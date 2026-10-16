@@ -9,11 +9,35 @@ This repo has two parts:
 
 ## The plugin
 
-Install it from a Claude Code terminal session:
+### Install
+
+At the prompt of a Claude Code terminal session:
 
 ```
 /plugin install living-map --marketplace harshit-pi/living-map
 ```
+
+Answer `y` to add the marketplace, then pick the user scope so it runs in every session.
+
+From a shell:
+
+```bash
+claude plugin install living-map --marketplace harshit-pi/living-map
+```
+
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `harshit-pi/living-map`, then Add plugin. A plugin installed from a terminal at the user scope also runs in the desktop app's Code tab.
+
+This repository is private: installing needs GitHub read access to it, and a git credential for github.com on that machine (an SSH key, or `gh auth login` then `gh auth setup-git`).
+
+### Update
+
+After a new version is pushed:
+
+```bash
+claude plugin update living-map@living-map
+```
+
+then `/reload-plugins` in any open session.
 
 | Command | What it does |
 |---|---|
