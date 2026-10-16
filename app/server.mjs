@@ -215,6 +215,7 @@ async function claudeTurn(action, settings, { text, selection, threadId = null, 
       messages.push({ role: 'system', text: 'Stopped.', ts: Date.now() })
       return {}
     }
+    if (process.env.LM_DEBUG) console.log('[turn]', JSON.stringify({ ended, lastText: lastText.slice(0, 400), streamed: streamed.length, applied }))
     let final = lastText
     if (!ended) {
       // the process ended without a clean finish: trust only the CLI's result
