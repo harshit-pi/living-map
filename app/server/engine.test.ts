@@ -278,6 +278,79 @@ test("Show answer asks once more when the answer did not arrive, and only then m
   assert.equal(m.chat.length, 0);
 });
 
+test("Show answer goes to the thread named on its step, ignores one on another node, and fills the step's blanks", async () => {
+  const m = newMap("Rust", "learn");
+  const step = (id: string) => ({
+    id,
+    parent: null,
+    kind: "question" as const,
+    title: id,
+    summary: "",
+    detail: "",
+    status: "open" as const,
+    by: "claude" as const,
+    updatedAt: 0,
+    order: 0,
+  });
+  m.nodes.step = step("step");
+  m.nodes.other = step("other");
+  m.diagram = {
+    form: "grid",
+    title: "Who frees",
+    columns: ["who"],
+    rows: [{ label: "heap", cells: [{ id: "c2", text: "?", blank: true }] }],
+  };
+  m.threads.mine = {
+    id: "mine",
+    nodeId: "step",
+    title: "Thread",
+    createdAt: 1,
+    messages: [],
+  };
+  m.threads.later = {
+    id: "later",
+    nodeId: "step",
+    title: "Fork 2",
+    createdAt: 2,
+    messages: [],
+  };
+  m.threads.theirs = {
+    id: "theirs",
+    nodeId: "other",
+    title: "Thread",
+    createdAt: 3,
+    messages: [],
+  };
+  const { engine, calls } = setup(m);
+  const reply =
+    'The owner.\n```map\n{"ops":[{"op":"update","id":"step","detail":"The owner frees it."},{"op":"judge","id":"c2","state":"right","label":"owner"}]}\n```';
+
+  const named = act(engine, {
+    type: "answer",
+    nodeId: "step",
+    threadId: "mine",
+  });
+  await settled(calls, 1);
+  calls[0].release(reply);
+  assert.equal((await named).threadId, "mine", "the thread you had open");
+  assert.equal(m.fills.c2?.state, "right", "the step's blank is filled");
+
+  m.nodes.step.detail = "";
+  const elsewhere = act(engine, {
+    type: "answer",
+    nodeId: "step",
+    threadId: "theirs",
+  });
+  await settled(calls, 2);
+  calls[1].release(reply);
+  assert.equal(
+    (await elsewhere).threadId,
+    "later",
+    "another node's thread is ignored: the step's latest",
+  );
+  assert.equal(m.threads.theirs.messages.length, 0);
+});
+
 test("Stop during an explanation does not start a second try", async () => {
   const { engine, calls } = setup();
   const first = act(engine, {

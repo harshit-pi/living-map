@@ -138,8 +138,8 @@ export function NodePanel({
     void run({ type, nodeId: node.id });
   };
   const writeIt = learn && /^write it/i.test(node.title);
-  // a shown answer is read in the thread it was asked in; older maps kept it
-  // only in the detail block
+  // a shown answer is read in the thread it was asked in, so its full copy
+  // starts folded; older maps keep it open
   const answerInThread =
     node.revealed &&
     threads.some((t) => t.messages.some((m) => m.text === ASK_ANSWER));
@@ -297,9 +297,9 @@ export function NodePanel({
             ))}
           </div>
         )}
-        {node.detail && !answerInThread && (
+        {node.detail && (
           <details
-            open
+            open={!answerInThread}
             className="mb-3 rounded-lg border border-line bg-panel px-3 py-2"
           >
             <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-muted">

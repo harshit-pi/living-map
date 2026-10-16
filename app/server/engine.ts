@@ -44,6 +44,7 @@ export type TurnOptions = {
   label?: string; // what the working bar says
   nodeId?: string | null; // the node the move is about, for the panel's working state
   blankId?: string | null; // a blank being checked, cleared if the check never comes back
+  judge?: boolean; // in a thread, may still fill the topic diagram's blanks
   view?: View;
   // the instructions this move needs beyond the canvas's job (see prompts.ts)
   sections?: readonly Section[];
@@ -267,7 +268,7 @@ export function createEngine({
           const ops = completeOps(soFar);
           if (ops.length > applied) {
             try {
-              applyOps(m, ops.slice(applied), { scope });
+              applyOps(m, ops.slice(applied), { scope, judge: opts.judge });
             } catch (e) {
               console.error("[move] an op could not be applied:", e);
             }
@@ -305,7 +306,8 @@ export function createEngine({
         return {};
       }
       const ops = completeOps(reply.final);
-      if (ops.length > applied) applyOps(m, ops.slice(applied), { scope });
+      if (ops.length > applied)
+        applyOps(m, ops.slice(applied), { scope, judge: opts.judge });
       // say so when some of the model's changes could not be read, rather than
       // dropping them silently
       const broken = unreadableOps(reply.final);

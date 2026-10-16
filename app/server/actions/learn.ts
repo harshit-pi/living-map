@@ -77,8 +77,7 @@ export function hint(ctx: Ctx, nodeId: string): Promise<ActionResult> {
   );
 }
 
-// The answer is written in the step's thread, where you were working on it,
-// not as a caption over the canvas.
+// The answer is written in the step's thread, where you were working on it.
 export async function answer(
   ctx: Ctx,
   nodeId: string,
@@ -98,13 +97,14 @@ export async function answer(
   const r = await withDetail(
     ctx,
     nodeId,
-    `SHOW ANSWER on step ${found.named}, asked in its thread. Reply with the full answer, worked through for this example. Required: an update op on "${nodeId}" with the same answer in its "detail" field; fill this step's blanks with judge ops (state right, with the label).`,
+    `SHOW ANSWER on step ${found.named}, asked in its thread. Reply with the answer, worked through for this example. Required: an update op on "${nodeId}" with the full answer in its "detail" field; fill this step's blanks with judge ops (state right, with the label).`,
     {
       label: "Writing the answer",
       nodeId,
       threadId: tid,
       view: "thread",
       sections: ["diagram", "threads"],
+      judge: true,
     },
   );
   // a shown answer is not one you earned: never credit it as solved; and only
