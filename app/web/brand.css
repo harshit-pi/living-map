@@ -1,0 +1,59 @@
+/*
+  Living Map brand: every colour and font the app uses, by role.
+  Change the look here; components only ever name these roles
+  (bg-canvas, text-ink, bg-primary, border-success-line, …).
+*/
+
+@theme static {
+  /* type */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, Inter, "Helvetica Neue", sans-serif;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* surfaces */
+  --color-canvas: #faf9f5; /* page background */
+  --color-surface: #ffffff; /* cards, panels, inputs */
+  --color-panel: #f5f4ee; /* subtle fills: headers, chips, hover */
+  --color-bubble: #f0eee6; /* your messages */
+  --color-board-light: #fbfaf6; /* playable board squares */
+  --color-board-dark: #ede9df;
+
+  /* lines */
+  --color-line: #e8e6dc;
+  --color-line-strong: #d9d6c9;
+
+  /* text */
+  --color-ink: #141413; /* titles and strong text */
+  --color-body: #3d3d3a; /* running text */
+  --color-muted: #73726c; /* secondary text */
+  --color-faint: #a3a29a; /* hints, placeholders */
+
+  /* primary: buttons, focus, the thing to do next */
+  --color-primary: #d97757;
+  --color-primary-strong: #c6613f;
+  --color-primary-soft: #fff7ed;
+  --color-primary-line: #fed7aa;
+  --color-on-primary: #ffffff;
+
+  /* states */
+  --color-success: #0d9488; /* got it, filled, chosen */
+  --color-success-strong: #134e4a;
+  --color-success-soft: #f0fdfa;
+  --color-success-line: #99f6e4;
+
+  --color-warning: #f59e0b; /* open, to figure out */
+  --color-warning-strong: #92400e;
+  --color-warning-soft: #fffbeb;
+  --color-warning-line: #fde68a;
+
+  --color-danger: #f87171; /* wrong, attacked */
+  --color-danger-strong: #991b1b;
+  --color-danger-soft: #fef2f2;
+  --color-danger-line: #fecaca;
+
+  --color-hint: #a78bfa; /* hints, answers shown */
+  --color-hint-strong: #5b21b6;
+  --color-hint-soft: #f5f3ff;
+  --color-hint-line: #ddd6fe;
+}

@@ -1,0 +1,9 @@
+Rust's rule is that each value has exactly one owner, and memory is freed when that owner goes out of scope. That's why printing `a` after `b = a` won't compile, and why Rust has no collector pauses.
+
+```map
+{"ops":[
+{"op":"update","id":"step-memory","detail":"**Key idea:** Go has a *garbage collector*, a helper that runs alongside your program, finds data nothing points to any more, and frees it. Rust has no collector. Every value has exactly **one owner** (a variable), and the value is freed the moment that owner goes out of scope (its `{ }` block ends).\n\n**Tiny example:**\n```\nlet a = String::from(\"hi\");\nlet b = a;          // ownership MOVES to b\nprintln!(\"{}\", a);  // compile error: a was moved\n```\nIn Go, `b := a` for a slice or pointer just gives you two names for the same data, and the collector frees it later, once both are unused.\n\n**Consequences:**\n- Rust catches use-after-move **at compile time**, before the program ever runs.\n- Rust frees memory at known points (the end of a scope), so there are **no collector pauses**. Go has short pauses while its collector runs.\n- Small values like numbers are *copied*, not moved, so `let b = a;` with `a = 5` leaves `a` usable."},
+{"op":"judge","id":"c-rs-move","state":"right","label":"Won't compile: a moved to b, a unusable"},
+{"op":"judge","id":"c-rs-pause","state":"right","label":"None: freed when the owner's scope ends"}
+]}
+```

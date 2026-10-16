@@ -1,15 +1,16 @@
 // Every action the browser can send, routed to the module that handles it.
 
-import type {
-  ActionRequest,
-  ActionResult,
-  Settings,
-} from "../../shared/model.ts";
+import { safeId } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
 import * as canvas from "./canvas.ts";
 import { makeCtx } from "./context.ts";
 import * as learn from "./learn.ts";
 import * as maps from "./maps.ts";
+import type {
+  ActionRequest,
+  ActionResult,
+  Settings,
+} from "../../shared/model.ts";
 
 // Only model and effort ids the provider offers get through.
 function cleanSettings(engine: Engine, raw: Partial<Settings> = {}): Settings {
@@ -20,10 +21,20 @@ function cleanSettings(engine: Engine, raw: Partial<Settings> = {}): Settings {
   };
 }
 
+// Ids the browser sends become object keys: only plain, safe ones get through.
+function badIds(req: ActionRequest): boolean {
+  const r = req as Record<string, unknown>;
+  return ["nodeId", "blankId", "threadId", "mapId"].some(
+    (k) => r[k] !== undefined && (typeof r[k] !== "string" || !safeId(r[k])),
+  );
+}
+
 export async function act(
   engine: Engine,
   req: ActionRequest,
 ): Promise<ActionResult> {
+  if (!req || typeof req !== "object" || badIds(req))
+    return { error: "That request is not valid." };
   const settings = cleanSettings(engine, req.settings);
   switch (req.type) {
     case "stop":
@@ -63,7 +74,13 @@ export async function act(
     case "next":
       return canvas.next(ctx);
     case "message":
-      return canvas.message(ctx, req.text, req.selection ?? []);
+      return canvas.message(
+        ctx,
+        req.text,
+        Array.isArray(req.selection)
+          ? req.selection.filter((id) => typeof id === "string" && safeId(id))
+          : [],
+      );
     case "fill":
       return learn.fill(ctx, req.blankId, req.text);
     case "hint":

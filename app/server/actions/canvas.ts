@@ -1,7 +1,7 @@
 // Acting on nodes: choosing, setting aside, opening a diagram part, side
 // threads, and the moves that ask the model to change a node.
 
-import type { Ctx } from "./context.ts";
+import { withDetail, type Ctx } from "./context.ts";
 import type { ActionResult } from "../../shared/model.ts";
 import { choose as chooseOption } from "../core/canvas.ts";
 
@@ -29,8 +29,12 @@ export function choose(ctx: Ctx, nodeId: string): ActionResult {
 export function drop(ctx: Ctx, nodeId: string): ActionResult {
   const node = ctx.map.nodes[nodeId];
   if (!node) return { error: "No such node." };
+  const wasChosen = node.kind === "option" && node.status === "chosen";
   if (node.kind === "option") node.status = "dropped";
   node.dropped = true;
+  // setting aside your choice leaves its question open again
+  const q = node.parent ? ctx.map.nodes[node.parent] : undefined;
+  if (wasChosen && q?.kind === "question" && !q.revealed) q.status = "open";
   node.by = "you";
   ctx.note(`Set aside "${node.title}"; do not raise it again unless asked.`);
   return done(ctx);
@@ -60,7 +64,8 @@ export function focus(ctx: Ctx, anchor: string, label: string): ActionResult {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40);
-  const id = `el-${slug || "part"}`;
+  let id = `el-${slug || "part"}`;
+  for (let n = 2; nodes[id]; n++) id = `el-${slug || "part"}-${n}`;
   nodes[id] = {
     id,
     parent: root?.id ?? null,
@@ -123,9 +128,10 @@ export function explain(
   const part = found.node.anchor
     ? " (a part of the topic diagram the learner clicked: say what it is, what it does in THIS diagram, and what it receives and returns there)"
     : "";
-  return ctx.engine.turn(
+  return withDetail(
+    ctx,
+    nodeId,
     `EXPLAIN ${found.named}${part}: write its detail. Required: an update op on "${nodeId}" with a "detail" field.`,
-    ctx.settings,
     { label: EXPLAINING, nodeId },
   );
 }

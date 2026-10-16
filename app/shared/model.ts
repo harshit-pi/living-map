@@ -32,6 +32,8 @@ export type ChatLine = {
   text: string;
   ts: number;
   view?: View;
+  // a reply that checks a blank: it is shown on the blank, not as a caption
+  blankId?: string;
 };
 export type Thread = {
   id: string;
@@ -166,6 +168,8 @@ export type Working = {
   label: string;
   nodeId: string | null;
   threadId: string | null;
+  // set while a blank is being checked; its verdict appears on the blank
+  blankId: string | null;
   since: number;
 };
 export type Waiting = { label: string; nodeId: string | null };
@@ -210,6 +214,8 @@ export type Action =
 
 export type ActionRequest = Action & { settings?: Partial<Settings> };
 export type ActionResult = {
+  // the move was stopped, or cancelled before it ran (not an error to show)
+  stopped?: boolean;
   error?: string;
   threadId?: string;
   ok?: boolean;

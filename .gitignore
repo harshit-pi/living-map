@@ -1,10 +1,10 @@
+# Local outputs of the earlier decision-ledger experiment (now removed from the
+# repo). They can hold private transcripts, so they must never be committed.
 out/
 cache/
-data/*
-!data/README.md
-!data/example_probes.json
+data/
 __pycache__/
 *.pyc
 .chrome-profile/
+
 .DS_Store
-plugin/.claude-plugin/types/

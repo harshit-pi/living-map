@@ -52,10 +52,10 @@ export function layout(nodes: MapNode[]): { nodes: Node[]; edges: Edge[] } {
         style: {
           stroke:
             n.status === "dropped" || n.dropped
-              ? "#d6d3d1"
+              ? "var(--color-line-strong)"
               : n.status === "chosen"
-                ? "#0d9488"
-                : "#a8a29e",
+                ? "var(--color-success)"
+                : "var(--color-faint)",
           strokeWidth: n.status === "chosen" ? 2 : 1.2,
         },
       })),

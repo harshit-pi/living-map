@@ -1,4 +1,4 @@
-// Lint rules, after PiTrade's: recommended JS and TypeScript rules, React hooks,
+// Lint rules: recommended JS and TypeScript rules, React hooks,
 // imports ordered (external, blank line, internal), and Prettier as a rule.
 import js from "@eslint/js";
 import { defineConfig, globalIgnores } from "eslint/config";

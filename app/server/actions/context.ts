@@ -1,9 +1,9 @@
 // What every action gets: the engine, the model settings for this request,
 // and a few helpers for the open map.
 
-import type { MapNode, Settings } from "../../shared/model.ts";
-import type { StoredMap } from "../core/types.ts";
-import type { Engine } from "../engine.ts";
+import type { ActionResult, MapNode, Settings } from "../../shared/model.ts";
+import { own, type StoredMap } from "../core/types.ts";
+import type { Engine, TurnOptions } from "../engine.ts";
 
 export type Ctx = {
   engine: Engine;
@@ -33,13 +33,36 @@ export function makeCtx(
       engine.push();
     },
     node(id) {
-      const node = map.nodes[id];
+      const node = own(map.nodes, id);
       return node ? { node, named: `[${id}] "${node.title}"` } : null;
     },
     note(text) {
       map.notes.push(text);
     },
   };
+}
+
+// A move whose whole point is a node's detail (an explanation, a shown answer):
+// if the reply did not deliver it, ask once more, plainly, before giving up.
+export async function withDetail(
+  ctx: Ctx,
+  nodeId: string,
+  action: string,
+  opts: TurnOptions,
+): Promise<ActionResult> {
+  const r = await ctx.engine.turn(action, ctx.settings, opts);
+  if (
+    r.error ||
+    r.stopped ||
+    !own(ctx.map.nodes, nodeId) ||
+    ctx.map.nodes[nodeId].detail
+  )
+    return r;
+  return ctx.engine.turn(
+    `${action} Your previous reply did not deliver it: send the map block again as valid JSON, with the update op on "${nodeId}" carrying the "detail".`,
+    ctx.settings,
+    { ...opts, label: `${opts.label ?? "Thinking"} (second try)` },
+  );
 }
 
 export const hintCount = (map: StoredMap, nodeId: string) =>

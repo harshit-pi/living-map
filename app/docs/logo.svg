@@ -1,0 +1,9 @@
+<!-- Static copy of the Living Map logo for places that cannot read the app's CSS
+     (the README, GitHub). The app draws it from web/brand.css; keep the colours in step. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="48" viewBox="0 0 130 24">
+  <path d="M5 17.5 C 7.5 9.5, 10 7, 12 7 S 16.5 9.5, 19 14" fill="none" stroke="#73726c" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.5 3.2"/>
+  <circle cx="5" cy="17.5" r="2.6" fill="#ffffff" stroke="#141413" stroke-width="1.8"/>
+  <circle cx="12" cy="7" r="2.6" fill="#ffffff" stroke="#141413" stroke-width="1.8"/>
+  <circle cx="19" cy="14" r="3.4" fill="#d97757"/>
+  <text x="29" y="16.5" font-family="-apple-system, BlinkMacSystemFont, Inter, Helvetica Neue, sans-serif" font-size="13" font-weight="600" fill="#141413" letter-spacing="-0.2">Living Map</text>
+</svg>

@@ -14,11 +14,11 @@ import type {
 // which checks it against the answers Claude wrote and replies at once.
 
 const TONE: Record<Tone, string> = {
-  focus: "ring-2 ring-cl-accent ring-inset",
-  attack: "bg-red-100/80 text-red-900",
-  good: "bg-teal-100 text-teal-900",
-  bad: "bg-red-200 text-red-900",
-  path: "bg-amber-100 text-amber-900",
+  focus: "ring-2 ring-primary ring-inset",
+  attack: "bg-danger-soft/80 text-danger-strong",
+  good: "bg-success-soft text-success-strong",
+  bad: "bg-danger-line text-danger-strong",
+  path: "bg-warning-soft text-warning-strong",
   dim: "opacity-40",
 };
 const toneClasses = (tones: Tone[]) => tones.map((t) => TONE[t]).join(" ");
@@ -48,21 +48,21 @@ function Board({
   }
   return (
     <div
-      className="inline-grid gap-0 rounded-lg bg-cl-ink/80 p-1 shadow-md"
+      className="inline-grid gap-0 rounded-lg bg-ink/80 p-1 shadow-md"
       style={{ gridTemplateColumns: `20px repeat(${cols}, ${size}px)` }}
     >
       <div />
       {Array.from({ length: cols }, (_, c) => (
         <div
           key={c}
-          className="pb-0.5 text-center font-mono text-[10px] text-white/60"
+          className="pb-0.5 text-center font-mono text-[10px] text-on-primary/60"
         >
           {c}
         </div>
       ))}
       {s.cells.map((row, r) => (
         <Fragment key={r}>
-          <div className="flex items-center justify-center font-mono text-[10px] text-white/60">
+          <div className="flex items-center justify-center font-mono text-[10px] text-on-primary/60">
             {r}
           </div>
           {Array.from({ length: cols }, (_, c) => {
@@ -70,8 +70,8 @@ function Board({
             const f =
               flash?.key === key
                 ? flash.ok
-                  ? "animate-[pop_.35s_ease-out] bg-teal-300"
-                  : "animate-[shake_.35s] bg-red-300"
+                  ? "animate-[pop_.35s_ease-out] bg-success-line"
+                  : "animate-[shake_.35s] bg-danger-line"
                 : "";
             return (
               <button
@@ -79,7 +79,7 @@ function Board({
                 disabled={!pick}
                 onClick={() => pick?.(key)}
                 style={{ width: size, height: size }}
-                className={`flex items-center justify-center text-[22px] font-semibold transition ${(r + c) % 2 ? "bg-[#EDE9DF]" : "bg-[#FBFAF6]"} ${toneClasses(marks.get(key) ?? [])} ${pick ? "cursor-pointer hover:brightness-95" : "cursor-default"} ${f}`}
+                className={`flex items-center justify-center text-[22px] font-semibold transition ${(r + c) % 2 ? "bg-board-dark" : "bg-board-light"} ${toneClasses(marks.get(key) ?? [])} ${pick ? "cursor-pointer hover:brightness-95" : "cursor-default"} ${f}`}
               >
                 {row[c] ?? ""}
               </button>
@@ -101,7 +101,7 @@ function Row({ s, pick, flash }: { s: ArrayState; pick?: Pick; flash: Flash }) {
         {s.items.map((_, i) => (
           <div
             key={i}
-            className="flex h-9 w-16 flex-col items-center justify-end text-[11px] font-semibold text-cl-accentDk"
+            className="flex h-9 w-16 flex-col items-center justify-end text-[11px] font-semibold text-primary-strong"
           >
             {s.pointers
               .filter((p) => p.at === i)
@@ -111,21 +111,21 @@ function Row({ s, pick, flash }: { s: ArrayState; pick?: Pick; flash: Flash }) {
           </div>
         ))}
       </div>
-      <div className="flex overflow-hidden rounded-lg shadow-md ring-1 ring-cl-ink/60">
+      <div className="flex overflow-hidden rounded-lg shadow-md ring-1 ring-ink/60">
         {s.items.map((v, i) => {
           const k = String(i);
           const f =
             flash?.key === k
               ? flash.ok
-                ? "bg-teal-300"
-                : "animate-[shake_.35s] bg-red-300"
+                ? "bg-success-line"
+                : "animate-[shake_.35s] bg-danger-line"
               : "";
           return (
             <button
               key={i}
               disabled={!pick}
               onClick={() => pick?.(k)}
-              className={`flex h-14 w-16 items-center justify-center border-r border-cl-line2 bg-white font-mono text-[17px] last:border-r-0 ${toneClasses(marks.get(i) ?? [])} ${pick ? "cursor-pointer hover:bg-orange-50" : ""} ${f}`}
+              className={`flex h-14 w-16 items-center justify-center border-r border-line-strong bg-surface font-mono text-[17px] last:border-r-0 ${toneClasses(marks.get(i) ?? [])} ${pick ? "cursor-pointer hover:bg-primary-soft" : ""} ${f}`}
             >
               {v}
             </button>
@@ -136,7 +136,7 @@ function Row({ s, pick, flash }: { s: ArrayState; pick?: Pick; flash: Flash }) {
         {s.items.map((_, i) => (
           <div
             key={i}
-            className="w-16 pt-1 text-center font-mono text-[10px] text-cl-faint"
+            className="w-16 pt-1 text-center font-mono text-[10px] text-faint"
           >
             {i}
           </div>
@@ -192,7 +192,7 @@ function Tree({ s, pick, flash }: { s: TreeState; pick?: Pick; flash: Flash }) {
             key={i}
             d={`M${e.points.map((p) => `${p.x},${p.y}`).join(" L")}`}
             fill="none"
-            stroke="#A3A29A"
+            style={{ stroke: "var(--color-faint)" }}
             strokeWidth={1.5}
           />
         ))}
@@ -203,8 +203,8 @@ function Tree({ s, pick, flash }: { s: TreeState; pick?: Pick; flash: Flash }) {
         const f =
           flash?.key === n.id.toLowerCase()
             ? flash.ok
-              ? "bg-teal-300"
-              : "animate-[shake_.35s] bg-red-300"
+              ? "bg-success-line"
+              : "animate-[shake_.35s] bg-danger-line"
             : "";
         return (
           <button
@@ -217,7 +217,7 @@ function Tree({ s, pick, flash }: { s: TreeState; pick?: Pick; flash: Flash }) {
               width: p.width,
               height: p.height,
             }}
-            className={`absolute flex items-center justify-center rounded-full border border-cl-line2 bg-white px-2 font-mono text-[13px] shadow-xs ${toneClasses(marks.get(n.id) ?? [])} ${pick ? "cursor-pointer hover:border-cl-accent" : ""} ${f}`}
+            className={`absolute flex items-center justify-center rounded-full border border-line-strong bg-surface px-2 font-mono text-[13px] shadow-xs ${toneClasses(marks.get(n.id) ?? [])} ${pick ? "cursor-pointer hover:border-primary" : ""} ${f}`}
           >
             {n.label}
           </button>
@@ -272,30 +272,30 @@ export function ScenePlay({
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto flex max-w-3xl flex-col items-center px-6 pb-40 pt-5">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-cl-faint">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">
           Play · {stepTitle}
         </div>
-        <h2 className="mt-0.5 text-center font-serif text-2xl text-cl-ink">
+        <h2 className="mt-0.5 text-center font-serif text-2xl text-ink">
           {scene.title}
         </h2>
         <div className="mt-2 flex gap-1">
           {Array.from({ length: scene.total }, (_, i) => (
             <span
               key={i}
-              className={`h-1.5 w-6 rounded-full ${i < scene.at ? "bg-teal-600" : i === scene.at ? "bg-cl-accent" : "bg-cl-line2"}`}
+              className={`h-1.5 w-6 rounded-full ${i < scene.at ? "bg-success" : i === scene.at ? "bg-primary" : "bg-line-strong"}`}
             />
           ))}
         </div>
 
         <div
-          className={`mt-4 w-full max-w-xl rounded-xl px-4 py-3 text-center ${scene.done ? "bg-teal-50 ring-1 ring-teal-200" : "bg-white shadow-xs ring-1 ring-cl-line"}`}
+          className={`mt-4 w-full max-w-xl rounded-xl px-4 py-3 text-center ${scene.done ? "bg-success-soft ring-1 ring-success-line" : "bg-surface shadow-xs ring-1 ring-line"}`}
         >
           {scene.done ? (
             <>
-              <div className="text-[15px] font-semibold text-teal-900">
+              <div className="text-[15px] font-semibold text-success-strong">
                 You played it through.
               </div>
-              <div className="text-xs text-teal-800">
+              <div className="text-xs text-success-strong">
                 {scene.wrong} wrong tr{scene.wrong === 1 ? "y" : "ies"}
                 {scene.shown
                   ? ` · ${scene.shown} move${scene.shown > 1 ? "s" : ""} shown`
@@ -303,16 +303,16 @@ export function ScenePlay({
               </div>
             </>
           ) : scene.waiting ? (
-            <div className="animate-pulse py-1 text-sm text-cl-mute">
+            <div className="animate-pulse py-1 text-sm text-muted">
               Claude is writing the next move…
             </div>
           ) : (
             <>
-              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-cl-accentDk">
+              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-primary-strong">
                 Move {scene.at + 1}
                 {scene.total > scene.at + 1 ? ` of ${scene.total}` : ""}
               </div>
-              <div className="text-[16px] font-medium leading-snug text-cl-ink">
+              <div className="text-[16px] font-medium leading-snug text-ink">
                 {scene.ask}
               </div>
             </>
@@ -320,7 +320,7 @@ export function ScenePlay({
         </div>
         {scene.last && (
           <div
-            className={`mt-2 max-w-xl text-center text-[13.5px] leading-snug ${scene.last.ok ? "text-teal-800" : "text-red-800"}`}
+            className={`mt-2 max-w-xl text-center text-[13.5px] leading-snug ${scene.last.ok ? "text-success-strong" : "text-danger-strong"}`}
           >
             {scene.last.ok
               ? scene.last.shown
@@ -355,7 +355,7 @@ export function ScenePlay({
           )}
         </div>
         {scene.state.note && (
-          <div className="mt-2 text-xs italic text-cl-mute">
+          <div className="mt-2 text-xs italic text-muted">
             {scene.state.note}
           </div>
         )}
@@ -368,7 +368,7 @@ export function ScenePlay({
                 onClick={() => {
                   void play(c);
                 }}
-                className={`rounded-full border px-4 py-1.5 text-sm font-medium ${flash?.key === c.toLowerCase() && !flash.ok ? "animate-[shake_.35s] border-red-400 bg-red-50" : "border-cl-line2 bg-white hover:border-cl-accent hover:text-cl-accentDk"}`}
+                className={`rounded-full border px-4 py-1.5 text-sm font-medium ${flash?.key === c.toLowerCase() && !flash.ok ? "animate-[shake_.35s] border-danger bg-danger-soft" : "border-line-strong bg-surface hover:border-primary hover:text-primary-strong"}`}
               >
                 {c}
               </button>
@@ -383,13 +383,13 @@ export function ScenePlay({
             onKeyDown={(e) => {
               if (e.key === "Enter" && text.trim()) void play(text.trim());
             }}
-            className={`mt-4 w-64 rounded-lg border px-3 py-1.5 text-center outline-hidden focus:border-cl-accent ${flash && !flash.ok ? "border-red-400" : "border-cl-line2"}`}
+            className={`mt-4 w-64 rounded-lg border px-3 py-1.5 text-center outline-hidden focus:border-primary ${flash && !flash.ok ? "border-danger" : "border-line-strong"}`}
           />
         )}
         {!scene.done &&
           !scene.waiting &&
           (t === "cell" || t === "index" || t === "node") && (
-            <div className="mt-2 text-[11px] text-cl-faint">
+            <div className="mt-2 text-[11px] text-faint">
               Click{" "}
               {t === "cell" ? "a square" : t === "index" ? "a box" : "a node"}
             </div>
@@ -400,13 +400,13 @@ export function ScenePlay({
             <>
               <button
                 onClick={onNext}
-                className="rounded-lg bg-cl-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-cl-accentDk"
+                className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong"
               >
                 Next step ▸
               </button>
               <button
                 onClick={onReplay}
-                className="rounded-lg border border-cl-line2 px-3 py-1.5 text-sm text-cl-text hover:bg-cl-panel"
+                className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-body hover:bg-panel"
               >
                 Play again
               </button>
@@ -415,14 +415,14 @@ export function ScenePlay({
             <>
               <button
                 onClick={onHint}
-                className="rounded-lg border border-cl-line2 px-3 py-1.5 text-sm text-cl-text hover:bg-cl-panel"
+                className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-body hover:bg-panel"
               >
                 {busy ? "Hint (after Claude)" : "Hint"}
               </button>
               <button
                 onClick={onShow}
                 title="Counts as shown, not worked out"
-                className="rounded-lg border border-cl-line2 px-3 py-1.5 text-sm text-cl-mute hover:bg-cl-panel"
+                className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-muted hover:bg-panel"
               >
                 Show this move
               </button>
@@ -430,7 +430,7 @@ export function ScenePlay({
           )}
         </div>
         {building && (
-          <div className="mt-4 animate-pulse text-sm text-cl-mute">
+          <div className="mt-4 animate-pulse text-sm text-muted">
             Claude is rebuilding this scene…
           </div>
         )}

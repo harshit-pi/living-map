@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { test } from "vitest";
 
 import { applyOps, choose, outline, pathTo } from "./canvas.ts";
 import { cleanSpec, diagramOutline } from "./diagram.ts";
 import { systemPrompt } from "./prompts.ts";
-import { completeOps, visiblePart } from "./reply.ts";
+import { completeOps, unreadableOps, visiblePart } from "./reply.ts";
 import {
   cleanScene,
   newPlay,
@@ -344,4 +345,131 @@ test("a scene streamed move by move is playable before it is complete", () => {
   );
   sc.complete = true;
   assert.equal(sceneView(sc, play()).done, true);
+});
+
+test("a reply whose explanation holds a fenced code example is read whole", () => {
+  // a real Show-answer reply: the detail contains ``` inside a JSON string
+  const reply = fs.readFileSync(
+    new URL("./fixtures-answer-with-code.txt", import.meta.url),
+    "utf8",
+  );
+  const ops = completeOps(reply);
+  assert.equal(ops.length, 3);
+  assert.match(ops[0].detail, /compile error: a was moved/);
+  assert.equal(ops[2].label, "None: freed when the owner's scope ends");
+  assert.equal(unreadableOps(reply), 0);
+});
+
+test("raw line breaks inside a string do not lose the op", () => {
+  const reply =
+    'Ok.\n```map\n{"ops":[\n{"op":"update","id":"x","detail":"line one\nline two"},\n{"op":"remove","id":"y"}\n]}\n```';
+  const ops = completeOps(reply);
+  assert.equal(ops.length, 2);
+  assert.equal(ops[0].detail, "line one\nline two");
+});
+
+const node = (id: string, parent: string | null) => ({
+  id,
+  parent,
+  kind: "question" as const,
+  title: id,
+  summary: "",
+  detail: "",
+  status: "open" as const,
+  by: "claude" as const,
+  updatedAt: 0,
+  order: 0,
+});
+
+test("ids that name built-in object properties are refused and pollute nothing", () => {
+  const m: Canvas = { nodes: { r: node("r", null) }, diagram: null, fills: {} };
+  applyOps(m, [
+    {
+      op: "add",
+      id: "constructor",
+      parent: "r",
+      kind: "question",
+      title: "C",
+      status: "open",
+    },
+    { op: "add", id: "__proto__", parent: "r", title: "P" },
+    { op: "update", id: "toString", title: "T" },
+  ]);
+  assert.deepEqual(Object.keys(m.nodes), ["r"]);
+  assert.equal(
+    ({} as Record<string, unknown>).title,
+    undefined,
+    "Object.prototype untouched",
+  );
+});
+
+test("the root is never removed", () => {
+  const m: Canvas = {
+    nodes: { r: node("r", null), a: node("a", "r") },
+    diagram: null,
+    fills: {},
+  };
+  applyOps(m, [{ op: "remove", id: "r" }]);
+  assert.ok(m.nodes.r);
+  applyOps(m, [{ op: "remove", id: "a" }]);
+  assert.equal(m.nodes.a, undefined, "other nodes still can be");
+});
+
+test("a side thread changes only its node's subtree, and nothing once its node is gone", () => {
+  const m: Canvas = {
+    nodes: { r: node("r", null), a: node("a", "r"), b: node("b", "r") },
+    diagram: null,
+    fills: {},
+  };
+  applyOps(
+    m,
+    [
+      { op: "remove", id: "r" },
+      { op: "update", id: "b", title: "x" },
+    ],
+    { scope: "gone" },
+  );
+  assert.ok(m.nodes.r);
+  assert.equal(m.nodes.b.title, "b");
+  applyOps(
+    m,
+    [
+      {
+        op: "diagram",
+        spec: {
+          form: "timeline",
+          title: "T",
+          events: [{ id: "e", when: "1", label: "x" }],
+        },
+      },
+      { op: "judge", id: "c1", state: "right", label: "x" },
+      {
+        op: "scene",
+        step: "b",
+        spec: { kind: "array", start: { items: ["1"] }, moves: [] },
+      },
+    ],
+    { scope: "a" },
+  );
+  assert.equal(m.diagram, null, "a thread does not redraw the topic diagram");
+  assert.deepEqual(m.fills, {}, "nor judge blanks");
+  assert.equal(m.scenes?.b, undefined, "nor build another step's scene");
+});
+
+test("every part of a diagram gets an id of its own", () => {
+  const g = as(
+    cleanSpec({
+      form: "grid",
+      columns: ["A", "B"],
+      rows: [
+        { label: "x", cells: ["one", { text: "two" }] },
+        { label: "y", cells: ["three", { id: "same", text: "four" }] },
+        { label: "z", cells: [{ id: "same", text: "five" }] },
+      ],
+    }),
+    "grid",
+  );
+  const ids = g.rows.flatMap((r) => r.cells.map((c) => c.id));
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.every(Boolean));
 });

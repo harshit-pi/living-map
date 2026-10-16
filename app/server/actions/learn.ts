@@ -1,7 +1,7 @@
 // Learning: blanks on the topic diagram, the hint ladder, shown answers, and
 // playable scenes (checked here, with no model call).
 
-import { hintCount, type Ctx } from "./context.ts";
+import { hintCount, withDetail, type Ctx } from "./context.ts";
 import type { ActionResult, MapNode } from "../../shared/model.ts";
 import { newPlay, playMove, showMove } from "../core/scene.ts";
 import type { Play } from "../core/types.ts";
@@ -56,14 +56,16 @@ export function hint(ctx: Ctx, nodeId: string): Promise<ActionResult> {
 export async function answer(ctx: Ctx, nodeId: string): Promise<ActionResult> {
   const found = ctx.node(nodeId);
   ctx.say(`Show answer: ${found?.node.title}`);
-  const r = await ctx.engine.turn(
+  const r = await withDetail(
+    ctx,
+    nodeId,
     `SHOW ANSWER on step ${found?.named}. Required: an update op on "${nodeId}" with the full answer in its "detail" field; fill this step's blanks with judge ops (state right, with the label).`,
-    ctx.settings,
     { label: "Writing the answer", nodeId },
   );
-  // a shown answer is not one you earned: never credit it as solved
+  // a shown answer is not one you earned: never credit it as solved; and only
+  // mark it shown once an answer actually arrived
   const node = ctx.map.nodes[nodeId];
-  if (!r.error && node) {
+  if (!r.error && node?.detail) {
     node.revealed = true;
     ctx.engine.push();
   }

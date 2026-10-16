@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { Action, Purpose, Settings } from "../shared/model.ts";
+import { Mark } from "./components/Logo.tsx";
 import { MapsMenu } from "./components/MapList.tsx";
 import { Segmented } from "./components/Segmented.tsx";
 import { WorkingBar } from "./components/WorkingBar.tsx";
@@ -94,10 +95,11 @@ export default function App() {
           setLaunch({ from: map?.id ?? null });
           setStarting(false);
           const r = await act({ type: "new", text, purpose }, settings);
-          if (r.error) {
+          // stopped or nothing drawn: back to the start screen, never a spinner forever
+          if (r.error || r.stopped) {
             setLaunch(null);
             setStarting(true);
-            setStartError(r.error);
+            setStartError(r.error ?? "");
           }
         }}
       />
@@ -117,10 +119,11 @@ export default function App() {
   const learn = map.purpose === "learn";
 
   return (
-    <div className="flex h-full flex-col bg-cl-bg">
-      <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-cl-line px-4 py-2">
-        <div className="min-w-0">
-          <div className="truncate text-[15px] font-semibold text-cl-ink">
+    <div className="flex h-full flex-col bg-canvas">
+      <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-line px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Mark size={22} className="shrink-0" />
+          <div className="truncate text-[15px] font-semibold text-ink">
             {map.title}
           </div>
         </div>
@@ -137,7 +140,7 @@ export default function App() {
             }}
           />
           {!learn && (
-            <label className="flex items-center gap-1 text-xs text-cl-mute">
+            <label className="flex items-center gap-1 text-xs text-muted">
               <input
                 type="checkbox"
                 checked={showDropped}
@@ -151,8 +154,7 @@ export default function App() {
               onClick={() => {
                 void run({ type: "next" });
               }}
-              disabled={live.busy}
-              className="rounded-lg bg-cl-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-cl-accentDk disabled:opacity-40"
+              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
             >
               Next ▸
             </button>
@@ -167,7 +169,7 @@ export default function App() {
               setStartError("");
               setStarting(true);
             }}
-            className="rounded-lg border border-cl-line2 px-2.5 py-1.5 text-sm text-cl-text hover:bg-cl-panel"
+            className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
           >
             New
           </button>
@@ -175,14 +177,14 @@ export default function App() {
       </header>
       <WorkingBar working={live.working} queued={live.queued} onStop={stop} />
       {!live.online && (
-        <div className="bg-amber-50 px-4 py-1.5 text-sm text-amber-900">
+        <div className="bg-warning-soft px-4 py-1.5 text-sm text-warning-strong">
           Lost the connection to the Living Map server; reconnecting…
         </div>
       )}
       {error && (
-        <div className="flex items-center bg-amber-50 px-4 py-1.5 text-sm text-amber-900">
+        <div className="flex items-center bg-warning-soft px-4 py-1.5 text-sm text-warning-strong">
           <span className="flex-1">{error}</span>
-          <button onClick={() => setError("")} className="text-amber-700">
+          <button onClick={() => setError("")} className="text-warning-strong">
             ×
           </button>
         </div>

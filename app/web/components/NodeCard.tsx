@@ -19,7 +19,7 @@ export function NodeCard({ data, selected }: NodeProps) {
   return (
     <div
       style={{ width: NODE_W }}
-      className={`rounded-xl px-3 py-2.5 shadow-xs ${l.box} ${selected ? "ring-2 ring-cl-accent ring-offset-2 ring-offset-cl-bg" : ""} ${n.fresh ? "fresh" : ""} ${working ? "is-working" : ""}`}
+      className={`rounded-xl px-3 py-2.5 shadow-xs ${l.box} ${selected ? "ring-2 ring-primary ring-offset-2 ring-offset-canvas" : ""} ${n.fresh ? "fresh" : ""} ${working ? "is-working" : ""}`}
     >
       <Handle type="target" position={Position.Left} />
       <div className="flex items-center justify-between gap-2">
@@ -30,21 +30,18 @@ export function NodeCard({ data, selected }: NodeProps) {
         </span>
         <span className="flex items-center gap-1">
           {recommended && !gone && (
-            <span className="rounded-full bg-orange-100 px-1.5 text-[10px] font-semibold text-cl-accentDk">
+            <span className="rounded-full bg-primary-soft px-1.5 text-[10px] font-semibold text-primary-strong">
               ★ recommended
             </span>
           )}
           {n.detail && (
-            <span
-              className="text-[10px] text-cl-faint"
-              title="Has an explanation"
-            >
+            <span className="text-[10px] text-faint" title="Has an explanation">
               ≡
             </span>
           )}
           {threads > 0 && (
             <span
-              className="rounded-full bg-cl-panel px-1.5 text-[10px] text-cl-mute ring-1 ring-cl-line"
+              className="rounded-full bg-panel px-1.5 text-[10px] text-muted ring-1 ring-line"
               title="Side threads"
             >
               💬 {threads}
@@ -58,7 +55,7 @@ export function NodeCard({ data, selected }: NodeProps) {
         {n.title}
       </div>
       {n.summary && (
-        <div className="mt-0.5 whitespace-pre-line text-[13px] leading-snug text-cl-text">
+        <div className="mt-0.5 whitespace-pre-line text-[13px] leading-snug text-body">
           {n.summary.replace(/^Recommended:\s*/, "")}
         </div>
       )}

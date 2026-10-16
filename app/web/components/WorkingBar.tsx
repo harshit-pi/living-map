@@ -24,18 +24,18 @@ export function WorkingBar({
   return (
     <div className="relative">
       <div className="working-bar" />
-      <div className="absolute top-1.5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white py-1 pr-1 pl-3 text-xs text-cl-text shadow-md ring-1 ring-cl-line">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-cl-accent" />
+      <div className="absolute top-1.5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface py-1 pr-1 pl-3 text-xs text-body shadow-md ring-1 ring-line">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
         <span>
           Claude · {working.label}…{" "}
-          <span className="text-cl-faint tabular-nums">{secs}s</span>
+          <span className="text-faint tabular-nums">{secs}s</span>
           {queued > 0 && (
-            <span className="text-cl-accentDk"> · {queued} waiting</span>
+            <span className="text-primary-strong"> · {queued} waiting</span>
           )}
         </span>
         <button
           onClick={onStop}
-          className="rounded-full px-2 py-0.5 text-cl-mute hover:bg-cl-panel hover:text-cl-ink"
+          className="rounded-full px-2 py-0.5 text-muted hover:bg-panel hover:text-ink"
         >
           Stop
         </button>

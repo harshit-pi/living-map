@@ -22,7 +22,12 @@ import type {
 import { applyOps, outline, pathTo } from "./core/canvas.ts";
 import { diagramOutline } from "./core/diagram.ts";
 import { systemPrompt, viewLine } from "./core/prompts.ts";
-import { completeOps, hasMapBlock, visiblePart } from "./core/reply.ts";
+import {
+  completeOps,
+  hasMapBlock,
+  unreadableOps,
+  visiblePart,
+} from "./core/reply.ts";
 import { sceneOutline, sceneView } from "./core/scene.ts";
 import type { StoredMap } from "./core/types.ts";
 import type { Hub } from "./events.ts";
@@ -212,26 +217,35 @@ export function createEngine({
       label: opts.label ?? "Thinking",
       nodeId: opts.nodeId ?? scope,
       threadId,
+      blankId: opts.blankId ?? null,
       since: Date.now(),
     };
     hub.emit({ type: "busy", busy: true, threadId, working: state.working });
 
     const messages = threadOf(m, threadId);
     const notes = m.notes.splice(0);
-    const text = message(
-      m,
-      action,
-      opts,
-      scope,
-      messages.slice(-HISTORY - 1, -1),
-      notes,
-    );
-    for (const n of Object.values(m.nodes)) delete n.fresh;
-
     let shown = "";
     let applied = 0;
     let lastPush = 0;
     try {
+      // the thread so far, without the message this move is answering (it is
+      // sent as USER SAYS); replies to earlier queued messages stay in
+      const earlier = [...messages];
+      const own = opts.text
+        ? earlier
+            .map((h) => h.role === "you" && h.text === opts.text)
+            .lastIndexOf(true)
+        : -1;
+      if (own >= 0) earlier.splice(own, 1);
+      const text = message(
+        m,
+        action,
+        opts,
+        scope,
+        earlier.slice(-HISTORY),
+        notes,
+      );
+      for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         { system: systemPrompt(m.purpose), message: text, ...settings },
         (soFar) => {
@@ -246,7 +260,11 @@ export function createEngine({
           }
           const ops = completeOps(soFar);
           if (ops.length > applied) {
-            applyOps(m, ops.slice(applied), { scope });
+            try {
+              applyOps(m, ops.slice(applied), { scope });
+            } catch (e) {
+              console.error("[move] an op could not be applied:", e);
+            }
             applied = ops.length;
             const now = Date.now();
             if (now - lastPush > 120) {
@@ -259,7 +277,8 @@ export function createEngine({
       const reply = await call.reply;
       if (stopped) {
         messages.push({ role: "system", text: "Stopped.", ts: Date.now() });
-        return {};
+        m.notes.unshift(...notes);
+        return { stopped: true };
       }
       if (DEBUG)
         console.log(
@@ -281,6 +300,15 @@ export function createEngine({
       }
       const ops = completeOps(reply.final);
       if (ops.length > applied) applyOps(m, ops.slice(applied), { scope });
+      // say so when some of the model's changes could not be read, rather than
+      // dropping them silently
+      const broken = unreadableOps(reply.final);
+      if (broken)
+        messages.push({
+          role: "system",
+          text: `${broken} of Claude's changes could not be read. Try again.`,
+          ts: Date.now(),
+        });
       const view = opts.view ?? "visual";
       if (!hasMapBlock(reply.final) && view === "visual")
         messages.push({
@@ -293,6 +321,7 @@ export function createEngine({
         text: visiblePart(reply.final).trim() || "(updated the canvas)",
         ts: Date.now(),
         view,
+        ...(opts.blankId ? { blankId: opts.blankId } : {}),
       });
       void reply.usage.then((u) =>
         recordUsage(m, u, reply.firstMs, reply.endMs),
@@ -332,7 +361,17 @@ export function createEngine({
       if (gen !== generation || state.map !== forMap) {
         if (opts.blankId && forMap?.fills[opts.blankId]?.state === "pending")
           delete forMap.fills[opts.blankId];
-        return { error: "Cancelled." };
+        // say so where it was asked, so it does not look sent and unanswered
+        if (forMap) {
+          threadOf(forMap, opts.threadId).push({
+            role: "system",
+            text: "Cancelled before Claude saw it.",
+            ts: Date.now(),
+          });
+          if (forMap === state.map) push();
+          else save(forMap, { current: false });
+        }
+        return { stopped: true };
       }
       return run(action, settings, opts);
     });

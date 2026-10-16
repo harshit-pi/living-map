@@ -8,8 +8,8 @@ type Ctx = {
   fills: Record<string, Fill>;
   busy: boolean;
   onFill: (id: string, text: string) => void;
-  lastFill: string | null;
-  caption: string;
+  // what Claude said about each blank's latest answer, by blank id
+  verdict: (id: string) => string;
   onOpen: (id: string, label: string) => void; // a part was clicked: explain it, go deeper, talk about it
   openId: string | null;
 };
@@ -44,7 +44,7 @@ function Part({
           ctx.onOpen(id, label);
         }
       }}
-      className={`cursor-pointer rounded-lg transition hover:ring-2 hover:ring-cl-accent/60 ${on ? "ring-2 ring-cl-accent" : ""} ${className}`}
+      className={`cursor-pointer rounded-lg transition hover:ring-2 hover:ring-primary/60 ${on ? "ring-2 ring-primary" : ""} ${className}`}
     >
       {children}
     </div>
@@ -107,11 +107,11 @@ function BlankBox({
   const wrong = fill?.state === "wrong";
   return (
     <div
-      className={`rounded-lg border-2 border-dashed px-2 py-1.5 text-left ${wrong ? "border-red-400 bg-red-50" : "border-cl-accent bg-orange-50/70"} ${className}`}
+      className={`rounded-lg border-2 border-dashed px-2 py-1.5 text-left ${wrong ? "border-danger bg-danger-soft" : "border-primary bg-primary-soft/70"} ${className}`}
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        className={`text-[10.5px] font-semibold leading-tight ${wrong ? "text-red-700" : "text-cl-accentDk"}`}
+        className={`text-[10.5px] font-semibold leading-tight ${wrong ? "text-danger-strong" : "text-primary-strong"}`}
       >
         {wrong ? "Not quite. " : ""}
         {el.prompt || "Fill this in"}
@@ -124,16 +124,16 @@ function BlankBox({
         onKeyDown={(e) => {
           if (e.key === "Enter" && text.trim()) ctx.onFill(el.id, text.trim());
         }}
-        className="mt-1 w-full rounded-sm border border-cl-line2 bg-white px-1.5 py-0.5 text-[13px] text-cl-ink outline-hidden focus:border-cl-accent disabled:bg-cl-panel"
+        className="mt-1 w-full rounded-sm border border-line-strong bg-surface px-1.5 py-0.5 text-[13px] text-ink outline-hidden focus:border-primary disabled:bg-panel"
       />
       {pending && (
-        <div className="mt-0.5 animate-pulse text-[10.5px] text-cl-mute">
+        <div className="mt-0.5 animate-pulse text-[10.5px] text-muted">
           Claude is checking…
         </div>
       )}
-      {wrong && ctx.lastFill === el.id && ctx.caption && (
-        <div className="mt-1 text-[11.5px] leading-snug text-red-900">
-          {ctx.caption}
+      {wrong && ctx.verdict(el.id) && (
+        <div className="mt-1 text-[11.5px] leading-snug text-danger-strong">
+          {ctx.verdict(el.id)}
         </div>
       )}
     </div>
@@ -143,7 +143,7 @@ function BlankBox({
 const Got = ({ el }: { el: Blank }) =>
   el.filled ? (
     <span
-      className="ml-1 text-[10px] font-semibold text-teal-700"
+      className="ml-1 text-[10px] font-semibold text-success-strong"
       title="Filled in"
     >
       ✓
@@ -178,7 +178,7 @@ function Sequence({
           <div
             key={l}
             style={{ left: x(l) }}
-            className="absolute bottom-0 top-14 border-l-2 border-dashed border-cl-line2"
+            className="absolute bottom-0 top-14 border-l-2 border-dashed border-line-strong"
           />
         ))}
         <div className="relative h-16">
@@ -189,7 +189,7 @@ function Sequence({
               className="absolute top-0"
             >
               <Part ctx={ctx} id={`lane:${l}`} label={l}>
-                <div className="rounded-lg border border-cl-line2 bg-white px-2 py-1.5 text-center text-[12.5px] font-semibold leading-tight text-cl-ink shadow-xs">
+                <div className="rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-center text-[12.5px] font-semibold leading-tight text-ink shadow-xs">
                   {l}
                 </div>
               </Part>
@@ -204,7 +204,7 @@ function Sequence({
           const width = self ? 230 : Math.max(Math.abs(b - a) - 20, 60);
           return (
             <div key={s.id ?? i} className="relative pb-6 pt-3">
-              <div className="absolute bottom-[15px] left-1 text-[10px] text-cl-faint">
+              <div className="absolute bottom-[15px] left-1 text-[10px] text-faint">
                 {i + 1}
               </div>
               <div
@@ -216,7 +216,7 @@ function Sequence({
                 ) : (
                   <Part ctx={ctx} id={s.id} label={s.label}>
                     <span
-                      className={`block rounded-sm px-1.5 text-center text-[13.5px] leading-tight ${s.filled ? "bg-teal-50 font-medium text-teal-900" : "bg-cl-bg text-cl-ink"}`}
+                      className={`block rounded-sm px-1.5 text-center text-[13.5px] leading-tight ${s.filled ? "bg-success-soft font-medium text-success-strong" : "bg-canvas text-ink"}`}
                     >
                       {s.label}
                       <Got el={s} />
@@ -227,15 +227,15 @@ function Sequence({
               {self ? (
                 <div
                   style={{ left: a + 4, width: 28, height: 22 }}
-                  className="absolute bottom-2 rounded-r-md border-2 border-l-0 border-cl-ink"
+                  className="absolute bottom-2 rounded-r-md border-2 border-l-0 border-ink"
                 />
               ) : (
                 <div
                   style={{ left: Math.min(a, b), width: Math.abs(b - a) }}
-                  className={`absolute bottom-[18px] border-t-2 ${s.blank ? "border-dashed border-cl-accent" : s.filled ? "border-teal-600" : "border-cl-ink"}`}
+                  className={`absolute bottom-[18px] border-t-2 ${s.blank ? "border-dashed border-primary" : s.filled ? "border-success" : "border-ink"}`}
                 >
                   <span
-                    className={`absolute top-[-7px] h-0 w-0 border-y-[6px] border-y-transparent ${b > a ? "right-[-2px] border-l-[9px] border-l-cl-ink" : "left-[-2px] border-r-[9px] border-r-cl-ink"}`}
+                    className={`absolute top-[-7px] h-0 w-0 border-y-[6px] border-y-transparent ${b > a ? "right-[-2px] border-l-[9px] border-l-ink" : "left-[-2px] border-r-[9px] border-r-ink"}`}
                   />
                 </div>
               )}
@@ -344,7 +344,10 @@ function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
                 markerHeight="7"
                 orient="auto"
               >
-                <path d="M0,0 L10,5 L0,10 z" fill="#73726C" />
+                <path
+                  d="M0,0 L10,5 L0,10 z"
+                  style={{ fill: "var(--color-muted)" }}
+                />
               </marker>
             </defs>
             {laid.edges.map((e) => (
@@ -352,7 +355,7 @@ function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
                 key={e.key}
                 d={`M${e.points.map((p) => `${p.x},${p.y}`).join(" L")}`}
                 fill="none"
-                stroke="#A3A29A"
+                style={{ stroke: "var(--color-faint)" }}
                 strokeWidth={1.6}
                 markerEnd="url(#arrow)"
               />
@@ -364,7 +367,7 @@ function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
                 <div
                   key={`l${e.key}`}
                   style={{ left: e.x, top: e.y }}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-sm bg-cl-bg px-1 text-[11.5px] italic text-cl-mute"
+                  className="absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-sm bg-canvas px-1 text-[11.5px] italic text-muted"
                 >
                   {e.label}
                 </div>
@@ -419,14 +422,14 @@ function Concept({
           body: (
             <Part ctx={ctx} id={n.id} label={n.label} className="rounded-xl">
               <div
-                className={`rounded-xl border px-3 py-2 text-center shadow-xs ${n.filled ? "border-teal-600 bg-teal-50" : "border-cl-line2 bg-white"}`}
+                className={`rounded-xl border px-3 py-2 text-center shadow-xs ${n.filled ? "border-success bg-success-soft" : "border-line-strong bg-surface"}`}
               >
-                <div className="text-[13.5px] font-semibold leading-tight text-cl-ink">
+                <div className="text-[13.5px] font-semibold leading-tight text-ink">
                   {n.label}
                   <Got el={n} />
                 </div>
                 {n.note && (
-                  <div className="mt-0.5 text-[11.5px] leading-tight text-cl-mute">
+                  <div className="mt-0.5 text-[11.5px] leading-tight text-muted">
                     {n.note}
                   </div>
                 )}
@@ -462,16 +465,16 @@ function Structure({
           body: (
             <Part ctx={ctx} id={b.id} label={b.label}>
               <div
-                className={`overflow-hidden rounded-lg border-2 shadow-xs ${b.filled ? "border-teal-600 bg-teal-50" : "border-cl-ink/70 bg-white"}`}
+                className={`overflow-hidden rounded-lg border-2 shadow-xs ${b.filled ? "border-success bg-success-soft" : "border-ink/70 bg-surface"}`}
               >
-                <div className="bg-cl-panel px-2 py-1 text-[12.5px] font-semibold text-cl-ink">
+                <div className="bg-panel px-2 py-1 text-[12.5px] font-semibold text-ink">
                   {b.label}
                   <Got el={b} />
                 </div>
                 {b.rows?.map((r, i) => (
                   <div
                     key={i}
-                    className="border-t border-cl-line px-2 py-0.5 font-mono text-[11.5px] text-cl-text"
+                    className="border-t border-line px-2 py-0.5 font-mono text-[11.5px] text-body"
                   >
                     {r}
                   </div>
@@ -494,7 +497,7 @@ function Timeline({
 }) {
   return (
     <div className="relative mx-auto max-w-3xl py-2">
-      <div className="absolute bottom-0 left-1/2 top-0 w-0.5 -translate-x-1/2 bg-cl-line2" />
+      <div className="absolute bottom-0 left-1/2 top-0 w-0.5 -translate-x-1/2 bg-line-strong" />
       {d.events.map((e, i) => {
         const card = e.blank ? (
           <BlankBox el={e} ctx={ctx} className="w-full max-w-[260px]" />
@@ -506,14 +509,14 @@ function Timeline({
             className="inline-block"
           >
             <div
-              className={`max-w-[300px] rounded-lg border px-3 py-1.5 text-left shadow-xs ${e.filled ? "border-teal-600 bg-teal-50" : "border-cl-line2 bg-white"}`}
+              className={`max-w-[300px] rounded-lg border px-3 py-1.5 text-left shadow-xs ${e.filled ? "border-success bg-success-soft" : "border-line-strong bg-surface"}`}
             >
-              <div className="text-[13.5px] font-semibold leading-snug text-cl-ink">
+              <div className="text-[13.5px] font-semibold leading-snug text-ink">
                 {e.label}
                 <Got el={e} />
               </div>
               {e.note && (
-                <div className="text-[12px] leading-snug text-cl-mute">
+                <div className="text-[12px] leading-snug text-muted">
                   {e.note}
                 </div>
               )}
@@ -526,7 +529,7 @@ function Timeline({
             className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-2"
           >
             <div className="flex justify-end">{i % 2 === 0 && card}</div>
-            <div className="z-10 whitespace-nowrap rounded-full bg-cl-ink px-2.5 py-0.5 font-mono text-[11.5px] text-white">
+            <div className="z-10 whitespace-nowrap rounded-full bg-ink px-2.5 py-0.5 font-mono text-[11.5px] text-on-primary">
               {e.when || "?"}
             </div>
             <div className="flex justify-start">{i % 2 === 1 && card}</div>
@@ -540,14 +543,14 @@ function Timeline({
 // ---- grid: alternatives against criteria ---------------------------------------
 function Grid({ d, ctx }: { d: Extract<Diagram, { form: "grid" }>; ctx: Ctx }) {
   return (
-    <table className="mx-auto border-separate border-spacing-0 overflow-hidden rounded-xl bg-white text-[13.5px] shadow-xs ring-1 ring-cl-line">
+    <table className="mx-auto border-separate border-spacing-0 overflow-hidden rounded-xl bg-surface text-[13.5px] shadow-xs ring-1 ring-line">
       <thead>
         <tr>
-          <th className="bg-cl-panel" />
+          <th className="bg-panel" />
           {d.columns.map((c) => (
             <th
               key={c}
-              className="bg-cl-panel px-2 py-1.5 text-left font-semibold text-cl-ink"
+              className="bg-panel px-2 py-1.5 text-left font-semibold text-ink"
             >
               <Part ctx={ctx} id={`col:${c}`} label={c} className="px-2 py-0.5">
                 {c}
@@ -559,7 +562,7 @@ function Grid({ d, ctx }: { d: Extract<Diagram, { form: "grid" }>; ctx: Ctx }) {
       <tbody>
         {d.rows.map((r, i) => (
           <tr key={i}>
-            <th className="border-t border-cl-line bg-cl-panel px-2 py-1.5 text-left font-medium text-cl-text">
+            <th className="border-t border-line bg-panel px-2 py-1.5 text-left font-medium text-body">
               <Part
                 ctx={ctx}
                 id={`row:${r.label}`}
@@ -572,7 +575,7 @@ function Grid({ d, ctx }: { d: Extract<Diagram, { form: "grid" }>; ctx: Ctx }) {
             {r.cells.map((c, j) => (
               <td
                 key={c.id ?? j}
-                className={`min-w-[150px] border-t border-cl-line px-3 py-2 align-top ${c.filled ? "bg-teal-50" : ""}`}
+                className={`min-w-[150px] border-t border-line px-3 py-2 align-top ${c.filled ? "bg-success-soft" : ""}`}
               >
                 {c.blank ? (
                   <BlankBox el={c} ctx={ctx} />
@@ -626,7 +629,7 @@ export function DiagramView({
 }: { diagram: Diagram | null } & Ctx) {
   if (!diagram)
     return (
-      <div className="flex h-full items-center justify-center text-cl-mute">
+      <div className="flex h-full items-center justify-center text-muted">
         {ctx.busy ? (
           <div className="w-[520px] max-w-[80%]">
             <div className="skeleton mx-auto mb-6 h-5 w-1/2" />
@@ -654,12 +657,12 @@ export function DiagramView({
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-[1400px] px-8 pb-40 pt-6">
         <div className="mb-5 flex items-baseline justify-center gap-3 text-center">
-          <h2 className="font-serif text-2xl text-cl-ink">{diagram.title}</h2>
-          <span className="rounded-full bg-cl-panel px-2 py-0.5 text-[11px] text-cl-mute ring-1 ring-cl-line">
+          <h2 className="font-serif text-2xl text-ink">{diagram.title}</h2>
+          <span className="rounded-full bg-panel px-2 py-0.5 text-[11px] text-muted ring-1 ring-line">
             {NAMES[diagram.form]}
           </span>
         </div>
-        <div className="-mt-3 mb-5 text-center text-xs text-cl-mute">
+        <div className="-mt-3 mb-5 text-center text-xs text-muted">
           Click any part to have it explained or to ask about it
           {open > 0 && (
             <>
@@ -668,7 +671,7 @@ export function DiagramView({
             </>
           )}
           {done > 0 && (
-            <span className="text-teal-700"> · {done} filled ✓</span>
+            <span className="text-success-strong"> · {done} filled ✓</span>
           )}
         </div>
         {diagram.form === "sequence" && <Sequence d={diagram} ctx={ctx} />}

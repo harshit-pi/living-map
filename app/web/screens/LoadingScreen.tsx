@@ -10,14 +10,14 @@ export function LoadingScreen({
   onStop: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col bg-cl-bg">
+    <div className="flex h-full flex-col bg-canvas">
       <WorkingBar working={live.working} queued={live.queued} onStop={onStop} />
-      <div className="flex flex-1 items-center justify-center text-cl-mute">
+      <div className="flex flex-1 items-center justify-center text-muted">
         <div className="max-w-md text-center">
           <div className="animate-pulse">
             {live.working?.label ?? "Starting"}…
           </div>
-          <div className="mt-3 text-sm text-cl-faint">{live.stream.text}</div>
+          <div className="mt-3 text-sm text-faint">{live.stream.text}</div>
         </div>
       </div>
     </div>

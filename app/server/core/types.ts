@@ -71,3 +71,16 @@ export const str = (v: unknown, n: number): string =>
   typeof v === "string" ? v.slice(0, n) : "";
 export const list = (v: unknown, n: number): Raw[] =>
   Array.isArray(v) ? v.slice(0, n) : [];
+
+// Lookups by an id the model or the browser chose only see the record's own
+// entries: never "constructor", "__proto__" and the like from Object.prototype.
+export const own = <T>(
+  rec: Record<string, T> | undefined,
+  key: string,
+): T | undefined => (rec && Object.hasOwn(rec, key) ? rec[key] : undefined);
+
+// An id that is safe to use as a key: short, plain characters, and not one of
+// the names JavaScript objects already carry.
+export const safeId = (id: string): boolean =>
+  /^[\w.:-]{1,60}$/.test(id) &&
+  !["__proto__", "constructor", "prototype"].includes(id);

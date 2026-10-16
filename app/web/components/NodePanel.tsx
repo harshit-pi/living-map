@@ -35,8 +35,8 @@ function Btn({
       title={title}
       className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
         primary
-          ? "bg-cl-accent text-white hover:bg-cl-accentDk"
-          : "border border-cl-line2 bg-white text-cl-text hover:border-cl-accent hover:text-cl-accentDk"
+          ? "bg-primary text-on-primary hover:bg-primary-strong"
+          : "border border-line-strong bg-surface text-body hover:border-primary hover:text-primary-strong"
       }`}
     >
       {children}
@@ -92,13 +92,11 @@ export function NodePanel({
     [map.threads, node.id],
   );
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [explaining, setExplaining] = useState(false);
   // a different node starts on its latest thread, with nothing pending
   const [shownNode, setShownNode] = useState(node.id);
   if (shownNode !== node.id) {
     setShownNode(node.id);
     setActiveId(null);
-    setExplaining(false);
   }
   // a move writing into one of this node's threads is the one to watch
   const streamingThread =
@@ -141,8 +139,8 @@ export function NodePanel({
   const writeIt = learn && /^write it/i.test(node.title);
 
   return (
-    <aside className="absolute bottom-3 right-3 top-3 z-20 flex w-[min(420px,calc(100%-24px))] flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-cl-line">
-      <div className="border-b border-cl-line px-4 pb-3 pt-3">
+    <aside className="absolute bottom-3 right-3 top-3 z-20 flex w-[min(420px,calc(100%-24px))] flex-col overflow-hidden rounded-2xl bg-surface shadow-xl ring-1 ring-line">
+      <div className="border-b border-line px-4 pb-3 pt-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div
@@ -150,20 +148,20 @@ export function NodePanel({
             >
               {look.tag}
             </div>
-            <div className="mt-0.5 text-[17px] font-semibold leading-snug text-cl-ink">
+            <div className="mt-0.5 text-[17px] font-semibold leading-snug text-ink">
               {node.title}
             </div>
           </div>
           <button
             onClick={onClose}
             title="Close (Esc)"
-            className="text-xl leading-none text-cl-faint hover:text-cl-ink"
+            className="text-xl leading-none text-faint hover:text-ink"
           >
             ×
           </button>
         </div>
         {node.summary && (
-          <div className="mt-1 text-[13.5px] leading-snug text-cl-text">
+          <div className="mt-1 text-[13.5px] leading-snug text-body">
             {node.summary.replace(/^Recommended:\s*/, "")}
           </div>
         )}
@@ -199,14 +197,7 @@ export function NodePanel({
                   <Btn onClick={() => act("challenge")}>Challenge</Btn>
                 )}
               {!node.detail && (
-                <Btn
-                  onClick={() => {
-                    setExplaining(true);
-                    act("explain");
-                  }}
-                >
-                  Explain
-                </Btn>
+                <Btn onClick={() => act("explain")}>Explain</Btn>
               )}
               {openStep && (
                 <Btn
@@ -240,8 +231,8 @@ export function NodePanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {!(working && working.nodeId === node.id) &&
           waiting.some((w) => w.nodeId === node.id) && (
-            <div className="mb-3 rounded-lg border border-cl-line bg-cl-panel px-3 py-2.5 text-xs text-cl-mute">
-              <span className="font-medium text-cl-text">Next in line.</span>{" "}
+            <div className="mb-3 rounded-lg border border-line bg-panel px-3 py-2.5 text-xs text-muted">
+              <span className="font-medium text-body">Next in line.</span>{" "}
               Claude is first finishing{" "}
               {working ? (
                 <>
@@ -258,9 +249,9 @@ export function NodePanel({
             </div>
           )}
         {working && working.nodeId === node.id && !working.threadId && (
-          <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50/60 px-3 py-2.5">
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-cl-accentDk">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-cl-accent" />
+          <div className="mb-3 rounded-lg border border-primary-line bg-primary-soft/60 px-3 py-2.5">
+            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-primary-strong">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
               {working.label}…
             </div>
             <div className="space-y-1.5">
@@ -269,7 +260,7 @@ export function NodePanel({
               <div className="skeleton w-10/12" />
             </div>
             {stream.threadId === null && stream.text && (
-              <div className="mt-2 text-[12.5px] leading-snug text-cl-text">
+              <div className="mt-2 text-[12.5px] leading-snug text-body">
                 {stream.text}
               </div>
             )}
@@ -280,45 +271,36 @@ export function NodePanel({
             {hints.map((h) => (
               <div
                 key={h.id}
-                className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2"
+                className="rounded-lg border border-hint-line bg-hint-soft px-3 py-2"
               >
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-hint-strong">
                   {h.title}
                 </div>
-                <div className="whitespace-pre-line text-[13.5px] leading-snug text-violet-950">
+                <div className="whitespace-pre-line text-[13.5px] leading-snug text-hint-strong">
                   {h.summary}
                 </div>
               </div>
             ))}
           </div>
         )}
-        {(node.detail ||
-          (explaining &&
-            !(working && working.nodeId === node.id) &&
-            !waiting.some((w) => w.nodeId === node.id))) && (
+        {node.detail && (
           <details
             open
-            className="mb-3 rounded-lg border border-cl-line bg-cl-panel px-3 py-2"
+            className="mb-3 rounded-lg border border-line bg-panel px-3 py-2"
           >
-            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-cl-mute">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-muted">
               {node.revealed ? "Answer (shown)" : "Explanation"}
             </summary>
-            {node.detail ? (
-              <div className="answer answer-sm mt-1">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {node.detail}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <div className="mt-1 animate-pulse text-sm text-cl-mute">
-                Claude is writing it…
-              </div>
-            )}
+            <div className="answer answer-sm mt-1">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {node.detail}
+              </ReactMarkdown>
+            </div>
           </details>
         )}
         {others.length > 0 && (
           <div className="mb-3">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-cl-faint">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">
               Under this
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -326,7 +308,7 @@ export function NodePanel({
                 <button
                   key={c.id}
                   onClick={() => onSelect(c.id)}
-                  className={`rounded-md border px-2 py-0.5 text-left text-xs hover:border-cl-accent ${c.dropped ? "border-dashed border-cl-line2 text-cl-faint line-through" : "border-cl-line2 text-cl-text"}`}
+                  className={`rounded-md border px-2 py-0.5 text-left text-xs hover:border-primary ${c.dropped ? "border-dashed border-line-strong text-faint line-through" : "border-line-strong text-body"}`}
                 >
                   {c.title}
                 </button>
@@ -335,19 +317,19 @@ export function NodePanel({
           </div>
         )}
 
-        <div className="mb-2 flex items-center gap-1 border-b border-cl-line pb-1.5">
+        <div className="mb-2 flex items-center gap-1 border-b border-line pb-1.5">
           {threads.map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveId(t.id)}
-              className={`rounded-md px-2 py-0.5 text-xs ${active?.id === t.id ? "bg-cl-panel font-medium text-cl-ink" : "text-cl-mute hover:text-cl-ink"}`}
+              className={`rounded-md px-2 py-0.5 text-xs ${active?.id === t.id ? "bg-panel font-medium text-ink" : "text-muted hover:text-ink"}`}
             >
               {t.title}
               {t.messages.length ? ` · ${t.messages.length}` : ""}
             </button>
           ))}
           {!threads.length && (
-            <span className="text-xs text-cl-mute">Side thread</span>
+            <span className="text-xs text-muted">Side thread</span>
           )}
           <div className="flex-1" />
           {threads.length > 0 && (
@@ -360,14 +342,14 @@ export function NodePanel({
                   composer.current?.focus();
                 }
               }}
-              className="rounded-md px-2 py-0.5 text-xs text-cl-accentDk hover:bg-orange-50 disabled:opacity-40"
+              className="rounded-md px-2 py-0.5 text-xs text-primary-strong hover:bg-primary-soft disabled:opacity-40"
             >
               ⑂ Fork
             </button>
           )}
         </div>
         <div
-          className="mb-2 text-[11px] leading-snug text-cl-faint"
+          className="mb-2 text-[11px] leading-snug text-faint"
           title="What Claude is sent for this thread"
         >
           Claude sees: the map · {path.map((p) => p.title).join(" → ")} · this
@@ -377,7 +359,7 @@ export function NodePanel({
           {active?.messages.map((m, i) =>
             m.role === "you" ? (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl bg-cl-user px-3 py-1.5 text-[13.5px] text-cl-ink">
+                <div className="max-w-[85%] rounded-2xl bg-bubble px-3 py-1.5 text-[13.5px] text-ink">
                   {m.text}
                 </div>
               </div>
@@ -390,7 +372,7 @@ export function NodePanel({
             ) : (
               <div
                 key={i}
-                className="rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-900"
+                className="rounded-md bg-warning-soft px-2 py-1 text-xs text-warning-strong"
               >
                 {m.text}
               </div>
@@ -403,7 +385,7 @@ export function NodePanel({
                   {stream.text}
                 </ReactMarkdown>
               ) : (
-                <span className="animate-pulse font-sans text-xs text-cl-mute">
+                <span className="animate-pulse font-sans text-xs text-muted">
                   Claude is thinking…
                 </span>
               )}
@@ -413,7 +395,7 @@ export function NodePanel({
         </div>
       </div>
 
-      <div className="border-t border-cl-line p-2.5">
+      <div className="border-t border-line p-2.5">
         <Composer
           ref={composer}
           compact

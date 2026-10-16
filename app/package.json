@@ -2,8 +2,25 @@
   "name": "living-map-app",
   "private": true,
   "version": "0.1.0",
-  "type": "module",
   "description": "Living Map: a visual canvas that drives your own Claude Code. Explore a question as a map, or learn any subject on a diagram you fill in and scenes you play by hand.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harshit-pi/living-map.git",
+    "directory": "app"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "learning",
+    "visualization",
+    "diagram",
+    "canvas"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
   "scripts": {
     "dev": "concurrently -k -n server,web \"node --watch server/index.ts\" \"vite\"",
     "build": "vite build",
@@ -50,9 +67,6 @@
     "typescript-eslint": "^8.71.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
-  },
-  "engines": {
-    "node": ">=23.6"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

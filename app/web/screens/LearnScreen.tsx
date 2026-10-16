@@ -18,7 +18,6 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
   const [centre, setCentre] = useState<"play" | "topic">("play");
   // in a narrow window the board needs the room: the panel tucks away while you play
   const [panelOpen, setPanelOpen] = useState(roomy);
-  const [lastFill, setLastFill] = useState<string | null>(null);
 
   // a newly selected step opens on its scene, with the panel as wide windows show it
   const [shownFor, setShownFor] = useState(selection.join());
@@ -48,8 +47,11 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
       void ws.run({ type: "explain", nodeId: r.nodeId });
   };
 
-  const lastClaude =
-    [...map.chat].reverse().find((c) => c.role === "claude")?.text ?? "";
+  // each blank's own verdict: its latest tagged reply, or the live text while it is checked
+  const verdicts: Record<string, string> = {};
+  for (const c of map.chat) if (c.blankId) verdicts[c.blankId] = c.text;
+  const verdict = (id: string) =>
+    live.working?.blankId === id ? live.stream.text : (verdicts[id] ?? "");
   const select = (id: string) =>
     setSelection((s) => (s.length === 1 && s[0] === id ? [] : [id]));
 
@@ -76,13 +78,13 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
               {tucked && (
                 <button
                   onClick={() => setPanelOpen(true)}
-                  className="absolute top-3 right-3 rounded-lg border border-cl-line2 bg-white px-2.5 py-1 text-xs text-cl-text hover:border-cl-accent"
+                  className="absolute top-3 right-3 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-xs text-body hover:border-primary"
                 >
                   💬 Hints &amp; thread
                 </button>
               )}
               {scene ? (
-                <div className="flex rounded-lg bg-cl-panel p-0.5 text-[13px]">
+                <div className="flex rounded-lg bg-panel p-0.5 text-[13px]">
                   {(
                     [
                       ["play", "▶ Play this step"],
@@ -92,14 +94,14 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
                     <button
                       key={v}
                       onClick={() => setCentre(v)}
-                      className={`rounded-md px-3 py-1 ${centre === v ? "bg-white text-cl-ink shadow-xs" : "text-cl-mute hover:text-cl-ink"}`}
+                      className={`rounded-md px-3 py-1 ${centre === v ? "bg-surface text-ink shadow-xs" : "text-muted hover:text-ink"}`}
                     >
                       {l}
                     </button>
                   ))}
                 </div>
               ) : building ? (
-                <div className="animate-pulse rounded-full bg-orange-50 px-4 py-1.5 text-sm text-cl-accentDk ring-1 ring-orange-200">
+                <div className="animate-pulse rounded-full bg-primary-soft px-4 py-1.5 text-sm text-primary-strong ring-1 ring-primary-line">
                   Building a playable scene for this step…
                 </div>
               ) : (
@@ -107,7 +109,7 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
                   onClick={() => {
                     void ws.run({ type: "scene", nodeId: step.id });
                   }}
-                  className="rounded-full bg-cl-accent px-4 py-1.5 text-sm font-medium text-white shadow-xs hover:bg-cl-accentDk"
+                  className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-on-primary shadow-xs hover:bg-primary-strong"
                 >
                   ▶ Play this step by hand
                 </button>
@@ -144,20 +146,12 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
                   diagram={map.diagram}
                   fills={map.fills}
                   busy={live.busy}
-                  lastFill={lastFill}
-                  caption={
-                    live.busy
-                      ? live.stream.threadId === null
-                        ? live.stream.text
-                        : ""
-                      : lastClaude
-                  }
+                  verdict={verdict}
                   openId={one?.anchor ?? null}
                   onOpen={(anchor, label) => {
                     void openPart(anchor, label);
                   }}
                   onFill={(blankId, text) => {
-                    setLastFill(blankId);
                     void ws.run({ type: "fill", blankId, text });
                   }}
                 />

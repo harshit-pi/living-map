@@ -33,7 +33,7 @@ function blankOf(x: Raw, field: "label" | "text") {
 
 // Keep only what each form needs, cap sizes, and strip any text from blanks so
 // an answer can never reach the browser.
-export function cleanSpec(spec: Raw): Diagram | null {
+function cleanForm(spec: Raw): Diagram | null {
   if (!spec || !FORMS.has(spec.form)) return null;
   const title = str(spec.title, 80);
   switch (spec.form as DiagramForm) {
@@ -124,22 +124,37 @@ export function cleanSpec(spec: Raw): Diagram | null {
         form: "grid",
         title,
         columns: list(spec.columns, 5).map((c) => str(c, 30)),
-        rows: list(spec.rows, 8).map((r) => ({
+        rows: list(spec.rows, 8).map((r, i) => ({
           label: str(r.label, 40),
           cells: list(r.cells, 5).map((c, j) =>
             typeof c === "string"
-              ? { id: "", text: str(c, 60) }
+              ? { id: `c${i}-${j}`, text: str(c, 60) }
               : ((blankOf(c, "text") as {
                   id: string;
                   text: string;
                 } | null) ?? {
-                  id: str(c?.id, 40) || `c${j}`,
+                  id: str(c?.id, 40) || `c${i}-${j}`,
                   text: str(c?.text, 60),
                 }),
           ),
         })),
       };
   }
+}
+
+// Every part of a diagram gets an id of its own: you click parts by id, blanks
+// are checked by id, and React keys rows by id.
+export function cleanSpec(spec: Raw): Diagram | null {
+  const d = cleanForm(spec);
+  if (!d) return null;
+  const seen = new Set<string>();
+  for (const el of elementsOf(d)) {
+    let id = el.id || "part";
+    for (let n = 2; seen.has(id); n++) id = `${el.id || "part"}-${n}`;
+    el.id = id;
+    seen.add(id);
+  }
+  return d;
 }
 
 export function elementsOf(spec: Diagram): Element[] {

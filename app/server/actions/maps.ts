@@ -21,12 +21,18 @@ export async function start(
   m.chat.push({ role: "you", text: source || title, ts: Date.now() });
   engine.state.map = m;
   engine.push();
-  return engine.turn(startAction(p, m.title), settings, {
+  const r = await engine.turn(startAction(p, m.title), settings, {
     label:
       p === "learn"
         ? "Drawing the topic and your path"
         : "Laying out the options",
   });
+  if (!r.error && !r.stopped && !Object.keys(m.nodes).length && !m.diagram)
+    return {
+      error:
+        "Claude did not lay anything out. Try again, or rephrase the question.",
+    };
+  return r;
 }
 
 // Reopen an earlier map; a move still running on the current one is stopped first.

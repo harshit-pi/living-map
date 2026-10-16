@@ -3,7 +3,7 @@
 
 import { cleanSpec, keepFilled, revealBlank } from "./diagram.ts";
 import { addMove, cleanScene, newPlay } from "./scene.ts";
-import type { Canvas, Raw } from "./types.ts";
+import { own, safeId, type Canvas, type Raw } from "./types.ts";
 import type { Kind, MapNode, Status } from "../../shared/model.ts";
 
 export const KINDS = new Set<Kind>(["question", "option", "fact"]);
@@ -47,18 +47,22 @@ export function removeTree(nodes: Record<string, MapNode>, id: string) {
   delete nodes[id];
 }
 
-// Apply ops to a map. `scope` (a node id) limits node changes to that node's
-// subtree, which is how a side thread stays on its node.
+// Apply ops to a map. `scope` (a node id) limits changes to that node's
+// subtree, which is how a side thread stays on its node: a scoped move may not
+// redraw the topic diagram, judge blanks, or touch another step's scene, and if
+// its node is gone it changes nothing.
 export function applyOps(
   map: Canvas,
   ops: Raw[],
   { scope = null as string | null, now = Date.now() } = {},
 ): number {
   const nodes = map.nodes;
+  if (scope && !own(nodes, scope)) return 0;
+  const inScope = () => (scope ? subtree(nodes, scope) : null);
   let changed = 0;
-  const allowed = () => (scope && nodes[scope] ? subtree(nodes, scope) : null);
   for (const op of ops ?? []) {
     if (op?.op === "diagram") {
+      if (scope) continue;
       const spec = cleanSpec(op.spec);
       if (spec) {
         keepFilled(spec, map.fills ?? {});
@@ -68,10 +72,16 @@ export function applyOps(
       }
       continue;
     }
-    if (op?.op === "scene") {
+    if (op?.op === "scene" || op?.op === "move") {
       const step = String(op.step ?? "");
+      if (!safeId(step) || !own(nodes, step)) continue;
+      if (scope && !inScope()?.has(step)) continue;
+      if (op.op === "move") {
+        if (addMove(own(map.scenes, step), op)) changed++;
+        continue;
+      }
       const scene = cleanScene(op.spec);
-      if (scene && nodes[step]) {
+      if (scene) {
         map.scenes ??= {};
         map.play ??= {};
         map.scenes[step] = scene;
@@ -80,15 +90,11 @@ export function applyOps(
       }
       continue;
     }
-    if (op?.op === "move") {
-      if (addMove(map.scenes?.[String(op.step ?? "")], op)) changed++;
-      continue;
-    }
     if (op?.op === "judge") {
       const id = String(op.id ?? "");
-      if (!id) continue;
+      if (scope || !safeId(id)) continue;
       map.fills ??= {};
-      const fill = map.fills[id] ?? { text: "", state: "pending" };
+      const fill = own(map.fills, id) ?? { text: "", state: "pending" };
       fill.state = op.state === "right" ? "right" : "wrong";
       if (fill.state === "right" && op.label) {
         fill.text = String(op.label);
@@ -99,23 +105,28 @@ export function applyOps(
       continue;
     }
     const id = String(op?.id ?? "").trim();
-    if (!id) continue;
-    const inScope = allowed();
+    if (!safeId(id)) continue;
+    const allowed = inScope();
+    const cur = own(nodes, id);
     if (op.op === "remove") {
-      if (nodes[id] && (!inScope || (inScope.has(id) && id !== scope))) {
+      // the root holds the whole map: it is never removed
+      if (
+        cur &&
+        cur.parent !== null &&
+        (!allowed || (allowed.has(id) && id !== scope))
+      ) {
         removeTree(nodes, id);
         changed++;
       }
       continue;
     }
-    const cur = nodes[id];
     if (op.op === "add" && !cur) {
       const kind: Kind = KINDS.has(op.kind) ? op.kind : "fact";
       let parent: string | null =
-        op.parent && nodes[op.parent] ? op.parent : null;
+        op.parent && own(nodes, String(op.parent)) ? String(op.parent) : null;
       if (!parent)
         parent = Object.values(nodes).find((x) => !x.parent)?.id ?? null;
-      if (inScope && scope && !inScope.has(parent ?? "")) parent = scope; // a thread adds under its own node
+      if (allowed && scope && !allowed.has(parent ?? "")) parent = scope; // a thread adds under its own node
       nodes[id] = {
         id,
         parent,
@@ -131,7 +142,7 @@ export function applyOps(
       };
       changed++;
     } else if (cur) {
-      if (inScope && !inScope.has(id)) continue;
+      if (allowed && !allowed.has(id)) continue;
       for (const k of ["title", "summary", "detail"] as const)
         if (typeof op[k] === "string") cur[k] = op[k];
       // only you choose
@@ -189,7 +200,6 @@ export function choose(
   const q = node.parent ? nodes[node.parent] : undefined;
   if (q && q.kind === "question") {
     q.status = "answered";
-    q.summary = `Chosen: ${node.title}`;
   }
   return q ?? null;
 }

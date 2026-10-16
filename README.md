@@ -1,81 +1,61 @@
-# living-map
+<p align="center"><img src="app/docs/logo.svg" alt="Living Map" width="260"></p>
 
-Understanding a long AI conversation by seeing it, not rereading it. **Living Map** is a local web app: a visual canvas that drives your own Claude Code, where you steer and answer on the picture itself.
+<p align="center"><b>Understand anything by seeing it, and by doing it.</b><br>
+A visual canvas that drives your own Claude Code: you steer and answer on the picture, not in a wall of text.</p>
 
-- **Decide:** the question as a tree of options and facts; choose, challenge, go deeper, and reply on any node in a side thread.
-- **Learn:** any subject drawn in the shape that fits it (sequence, concept map, timeline, structure, grid) with the key parts left blank; you fill them on the diagram and Claude checks each one.
+---
 
-This repo has two parts:
+Long AI answers are hard to hold in your head. Living Map turns the conversation into a picture you work on directly:
 
-- `app/`: the Living Map app. Run it with `cd app && npm install && npm start`, then open http://localhost:4317. Details in [app/README.md](app/README.md).
-- the evaluation pipeline (`lm/`, `run_*.py`): scores a conversation's decision ledger against real transcripts.
+- **Explore** a question as a map of options and facts. Choose, challenge, go deeper, and reply on any node in its own side thread.
+- **Learn** any subject (a protocol, a theory, a period of history, a coding problem). Claude draws it in the shape that fits: a sequence, a concept map, a timeline, a structure, or a grid. The key parts are left blank for you to fill, and Claude checks each one.
+- **Play a step by hand** on a board, an array or a tree, move by move. Your clicks are checked instantly, with no model call. Coding problems end with **Write it**, where Claude traces your code on the example and tells you which line breaks.
+- **Click any part** of a diagram to have it explained in plain words, broken down further, or discussed in a side thread.
 
-The earlier Claude Code plugin (a decision ledger shown as a board) was retired on 2026-10-16 in favour of the app; its last version is in git history at `c1921ce`.
+Everything runs on your machine. Living Map talks to the model through your own Claude Code (`claude -p`) and keeps your maps in `~/.living-map/`.
 
-## The evaluation pipeline
+## Quick start
 
-### What gets scored
-
-| Score | Question it answers | How |
-|---|---|---|
-| Capture | Does the ledger hold what is settled? | 26 gold probes, asked at the turn where the user actually lost the thread; answered from the ledger; graded by a judge model |
-| Retention | Is it better than what Claude kept? | Same probes answered from the real compaction summary + turns since |
-| Tokens | Does it save context? | Context size per condition; extraction prompt and output tokens per turn; cost per 100 turns |
-| Glance | Can it be read off the picture? | Probes answered from a screenshot only: board vs the same ledger as a plain list, at full size and shrunk to 900px |
-| Lint | Does the board follow the perception rules? | ≤40 items on screen, ≤5 live cards per thread, short labels, nothing hidden, status never colour-only |
-
-### Run
+You need [Node.js](https://nodejs.org) 23.6 or later, and [Claude Code](https://claude.com/claude-code) installed and signed in (`claude` on your PATH).
 
 ```bash
-python3 -I run_extract.py v2     # build ledgers -> out/v2/<chat>/ledger_tNNN.json
-python3 -I run_score.py v2       # score -> out/v2/scorecard.md and .html
+git clone https://github.com/harshit-pi/living-map.git
+cd living-map/app
+npm install
+npm start
 ```
 
-Model calls go through headless `claude -p` (your Claude Code login), cached in
-`cache/` so re-runs never re-spend tokens; `cache/usage.jsonl` logs every real
-call. MCP servers and settings are disabled per call, which cuts overhead from
-~287k tokens to under 1k.
+Then open http://localhost:4317.
 
-### Layout
+Model calls go through your Claude Code account and count toward its usage. Each move is one short, stateless call; Living Map defaults to low effort, which you can change from the model and effort pickers.
 
-- `lm/transcripts.py` — JSONL transcript → human turns + compaction summaries
-- `lm/ledger.py` — the ledger: items, history of changed values, text view
-- `lm/extract.py` — windowed extraction (6 turns per call), versioned prompts
-- `lm/render.py` — board and list HTML, Chrome screenshots, perception lint
-- `lm/score.py` — probes × contexts, glance test, judge
-- `lm/report.py` — scorecard
-- `data/` — your probe sets, built from your own transcripts and git-ignored; see `data/README.md`
+## How it works
 
-Transcripts and outputs stay local; `out/` and `cache/` are not committed.
+```
+browser ──actions──► server ──► engine (one move at a time) ──► model provider ──► claude -p
+   ▲                                  │
+   └──────── live events ◄────────────┘   the canvas updates as the reply streams in
+```
 
-### Results so far (2026-10-15)
+- Each move sends the model the canvas and the one thread it belongs to, so the input stays flat as a conversation grows.
+- The model answers with a short caption plus a block of small JSON changes. The server cleans every change before it reaches the canvas, and never sends the browser an answer you have yet to work out.
+- The model sits behind one interface (`app/server/providers/types.ts`). Claude Code is the default; another model is one new file.
 
-| | v1 | v2 | v3 | v4 |
-|---|---|---|---|---|
-| Capture: what Claude had after compaction | 0.58 | 0.58 | 0.58 | 0.58 |
-| Capture: ledger alone | 0.83 | 0.75 | 0.83 | 0.81 |
-| Capture: ledger + last 6 turns | 0.75 | 0.77 | 0.77 | 0.75 |
-| Overview at glance size: board vs list | 0.64 / 0.05 | 0.67 / 0.29 | 0.68 / 0.30 | 0.64 / 0.25 |
-| Threads per chat | 12.8 | 5.5 | 5.7 | 5.5 |
-| Items hidden on the board | 60 | 62 | 64 | 23 |
+## Project layout
 
-- v2: at most 6 threads, terse values. v3: only the user's words change a user decision; complaints restate rules. v4: items carry a kind (decision, rule, task, question); the board lists every decision and rule and counts tasks.
-- Context: ~4.6k-token ledger vs ~20k tokens Claude carried. Extraction ~900 prompt + ~450 output tokens per turn on Haiku, ~6¢ per 100 turns.
-- Two gold answers were wrong and fixed against the transcripts (`gold_fixed` in `data/probes.json`).
-- 26 probes: one probe moves a score by 0.04, so v2–v4 differences are noise.
-- Human check: open `out/v4/glance-test.html` (10 seconds per board).
+| Path                | What it holds                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `app/`              | the Living Map app: server, browser, tests. Its [README](app/README.md) and [AGENTS.md](app/AGENTS.md) cover development. |
+| `app/web/brand.css` | every colour and font, by role: restyle the app in one place                                                              |
 
-### 122-probe run (2026-10-15)
+## Contributing
 
-26 lost-thread probes plus 96 generated ones (8 chats, 12 each, all asked after a compaction; every gold verified against the transcript up to the anchor, every quote found verbatim). Judge: Haiku. Full table: `out/stats_p2.md` (`python3 -I run_stats.py p2`).
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the checks every change must pass, and the code conventions.
 
-| | v1 | v2 | v3 | v4 |
-|---|---|---|---|---|
-| Ledger alone | 0.79 | 0.75 | 0.76 | 0.72 |
-| What Claude had | 0.50 | 0.57 | 0.55 | 0.55 |
-| Ledger − Claude (paired) | +0.29 | +0.18 | +0.21 | +0.17 |
-| Board − list, overview at glance size | +0.53 | +0.45 | +0.49 | +0.48 |
+## Security
 
-- The ledger beats what Claude kept in every version; every interval excludes 0.
-- Prompt versions: only v4 − v1 (−0.07) clears its interval, and that is near the scorer's own noise (~0.07). Smallest detectable gap with 122 probes: ±0.08–0.10.
-- The board beats the list for overview at glance size by about +0.5; for detail questions they tie.
+The server listens on `127.0.0.1` only. See [SECURITY.md](SECURITY.md) to report a problem.
+
+## License
+
+[MIT](LICENSE)

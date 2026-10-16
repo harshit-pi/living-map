@@ -24,31 +24,31 @@ export function MapRows({
   limit?: number;
 }) {
   return (
-    <ul className="divide-y divide-cl-line">
+    <ul className="divide-y divide-line">
       {maps.slice(0, limit).map((m) => (
         <li key={m.id}>
           <button
             onClick={() => onOpen(m.id)}
             disabled={m.current}
-            className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-cl-panel disabled:cursor-default disabled:bg-orange-50/50"
+            className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-panel disabled:cursor-default disabled:bg-primary-soft/50"
           >
             <span
-              className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${m.purpose === "learn" ? "bg-teal-50 text-teal-700" : "bg-amber-50 text-amber-700"}`}
+              className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${m.purpose === "learn" ? "bg-success-soft text-success-strong" : "bg-warning-soft text-warning-strong"}`}
             >
               {m.purpose}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13.5px] text-cl-ink">
+              <span className="block truncate text-[13.5px] text-ink">
                 {m.title}
               </span>
-              <span className="block text-[11px] text-cl-mute">
+              <span className="block text-[11px] text-muted">
                 {m.purpose === "learn"
                   ? `${m.done} worked out · ${m.open} to go`
                   : `${m.nodes} nodes · ${m.open} open`}
                 {m.form ? ` · ${m.form}` : ""}
               </span>
             </span>
-            <span className="shrink-0 text-[11px] text-cl-faint">
+            <span className="shrink-0 text-[11px] text-faint">
               {m.current ? "open now" : ago(m.updatedAt)}
             </span>
           </button>
@@ -74,13 +74,13 @@ export function MapsMenu({ onOpen }: { onOpen: (id: string) => void }) {
     <div ref={box} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="rounded-lg border border-cl-line2 px-2.5 py-1.5 text-sm text-cl-text hover:bg-cl-panel"
+        className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
       >
         Maps ▾
       </button>
       {open && (
-        <div className="absolute right-0 top-10 z-40 max-h-[70vh] w-[420px] overflow-y-auto rounded-xl bg-white shadow-xl ring-1 ring-cl-line">
-          <div className="border-b border-cl-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-cl-faint">
+        <div className="absolute right-0 top-10 z-40 max-h-[70vh] w-[420px] overflow-y-auto rounded-xl bg-surface shadow-xl ring-1 ring-line">
+          <div className="border-b border-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
             Your maps
           </div>
           {maps.length ? (
@@ -92,7 +92,7 @@ export function MapsMenu({ onOpen }: { onOpen: (id: string) => void }) {
               }}
             />
           ) : (
-            <div className="px-3 py-4 text-sm text-cl-mute">No maps yet.</div>
+            <div className="px-3 py-4 text-sm text-muted">No maps yet.</div>
           )}
         </div>
       )}

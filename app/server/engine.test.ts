@@ -144,8 +144,10 @@ test("Stop ends the running move and cancels what waits", async () => {
   await act(engine, { type: "stop" });
   assert.equal(calls[1].cancelled, true);
   await running;
-  assert.deepEqual(await waiting, { error: "Cancelled." });
-  assert.equal(engine.state.map?.chat.at(-1)?.text, "Stopped.");
+  assert.deepEqual(await waiting, { stopped: true });
+  const chat = engine.state.map?.chat.map((c) => c.text) ?? [];
+  assert.ok(chat.includes("Stopped."));
+  assert.equal(chat.at(-1), "Cancelled before Claude saw it.");
   assert.equal(calls.length, 2, "the waiting move never reached the model");
 });
 
@@ -226,4 +228,136 @@ test('maps saved as "decide" open as "explore"', () => {
     "explore",
   );
   assert.equal(normalise({ ...newMap("L", "learn") }).purpose, "learn");
+});
+
+test("a blank's verdict is tagged so it shows on the blank, not as a caption", async () => {
+  const m = newMap("DBs", "learn");
+  const { engine, calls } = setup(m);
+  const done = act(engine, { type: "fill", blankId: "c2", text: "rigid" });
+  await settled(calls, 1);
+  assert.equal(engine.state.working?.blankId, "c2");
+  calls[0].release(
+    'Not quite.\n```map\n{"ops":[{"op":"judge","id":"c2","state":"wrong"}]}\n```',
+  );
+  await done;
+  assert.equal(m.chat.at(-1)?.blankId, "c2");
+  assert.equal(m.fills.c2.state, "wrong");
+});
+
+test("Show answer asks once more when the answer did not arrive, and only then marks it shown", async () => {
+  const m = newMap("Rust", "learn");
+  m.nodes.step = {
+    id: "step",
+    parent: null,
+    kind: "question",
+    title: "Who frees memory?",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
+  const { engine, calls } = setup(m);
+  const done = act(engine, { type: "answer", nodeId: "step" });
+  await settled(calls, 1);
+  calls[0].release("Here is the answer."); // no map block: nothing delivered
+  await settled(calls, 2);
+  assert.match(calls[1].req.message, /did not deliver it/);
+  calls[1].release(
+    'Done.\n```map\n{"ops":[{"op":"update","id":"step","detail":"The owner frees it."}]}\n```',
+  );
+  await done;
+  assert.equal(m.nodes.step.detail, "The owner frees it.");
+  assert.equal(m.nodes.step.revealed, true);
+});
+
+test("Stop during an explanation does not start a second try", async () => {
+  const { engine, calls } = setup();
+  const first = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(ROOT);
+  await first;
+  const explaining = act(engine, { type: "explain", nodeId: "pg" });
+  await settled(calls, 2);
+  await act(engine, { type: "stop" });
+  assert.deepEqual(await explaining, { stopped: true });
+  await tick();
+  assert.equal(calls.length, 2, "no second try after Stop");
+  assert.equal(engine.state.busy, false);
+});
+
+test("a queued message is sent with the reply to the one before it, and only once", async () => {
+  const { engine, calls } = setup();
+  const first = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(ROOT);
+  await first;
+  const a = act(engine, { type: "message", text: "AAA", selection: [] });
+  const b = act(engine, { type: "message", text: "BBB", selection: [] });
+  await settled(calls, 2);
+  calls[1].release("Reply to AAA.");
+  await a;
+  await settled(calls, 3);
+  const sent = calls[2].req.message;
+  assert.match(sent, /YOU: Reply to AAA\./);
+  assert.equal(sent.match(/BBB/g)?.length, 1, "BBB appears once, as USER SAYS");
+  calls[2].release("Reply to BBB.");
+  await b;
+});
+
+test("Stop keeps your canvas notes for the next move", async () => {
+  const m = newMap("Notes", "explore");
+  m.nodes.q = {
+    id: "q",
+    parent: null,
+    kind: "question",
+    title: "Q",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
+  m.notes.push("Set aside X");
+  const { engine, calls } = setup(m);
+  const running = act(engine, { type: "message", text: "hi", selection: [] });
+  await settled(calls, 1);
+  await act(engine, { type: "stop" });
+  await running;
+  assert.deepEqual(m.notes, ["Set aside X"]);
+});
+
+test("ids the browser sends must be plain", async () => {
+  const { engine } = setup(newMap("x", "explore"));
+  assert.deepEqual(
+    await act(engine, { type: "play", nodeId: "__proto__", key: "1" }),
+    {
+      error: "That request is not valid.",
+    },
+  );
+  assert.deepEqual(
+    await act(engine, { type: "fill", blankId: "constructor", text: "x" }),
+    {
+      error: "That request is not valid.",
+    },
+  );
+});
+
+test("a new map that draws nothing says so instead of loading forever", async () => {
+  const { engine, calls } = setup();
+  const done = act(engine, { type: "new", text: "Anything", purpose: "learn" });
+  await settled(calls, 1);
+  calls[0].release("I could not draw this.");
+  const r = await done;
+  assert.match(r.error ?? "", /did not lay anything out/);
 });

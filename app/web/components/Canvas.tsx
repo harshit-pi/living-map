@@ -5,6 +5,14 @@ import { NodeCard } from "./NodeCard.tsx";
 import type { MapDoc } from "../../shared/model.ts";
 import { layout } from "../lib/layout.ts";
 
+// the floating message box covers the bottom of the canvas: frame above it
+const FRAME = {
+  top: "24px",
+  left: "24px",
+  right: "24px",
+  bottom: "140px",
+} as const;
+
 const nodeTypes = { map: NodeCard };
 
 // The app owns the selection: a click selects one node, Shift-click adds or
@@ -65,7 +73,7 @@ export function Canvas({
     if (!before) {
       requestAnimationFrame(() => {
         void fitView({
-          padding: 0.12,
+          padding: FRAME,
           duration: 300,
           maxZoom: 1,
           minZoom: 0.45,
@@ -83,7 +91,7 @@ export function Canvas({
     const t = setTimeout(() => {
       void fitView({
         nodes: focus,
-        padding: 0.18,
+        padding: FRAME,
         duration: 500,
         maxZoom: 1,
         minZoom: 0.55,
@@ -106,7 +114,7 @@ export function Canvas({
         const t = setTimeout(() => {
           void fitView({
             nodes: [...ids].map((id) => ({ id })),
-            padding: 0.12,
+            padding: FRAME,
             duration: 500,
             maxZoom: 1,
             minZoom: 0.35,
@@ -143,9 +151,9 @@ export function Canvas({
       minZoom={0.2}
       proOptions={{ hideAttribution: true }}
       fitView
-      fitViewOptions={{ maxZoom: 1, minZoom: 0.7 }}
+      fitViewOptions={{ maxZoom: 1, minZoom: 0.7, padding: FRAME }}
     >
-      <Background color="#e7e5e4" gap={22} />
+      <Background color="var(--color-line-strong)" gap={22} />
       <Controls showInteractive={false} position="top-left" />
     </ReactFlow>
   );

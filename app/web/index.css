@@ -1,23 +1,5 @@
 @import "tailwindcss";
-
-@theme {
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, Inter, Helvetica Neue, sans-serif;
-  --font-serif: ui-serif, Georgia, Cambria, Times New Roman, serif;
-
-  --color-cl-bg: #faf9f5;
-  --color-cl-panel: #f5f4ee;
-  --color-cl-surface: #ffffff;
-  --color-cl-line: #e8e6dc;
-  --color-cl-line2: #d9d6c9;
-  --color-cl-ink: #141413;
-  --color-cl-text: #3d3d3a;
-  --color-cl-mute: #73726c;
-  --color-cl-faint: #a3a29a;
-  --color-cl-accent: #d97757;
-  --color-cl-accentDk: #c6613f;
-  --color-cl-user: #f0eee6;
-}
+@import "./brand.css";
 
 /*
   The default border color has changed to `currentcolor` in Tailwind CSS v4,
@@ -33,7 +15,7 @@
   ::before,
   ::backdrop,
   ::file-selector-button {
-    border-color: var(--color-gray-200, currentcolor);
+    border-color: var(--color-line, currentcolor);
   }
 }
 
@@ -43,8 +25,8 @@ body,
   height: 100%;
 }
 body {
-  background: #faf9f5;
-  color: #141413;
+  background: var(--color-canvas);
+  color: var(--color-ink);
 }
 .react-flow__node {
   cursor: pointer;
@@ -53,8 +35,8 @@ body {
   opacity: 0;
 }
 .react-flow__controls button {
-  background: #fff;
-  border-color: #e8e6dc;
+  background: var(--color-surface);
+  border-color: var(--color-line);
 }
 @keyframes pop {
   from {
@@ -75,7 +57,7 @@ body {
   font-family: ui-serif, Georgia, Cambria, serif;
   font-size: 15.5px;
   line-height: 1.65;
-  color: #141413;
+  color: var(--color-ink);
 }
 .answer p {
   margin: 0 0 0.7em;
@@ -112,13 +94,13 @@ body {
 .answer code {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 0.86em;
-  background: #f0eee6;
+  background: var(--color-bubble);
   padding: 0.1em 0.3em;
   border-radius: 4px;
 }
 .answer pre {
-  background: #f5f4ee;
-  border: 1px solid #e8e6dc;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
   border-radius: 10px;
   padding: 0.8em 1em;
   overflow-x: auto;
@@ -135,11 +117,11 @@ body {
 }
 .answer th,
 .answer td {
-  border: 1px solid #e8e6dc;
+  border: 1px solid var(--color-line);
   padding: 0.3em 0.6em;
 }
 .answer th {
-  background: #f5f4ee;
+  background: var(--color-panel);
   font-family: -apple-system, sans-serif;
 }
 .answer strong {
@@ -165,14 +147,14 @@ body {
   position: relative;
   overflow: hidden;
   height: 2px;
-  background: #f0eee6;
+  background: var(--color-bubble);
 }
 .working-bar::after {
   content: "";
   position: absolute;
   inset: 0;
   width: 40%;
-  background: #d97757;
+  background: var(--color-primary);
   animation: slide 1.2s ease-in-out infinite;
 }
 @keyframes shimmer {
@@ -186,17 +168,24 @@ body {
 .skeleton {
   border-radius: 6px;
   height: 10px;
-  background: linear-gradient(90deg, #efede6 25%, #f8f7f3 50%, #efede6 75%);
+  background: linear-gradient(
+    90deg,
+    var(--color-panel) 25%,
+    var(--color-canvas) 50%,
+    var(--color-panel) 75%
+  );
   background-size: 600px 100%;
   animation: shimmer 1.4s linear infinite;
 }
 @keyframes ring {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(217, 119, 87, 0.45);
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--color-primary) 45%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(217, 119, 87, 0);
+    box-shadow: 0 0 0 6px
+      color-mix(in srgb, var(--color-primary) 0%, transparent);
   }
 }
 .is-working {

@@ -25,7 +25,7 @@ function Picker({
       title={title}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="cursor-pointer rounded-lg border-0 bg-transparent py-1 pl-2 pr-6 text-[12.5px] text-cl-mute hover:bg-cl-panel focus:ring-0"
+      className="cursor-pointer rounded-lg border-0 bg-transparent py-1 pl-2 pr-6 text-[12.5px] text-muted hover:bg-panel focus:ring-0"
     >
       {options.map((o) => (
         <option key={o.id} value={o.id}>
@@ -81,7 +81,7 @@ export const Composer = forwardRef<
     setText("");
   };
   return (
-    <div className="rounded-2xl border border-cl-line2 bg-white shadow-xs focus-within:border-cl-accent">
+    <div className="rounded-2xl border border-line-strong bg-surface shadow-xs focus-within:border-primary">
       {chips && (
         <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">{chips}</div>
       )}
@@ -106,11 +106,11 @@ export const Composer = forwardRef<
           }
         }}
         spellCheck={!code}
-        className={`block w-full resize-none border-0 bg-transparent px-4 pt-3 text-cl-ink outline-hidden placeholder:text-cl-faint focus:ring-0 ${code ? "font-mono text-[13px] leading-relaxed" : compact ? "text-[14px]" : "text-[15px]"}`}
+        className={`block w-full resize-none border-0 bg-transparent px-4 pt-3 text-ink outline-hidden placeholder:text-faint focus:ring-0 ${code ? "font-mono text-[13px] leading-relaxed" : compact ? "text-[14px]" : "text-[15px]"}`}
       />
       <div className="flex items-center gap-1 px-2 pb-2">
         {code && (
-          <span className="pl-2 text-[11px] text-cl-faint">
+          <span className="pl-2 text-[11px] text-faint">
             ⌘↩ to send · any language or pseudocode
           </span>
         )}
@@ -135,16 +135,16 @@ export const Composer = forwardRef<
           <button
             onClick={onStop}
             title="Stop Claude"
-            className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-cl-ink text-white hover:bg-black"
+            className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-on-primary hover:bg-ink"
           >
-            <span className="h-2.5 w-2.5 rounded-[2px] bg-white" />
+            <span className="h-2.5 w-2.5 rounded-[2px] bg-surface" />
           </button>
         ) : (
           <button
             onClick={send}
             disabled={!text.trim()}
             title={busy ? "Send (runs when Claude finishes)" : "Send"}
-            className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-cl-accent text-white hover:bg-cl-accentDk disabled:opacity-40"
+            className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary hover:bg-primary-strong disabled:opacity-40"
           >
             ↑
           </button>
@@ -165,14 +165,11 @@ export function Chip({
 }) {
   return (
     <span
-      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ${tone === "accent" ? "bg-orange-50 text-cl-accentDk ring-orange-200" : "bg-cl-panel text-cl-text ring-cl-line"}`}
+      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ${tone === "accent" ? "bg-primary-soft text-primary-strong ring-primary-line" : "bg-panel text-body ring-line"}`}
     >
       {children}
       {onRemove && (
-        <button
-          className="ml-1 text-cl-faint hover:text-cl-ink"
-          onClick={onRemove}
-        >
+        <button className="ml-1 text-faint hover:text-ink" onClick={onRemove}>
           ×
         </button>
       )}

@@ -5,7 +5,7 @@ A local web app that drives a model (your own Claude Code by default) from a vis
 ## Stack
 
 - Node 23.6+ runs the server's TypeScript directly (type stripping): no build step for the server.
-- Server: Express 5, server-sent events. Browser: React 19, Vite 8, Tailwind 4 (theme in `web/index.css`), React Flow 12, dagre 3.
+- Server: Express 5, server-sent events. Browser: React 19, Vite 8, Tailwind 4 (every colour and font in `web/brand.css`), React Flow 12, dagre 3.
 - TypeScript 6, strict, one `tsconfig.json` for server, browser and shared code. Tests: Vitest. Lint: ESLint 10 flat config. Format: Prettier (defaults).
 
 ## Commands
@@ -36,5 +36,6 @@ The pre-commit hook (husky, `app/.husky/pre-commit`) runs lint-staged, then the 
 - The engine never names Claude: anything model-specific lives in a provider.
 - The model's output is untrusted (`Raw`): clean every field before it reaches the map (`cleanSpec`, `cleanScene`), and never send answers (scene moves, blank text) to the browser.
 - Explanations are written only when a node is opened; a move asked while another runs waits in the queue, never refused.
+- Colours come only from the roles in `web/brand.css` (`bg-canvas`, `text-ink`, `bg-primary`, `border-success-line`, …): no Tailwind palette colours or hex codes in components. The logo mark is `web/lib/mark.ts`; the favicon is drawn from it at startup.
 - No `setState` inside effects: derive the value, or reset state when its key changes during render.
 - Copy the user reads says "you", in plain words; the word for the left mode is **Explore** (older maps saved as "decide" are migrated on load).

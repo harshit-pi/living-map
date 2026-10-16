@@ -9,38 +9,38 @@ function stateOf(map: MapDoc, n: MapNode) {
   if (n.dropped)
     return {
       mark: "–",
-      cls: "border-cl-line2 text-cl-faint",
+      cls: "border-line-strong text-faint",
       word: "set aside",
     };
   if (n.revealed)
     return {
       mark: "◉",
-      cls: "border-violet-400 bg-violet-50 text-violet-700",
+      cls: "border-hint bg-hint-soft text-hint-strong",
       word: "answer shown",
     };
   if (n.kind === "question" && n.status === "answered")
     return {
       mark: "✓",
-      cls: "border-teal-600 bg-teal-600 text-white",
+      cls: "border-success bg-success text-on-primary",
       word: "got it",
     };
   const sc = map.scenes?.[n.id];
   if (sc && !sc.done && sc.at > 0)
     return {
       mark: "▶",
-      cls: "border-cl-accent bg-orange-50 text-cl-accentDk",
+      cls: "border-primary bg-primary-soft text-primary-strong",
       word: `playing · ${sc.at} of ${sc.total}`,
     };
   const h = hintsOf(map, n.id);
   if (h)
     return {
       mark: String(h),
-      cls: "border-amber-500 bg-amber-50 text-amber-800",
+      cls: "border-warning bg-warning-soft text-warning-strong",
       word: `${h} hint${h > 1 ? "s" : ""} used`,
     };
   return {
     mark: "",
-    cls: "border-amber-500 bg-white text-amber-700",
+    cls: "border-warning bg-surface text-warning-strong",
     word: "to do",
   };
 }
@@ -69,36 +69,40 @@ export function PathRail({
     : [];
   const steps = kids.filter((n) => n.kind === "question");
   const notes = kids.filter((n) => n.kind !== "question");
+  const subSteps = (id: string) =>
+    Object.values(map.nodes)
+      .filter((n) => n.parent === id && n.kind === "question")
+      .sort((a, b) => a.order - b.order);
   const got = steps.filter(
     (s) => s.status === "answered" && !s.revealed,
   ).length;
   return (
-    <nav className="flex h-full w-[220px] shrink-0 xl:w-[270px] flex-col border-r border-cl-line bg-cl-bg">
+    <nav className="flex h-full w-[220px] shrink-0 xl:w-[270px] flex-col border-r border-line bg-canvas">
       <div className="px-4 pb-2 pt-4">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-cl-faint">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
           Your path
         </div>
         {root && (
           <button
             onClick={() => onSelect(root.id)}
-            className="mt-0.5 text-left text-[15px] font-semibold leading-snug text-cl-ink hover:text-cl-accentDk"
+            className="mt-0.5 text-left text-[15px] font-semibold leading-snug text-ink hover:text-primary-strong"
           >
             {root.title}
           </button>
         )}
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-cl-line">
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line">
           <div
-            className="h-full rounded-full bg-teal-600 transition-all"
+            className="h-full rounded-full bg-success transition-all"
             style={{
               width: `${steps.length ? (got / steps.length) * 100 : 0}%`,
             }}
           />
         </div>
-        <div className="mt-1 text-xs text-cl-mute">
+        <div className="mt-1 text-xs text-muted">
           {got} of {steps.length} worked out by you
         </div>
       </div>
-      <ol className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+      <ol className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
         {steps.map((s, i) => {
           const st = stateOf(map, s);
           const on = selected === s.id;
@@ -106,7 +110,7 @@ export function PathRail({
             <li key={s.id}>
               <button
                 onClick={() => onSelect(s.id)}
-                className={`group flex w-full gap-2.5 rounded-xl px-2 py-2 text-left ${on ? "bg-white shadow-xs ring-1 ring-cl-accent" : "hover:bg-cl-panel"} ${s.fresh ? "fresh" : ""}`}
+                className={`group flex w-full gap-2.5 rounded-xl px-2 py-2 text-left ${on ? "bg-surface shadow-xs ring-1 ring-inset ring-primary" : "hover:bg-panel"} ${s.fresh ? "fresh" : ""}`}
               >
                 <span className="flex flex-col items-center">
                   <span
@@ -115,25 +119,47 @@ export function PathRail({
                     {st.mark || i + 1}
                   </span>
                   {i < steps.length - 1 && (
-                    <span className="mt-1 w-px flex-1 bg-cl-line2" />
+                    <span className="mt-1 w-px flex-1 bg-line-strong" />
                   )}
                 </span>
                 <span className="min-w-0 pb-1">
                   <span
-                    className={`block text-[13.5px] font-medium leading-snug ${s.dropped ? "text-cl-faint line-through" : "text-cl-ink"}`}
+                    className={`block text-[13.5px] font-medium leading-snug ${s.dropped ? "text-faint line-through" : "text-ink"}`}
                   >
                     {s.title}
                   </span>
-                  <span className="block text-[11px] text-cl-mute">
+                  <span className="block text-[11px] text-muted">
                     {st.word}
                   </span>
                 </span>
               </button>
+              {/* smaller steps ("Smaller steps" on a step) sit under it */}
+              {subSteps(s.id).map((c) => {
+                const cs = stateOf(map, c);
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => onSelect(c.id)}
+                    className={`ml-9 flex w-[calc(100%-2.25rem)] items-start gap-2 rounded-lg px-2 py-1 text-left ${selected === c.id ? "bg-surface shadow-xs ring-1 ring-inset ring-primary" : "hover:bg-panel"} ${c.fresh ? "fresh" : ""}`}
+                  >
+                    <span
+                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-semibold ${cs.cls} ${workingId === c.id ? "is-working" : ""}`}
+                    >
+                      {cs.mark}
+                    </span>
+                    <span
+                      className={`text-[12.5px] leading-snug ${c.dropped ? "text-faint line-through" : "text-body"}`}
+                    >
+                      {c.title}
+                    </span>
+                  </button>
+                );
+              })}
             </li>
           );
         })}
         {notes.length > 0 && (
-          <li className="mt-3 px-3 text-[10px] font-semibold uppercase tracking-wide text-cl-faint">
+          <li className="mt-3 px-3 text-[10px] font-semibold uppercase tracking-wide text-faint">
             You looked into
           </li>
         )}
@@ -141,7 +167,7 @@ export function PathRail({
           <li key={n.id}>
             <button
               onClick={() => onSelect(n.id)}
-              className={`mt-1 w-full rounded-lg px-3 py-1.5 text-left text-xs ${selected === n.id ? "bg-white ring-1 ring-cl-accent" : "text-cl-mute hover:bg-cl-panel"}`}
+              className={`mt-1 w-full rounded-lg px-3 py-1.5 text-left text-xs ${selected === n.id ? "bg-surface ring-1 ring-inset ring-primary" : "text-muted hover:bg-panel"}`}
             >
               {n.kind === "option" ? "◇ " : "· "}
               {n.title}
@@ -149,11 +175,11 @@ export function PathRail({
           </li>
         ))}
       </ol>
-      <div className="border-t border-cl-line p-3">
+      <div className="border-t border-line p-3">
         <button
           onClick={onNext}
           disabled={busy}
-          className="w-full rounded-lg bg-cl-accent py-1.5 text-sm font-medium text-white hover:bg-cl-accentDk disabled:opacity-40"
+          className="w-full rounded-lg bg-primary py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
         >
           Next step ▸
         </button>

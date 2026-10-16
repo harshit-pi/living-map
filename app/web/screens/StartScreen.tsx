@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Purpose } from "../../shared/model.ts";
+import { Logo } from "../components/Logo.tsx";
 import { MapRows } from "../components/MapList.tsx";
 import { Segmented } from "../components/Segmented.tsx";
 import { useMaps } from "../lib/api.ts";
@@ -41,8 +42,12 @@ export function StartScreen({
   };
   const learn = purpose === "learn";
   return (
-    <div className="flex h-full items-center justify-center bg-cl-bg p-6">
-      <div className="w-full max-w-xl">
+    // scrolls when the window is short, instead of cutting off the top
+    <div className="h-full overflow-y-auto bg-canvas">
+      <div className="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center px-6 py-8">
+        <div className="mb-6 flex justify-center">
+          <Logo size={30} />
+        </div>
         <div className="mb-4 flex justify-center">
           <Segmented
             value={purpose}
@@ -56,17 +61,17 @@ export function StartScreen({
             }}
           />
         </div>
-        <h1 className="text-center font-serif text-3xl text-cl-ink">
+        <h1 className="text-center font-serif text-3xl text-ink">
           {learn
             ? "What do you want to understand?"
             : "What do you want to think through?"}
         </h1>
-        <p className="mt-2 text-center text-cl-mute">
+        <p className="mt-2 text-center text-muted">
           {learn
             ? "Any subject. Claude draws it in the shape that fits and leaves the key parts blank for you to fill."
             : "A question to explore or a choice to make. Claude lays it out as a map; you steer by clicking and replying on the nodes."}
         </p>
-        <div className="mt-6 rounded-2xl border border-cl-line2 bg-white shadow-xs focus-within:border-cl-accent">
+        <div className="mt-6 rounded-2xl border border-line-strong bg-surface shadow-xs focus-within:border-primary">
           <textarea
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -89,14 +94,14 @@ export function StartScreen({
             <button
               onClick={() => go(q)}
               disabled={!q.trim()}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-cl-accent text-white disabled:opacity-40"
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary disabled:opacity-40"
             >
               ↑
             </button>
           </div>
         </div>
         {error && (
-          <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">
             {error}
           </div>
         )}
@@ -104,7 +109,7 @@ export function StartScreen({
           <div className="mt-3 text-center">
             <button
               onClick={onCancel}
-              className="text-sm text-cl-mute hover:text-cl-ink"
+              className="text-sm text-muted hover:text-ink"
             >
               ← Back to the current map
             </button>
@@ -115,7 +120,7 @@ export function StartScreen({
             <button
               key={e}
               onClick={() => go(e)}
-              className="rounded-full border border-cl-line2 bg-white px-3 py-1 text-sm text-cl-text hover:border-cl-accent"
+              className="rounded-full border border-line-strong bg-surface px-3 py-1 text-sm text-body hover:border-primary"
             >
               {e}
             </button>
@@ -123,10 +128,10 @@ export function StartScreen({
         </div>
         {maps.length > 0 && (
           <div className="mt-8">
-            <div className="mb-1 px-1 text-[11px] font-semibold tracking-wide text-cl-faint uppercase">
+            <div className="mb-1 px-1 text-[11px] font-semibold tracking-wide text-faint uppercase">
               Pick up where you left off
             </div>
-            <div className="overflow-hidden rounded-xl bg-white ring-1 ring-cl-line">
+            <div className="overflow-hidden rounded-xl bg-surface ring-1 ring-line">
               <MapRows maps={maps} onOpen={onOpen} limit={6} />
             </div>
           </div>

@@ -27,7 +27,14 @@ export function createApp(engine: Engine, hub: Hub) {
   });
 
   app.post("/api/action", async (req, res) => {
-    res.json(await act(engine, (req.body ?? {}) as ActionRequest));
+    try {
+      res.json(await act(engine, (req.body ?? {}) as ActionRequest));
+    } catch (e) {
+      console.error("[action] failed:", e);
+      res
+        .status(500)
+        .json({ error: "Something went wrong on the server. Try again." });
+    }
   });
 
   app.get("/api/maps", (_req, res) => {

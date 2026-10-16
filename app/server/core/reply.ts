@@ -6,45 +6,60 @@ export const visiblePart = (text: string): string => text.split("```map")[0];
 
 export const hasMapBlock = (text: string): boolean => text.includes("```map");
 
-// The op objects complete so far in a streaming reply, in order. Scans the map
-// block's JSON for balanced {...} objects inside the ops array, respecting
-// strings, so a half-written op is never applied.
-export function completeOps(text: string): Raw[] {
+const CONTROL: Record<string, string> = {
+  "\n": "\\n",
+  "\r": "\\r",
+  "\t": "\\t",
+};
+
+// Scans the map block's JSON for balanced {...} objects inside the ops array,
+// respecting strings, so a half-written op is never applied. The block ends at
+// the array's closing bracket, not at the first ``` (an explanation may hold a
+// fenced code example inside a string). Raw line breaks and tabs inside strings,
+// which JSON does not allow, are escaped rather than losing the op.
+function scan(text: string): { ops: Raw[]; broken: number } {
+  const ops: Raw[] = [];
+  let broken = 0;
   const at = text.indexOf("```map");
-  if (at < 0) return [];
-  let body = text.slice(at + 6);
-  const end = body.indexOf("```");
-  if (end >= 0) body = body.slice(0, end);
+  if (at < 0) return { ops, broken };
+  const body = text.slice(at + 6);
   const arr = body.indexOf("[");
-  if (arr < 0) return [];
-  const out: Raw[] = [];
+  if (arr < 0) return { ops, broken };
   let depth = 0;
-  let start = -1;
   let inStr = false;
   let esc = false;
+  let op = "";
   for (let i = arr + 1; i < body.length; i++) {
     const ch = body[i];
     if (inStr) {
       if (esc) esc = false;
       else if (ch === "\\") esc = true;
       else if (ch === '"') inStr = false;
+      op += !esc && CONTROL[ch] ? CONTROL[ch] : ch;
       continue;
     }
+    if (depth > 0) op += ch;
     if (ch === '"') inStr = true;
     else if (ch === "{") {
-      if (depth === 0) start = i;
+      if (depth === 0) op = "{";
       depth++;
     } else if (ch === "}") {
       depth--;
-      if (depth === 0 && start >= 0) {
+      if (depth === 0) {
         try {
-          out.push(JSON.parse(body.slice(start, i + 1)));
+          ops.push(JSON.parse(op));
         } catch {
-          // a malformed op is skipped; the rest still apply
+          broken++; // a malformed op is skipped; the rest still apply
         }
-        start = -1;
+        op = "";
       }
-    } else if (ch === "]" && depth === 0) break;
+    } else if (depth === 0 && (ch === "]" || body.startsWith("```", i))) break;
   }
-  return out;
+  return { ops, broken };
 }
+
+// The op objects complete so far in a streaming reply, in order.
+export const completeOps = (text: string): Raw[] => scan(text).ops;
+
+// How many ops in a finished reply could not be read.
+export const unreadableOps = (text: string): number => scan(text).broken;

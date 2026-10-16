@@ -17,9 +17,12 @@ export function FloatingComposer({
   const { map, live, selection, setSelection, roomy } = ws;
   const caption = useCaption(map, live.busy, live.stream);
   const one = selection.length === 1 ? selection[0] : null;
-  // the panel already shows what is being written for its own node
+  // the panel already shows what is being written for its own node, and a
+  // blank's verdict is written on the blank itself
   const inPanel =
-    caption.live && !!live.working?.nodeId && live.working.nodeId === one;
+    caption.live &&
+    ((!!live.working?.nodeId && live.working.nodeId === one) ||
+      !!live.working?.blankId);
   return (
     <div
       className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 px-4 pb-4"
@@ -28,7 +31,7 @@ export function FloatingComposer({
       {caption.text && !inPanel && (
         <div
           onClick={caption.clear}
-          className="pointer-events-auto max-w-2xl cursor-pointer rounded-2xl bg-white/95 px-4 py-2.5 shadow-lg ring-1 ring-cl-line backdrop-blur-sm"
+          className="pointer-events-auto max-w-2xl cursor-pointer rounded-2xl bg-surface/95 px-4 py-2.5 shadow-lg ring-1 ring-line backdrop-blur-sm"
         >
           <div className="answer answer-sm">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
