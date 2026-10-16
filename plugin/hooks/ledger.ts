@@ -30,7 +30,7 @@ Each op:
 - title: the topic in 2-6 words ("Extraction model").
 - value: the current answer, specific, at most 15 words, with names and numbers ("Qwen3 locally; Claude too costly").
 - status: open | decided | done | parked | dropped | waiting
-- turn: the turn index where it happened.
+- turn: the index of the LATEST turn in this batch that shows this value and status (where it was decided, built or changed), not the first turn that mentions the topic.
 - kind: decision (a choice between options) | rule (a standing instruction going forward) | task (work to build, fix or ship) | question (an open question). A built feature is a task; the choice of HOW it is built is a decision.
 
 Be economical: usually 0-6 ops per batch. Update existing items rather than adding near-duplicates.
@@ -161,7 +161,9 @@ export function counts(items: MapItems): Record<MapStatus, number> {
 // What a turn contributes as an item's source: the user's words, then the AI's.
 export function sourceOf(t: MapTurn): string {
   const one = (x: string, n: number) => x.replace(/\s+/g, ' ').trim().slice(0, n)
-  return `You: "${one(t.human, 220)}"` + (t.ai ? ` · Claude: "${one(t.ai, 220)}"` : '')
+  const ai = t.ai.replace(/\s+/g, ' ').trim()
+  const aiPart = ai.length > 900 ? `${ai.slice(0, 350)} … ${ai.slice(-500)}` : ai
+  return `You: "${one(t.human, 400)}"` + (aiPart ? ` · Claude: "${aiPart}"` : '')
 }
 
 const rank = (i: MapItem) => (i.pinned ? 0 : 1)

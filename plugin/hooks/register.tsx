@@ -2,7 +2,6 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { MapItem, MapItems, MapMeta, MapTurn } from '../types'
-import { boardSvg } from './board'
 import {
   applyOps, buildPrompt, byThread, clip, clipTurn, counts, lookup, parseOps, priorValues, sourceOf,
   STATUS_LABEL, summaryText, SYSTEM, threads, toText,
@@ -271,46 +270,111 @@ async function doctor($: EngineInterface): Promise<string> {
     const i = all[x.id]
     lines.push(`| ${i ? `${i.title}: ${clip(i.value, 60)}` : x.id} | ${x.verdict === 'supported' ? '✓ supported' : x.verdict === 'partial' ? '~ partial' : '✗ unsupported'} | ${x.reason} |`)
   }
-  if (ok < checks.length) lines.push('', 'Drop a wrong item from the board: /map, pick it under Details, then Drop.')
+  if (ok < checks.length) lines.push('', 'Drop a wrong item from the board: /map, click it, then Drop.')
   return lines.join('\n')
 }
 
-// ---- the details picker (desktop and terminal) ------------------------------
+// ---- the board, as native elements: every card and row can be clicked ------
 
-type Els = { Box: any; Text: any; Button: any; Select: any }
+type Els = { Box: any; Text: any; Button: any }
 
-function details($: EngineInterface, els: Els, all: MapItems, m: MapMeta) {
-  const { Box, Text, Button, Select } = els
-  const order = (i: MapItem) => (i.pinned ? 0 : i.status === 'waiting' ? 1 : i.status === 'open' ? 2 : 3)
-  const list = Object.values(all).sort((a, b) => order(a) - order(b) || b.turn - a.turn).slice(0, 60)
-  if (!list.length) return null
-  const i = m.focus ? all[m.focus] : undefined
-  const was = i ? priorValues(i) : []
+const focusOn = ($: EngineInterface, id: string) =>
+  update($, meta, x => ({ ...x, focus: x.focus === id ? '' : id }))
+
+// What opens under a clicked item: where it came from, how it changed, steering.
+function detailsBlock($: EngineInterface, els: Els, i: MapItem) {
+  const { Box, Text, Button } = els
+  const was = priorValues(i)
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Select
-        key="focus"
-        label="Details"
-        value={i?.id}
-        options={list.map(x => ({ value: x.id, label: `${x.pinned ? '◆ ' : ''}${ICON[x.status]} ${x.title}` }))}
-        onSelect={(v: string) => update($, meta, x => ({ ...x, focus: v }))}
-      />
-      {i && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text bold>{i.pinned ? '◆ ' : ''}{i.title}</Text>
-          <Text>
-            <Text color={COLOR[i.status]} bold>{ICON[i.status]} {STATUS_LABEL[i.status]}{i.userDropped ? ' (by you)' : ''}</Text> · {i.thread} · turn {i.turn}
-          </Text>
-          <Text>{i.value}</Text>
-          {was.length > 0 && <Text dimColor>↺ changed from: {was.join(' → ')}</Text>}
-          <Text dimColor>{i.source ? `Where: ${i.source}` : 'Where: no source recorded (mapped before sources were kept)'}</Text>
-          <Box flexDirection="row" marginTop={1}>
-            <Button key="pin" label={i.pinned ? 'Unpin' : 'Pin'} onPress={() => togglePin($, i.id)} />
-            <Text> </Text>
-            <Button key="drop" label={i.userDropped ? 'Restore' : 'Drop'} onPress={() => toggleDrop($, i.id)} />
-          </Box>
-        </Box>
+    <Box key={`d-${i.id}`} flexDirection="column" borderStyle="single" borderDimColor paddingX={1} marginBottom={1}>
+      <Text dimColor>{STATUS_LABEL[i.status]}{i.userDropped ? ' (dropped by you)' : ''} · {i.thread} · turn {i.turn}</Text>
+      {was.length > 0 && <Text dimColor>↺ changed from: {was.join(' → ')}</Text>}
+      <Text dimColor>{i.source ? `Where: ${i.source}` : 'Where: no source recorded (mapped before sources were kept)'}</Text>
+      <Box flexDirection="row" gap={1} marginTop={1}>
+        <Button key={`pin-${i.id}`} label={i.pinned ? 'Unpin' : 'Pin'} onPress={() => togglePin($, i.id)} />
+        <Button key={`drop-${i.id}`} label={i.userDropped ? 'Restore' : 'Drop'} onPress={() => toggleDrop($, i.id)} />
+        <Button key={`close-${i.id}`} label="Close" onPress={() => focusOn($, i.id)} />
+      </Box>
+    </Box>
+  )
+}
+
+function nativeBoard($: EngineInterface, els: Els, all: MapItems, m: MapMeta, columns: number, footer: string) {
+  const { Box, Text, Button } = els
+  const c = counts(all)
+  const ths = threads(all).slice(0, 12)
+  const cols = columns >= 150 ? 3 : columns >= 96 ? 2 : 1
+  const colWidth = cols === 1 ? '100%' : `${Math.floor(100 / cols) - 2}%`
+  const kind = (i: MapItem) => i.kind ?? 'decision'
+
+  const card = (i: MapItem) => (
+    <Box key={`c-${i.id}`} flexDirection="column">
+      <Box borderStyle="round" borderColor={COLOR[i.status]} paddingX={1} marginBottom={m.focus === i.id ? 0 : 1}>
+        <Button key={`b-${i.id}`} plain onPress={() => focusOn($, i.id)}>
+          <Text color={COLOR[i.status]} bold>{ICON[i.status]} {STATUS_LABEL[i.status].toUpperCase()}</Text>
+          {'\n'}<Text bold>{i.pinned ? '◆ ' : ''}{i.title}</Text>
+          {'\n'}{i.value}
+        </Button>
+      </Box>
+      {m.focus === i.id && detailsBlock($, els, i)}
+    </Box>
+  )
+
+  const row = (i: MapItem) => {
+    const was = priorValues(i)
+    const color = i.status === 'done' ? COLOR.done : COLOR.decided
+    return (
+      <Box key={`r-${i.id}`} flexDirection="column">
+        <Button key={`b-${i.id}`} plain onPress={() => focusOn($, i.id)}>
+          <Text color={color} bold>{i.pinned ? '◆ ' : ''}{kind(i) === 'rule' ? '★' : ICON[i.status]} {i.title}</Text>
+          {' — '}{i.value}
+          {was.length > 0 ? <Text dimColor>{`  ↺ was ${was[was.length - 1]}`}</Text> : ''}
+        </Button>
+        {m.focus === i.id && detailsBlock($, els, i)}
+      </Box>
+    )
+  }
+
+  const section = (th: string) => {
+    const list = byThread(all, th)
+    const attention = list.filter(i => (i.status === 'waiting' || i.status === 'open') && !i.userDropped)
+      .sort((a, b) => Number(!a.pinned) - Number(!b.pinned))
+    const settled = list
+      .filter(i => (kind(i) === 'decision' || kind(i) === 'rule') && (i.status === 'decided' || i.status === 'done'))
+      .sort((a, b) => Number(!a.pinned) - Number(!b.pinned) || Number(kind(a) !== 'rule') - Number(kind(b) !== 'rule') || b.turn - a.turn)
+    const tasks = list.filter(i => kind(i) === 'task' && (i.status === 'decided' || i.status === 'done'))
+    const parked = list.filter(i => i.status === 'parked')
+    const dropped = list.filter(i => i.status === 'dropped')
+    const tasksDone = tasks.filter(i => i.status === 'done').length
+    return (
+      <Box key={th} flexDirection="column" width={colWidth} marginBottom={1}>
+        <Text bold>{th}</Text>
+        <Text dimColor>{'─'.repeat(Math.max(8, Math.min(40, Math.floor(columns / cols) - 4)))}</Text>
+        {attention.slice(0, 6).map(card)}
+        {attention.length > 6 && <Text dimColor>+{attention.length - 6} more open</Text>}
+        {settled.length > 0 && <Text dimColor bold>SETTLED</Text>}
+        {settled.slice(0, 12).map(row)}
+        {settled.length > 12 && <Text dimColor>+{settled.length - 12} more settled</Text>}
+        {tasks.length > 0 && <Text dimColor>Tasks: {tasksDone} done, {tasks.length - tasksDone} to build</Text>}
+        {parked.length > 0 && <Text dimColor>⏸ parked: {parked.map(i => i.title).join(', ')}</Text>}
+        {dropped.length > 0 && <Text dimColor>✕ dropped: {dropped.map(i => i.title).join(', ')}</Text>}
+      </Box>
+    )
+  }
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>Where things stand</Text>
+      <Text dimColor>
+        {c.waiting} waiting on you · {c.open} open · {c.decided} decided, not built · {c.done} done · click any item for where it came from
+      </Text>
+      {ths.length === 0 && (
+        <Text dimColor>Nothing settled yet. The map fills in as you work: it updates every {BATCH} turns, before a compaction, and when you open it.</Text>
       )}
+      <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={1}>
+        {ths.map(section)}
+      </Box>
+      <Text dimColor>{footer}</Text>
     </Box>
   )
 }
@@ -481,87 +545,16 @@ export const register: Register = on => {
     const all = await read($, items)
     const m = await read($, meta)
     const queued = await read($, pending)
-    const c = counts(all)
-    const width = e.props.bodyColumns ?? e.viewport?.columns ?? 80
+    const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 80
     const footer =
       (queued.length ? `${queued.length} turn(s) waiting to be mapped · ` : '') +
       `${m.turns} turns seen · Claude gets a ~${Math.round(summaryText(all, TOOL).length / 4).toLocaleString()}-token summary · ` +
       `extraction so far ${Math.round((m.tokensIn + m.tokensOut) / 1000)}k tokens` + (m.lastError ? ` · ${m.lastError}` : '')
-
-    // Desktop draws the card board as one SVG, with the details picker below.
-    if (e.surface === 'desktop') {
-      const { Box, Text, Button, Select, Svg } = $.ui.resolve(e)
-      const px = Math.max(320, Math.round(width * 8))
-      const board = boardSvg(all, px, footer, m.turns - 3)
-      return (
-        <Box flexDirection="column">
-          <Svg source={board.source} alt={board.alt} width={px} height={board.height} />
-          {details($, { Box, Text, Button, Select }, all, m)}
-        </Box>
-      )
+    if (e.surface === 'desktop' || e.surface === 'terminal') {
+      const { Box, Text, Button } = $.ui.resolve(e)
+      return nativeBoard($, { Box, Text, Button }, all, m, columns, footer)
     }
-    if (e.surface !== 'terminal') {
-      const { Text } = $.ui.resolve(e)
-      return <Text>{toText(all) || 'Nothing settled yet.'}</Text>
-    }
-
-    const { Box, Text, Button, Select } = $.ui.resolve(e)
-    const ths = threads(all).slice(0, 8)
-
-    const section = (th: string) => {
-      const list = byThread(all, th)
-      const kind = (i: MapItem) => i.kind ?? 'decision'
-      const attention = list.filter(i => i.status === 'waiting' || i.status === 'open')
-      const settled = list
-        .filter(i => (kind(i) === 'decision' || kind(i) === 'rule') && (i.status === 'decided' || i.status === 'done'))
-        .sort((a, b) => Number(!a.pinned) - Number(!b.pinned) || Number(kind(a) !== 'rule') - Number(kind(b) !== 'rule') || b.turn - a.turn)
-      const tasks = list.filter(i => kind(i) === 'task' && (i.status === 'decided' || i.status === 'done'))
-      const parked = list.filter(i => i.status === 'parked')
-      const dropped = list.filter(i => i.status === 'dropped')
-      const tasksDone = tasks.filter(i => i.status === 'done').length
-      return (
-        <Box key={th} flexDirection="column" marginTop={1}>
-          <Text bold>{th}</Text>
-          {attention.slice(0, 5).map(i => (
-            <Text key={i.id}>
-              <Text color={COLOR[i.status]} bold>{ICON[i.status]} {i.status === 'waiting' ? 'waiting on you' : 'open'}  </Text>
-              <Text bold>{i.pinned ? '◆ ' : ''}{i.title}</Text> — {i.value}
-            </Text>
-          ))}
-          {attention.length > 5 && <Text dimColor>+{attention.length - 5} more open</Text>}
-          {settled.slice(0, 10).map(i => {
-            const was = priorValues(i)
-            return (
-              <Text key={i.id}>
-                <Text color={i.status === 'done' ? COLOR.done : COLOR.decided}>{i.pinned ? '◆ ' : ''}{kind(i) === 'rule' ? '★' : ICON[i.status]} {i.title}</Text>
-                {' — '}{i.value}
-                {was.length > 0 && <Text dimColor>{`  ↺ was ${was[was.length - 1]}`}</Text>}
-              </Text>
-            )
-          })}
-          {settled.length > 10 && <Text dimColor>+{settled.length - 10} more settled</Text>}
-          {tasks.length > 0 && <Text dimColor>Tasks: {tasksDone} done, {tasks.length - tasksDone} to build</Text>}
-          {parked.length > 0 && <Text dimColor>⏸ parked: {parked.map(i => i.title).join(', ')}</Text>}
-          {dropped.length > 0 && <Text dimColor>✕ dropped: {dropped.map(i => i.title).join(', ')}</Text>}
-        </Box>
-      )
-    }
-
-    return (
-      <Box flexDirection="column">
-        <Text bold>Where things stand</Text>
-        <Text dimColor>
-          {c.waiting} waiting on you · {c.open} open · {c.decided} decided, not built · {c.done} done
-        </Text>
-        {ths.length === 0 && (
-          <Text dimColor>Nothing settled yet. The map fills in as you work: it updates every {BATCH} turns, before a compaction, and when you open it.</Text>
-        )}
-        {ths.map(section)}
-        {details($, { Box, Text, Button, Select }, all, m)}
-        <Box marginTop={1}>
-          <Text dimColor>{footer}</Text>
-        </Box>
-      </Box>
-    )
+    const { Text } = $.ui.resolve(e)
+    return <Text>{toText(all) || 'Nothing settled yet.'}</Text>
   })
 }
