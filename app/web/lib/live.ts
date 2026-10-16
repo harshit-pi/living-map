@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type {
   MapDoc,
   ServerEvent,
+  UpdateStep,
   Waiting,
   Working,
 } from "../../shared/model.ts";
@@ -17,6 +18,8 @@ export type Live = {
   waiting: Waiting[];
   stream: Stream;
   online: boolean;
+  // the steps of a one-click update in progress, as the server reports them
+  updateSteps: UpdateStep[];
 };
 
 // One live connection: the server pushes the canvas after every change, what
@@ -29,6 +32,7 @@ export function useLiveMap(): Live {
   const [waiting, setWaiting] = useState<Waiting[]>([]);
   const [stream, setStream] = useState<Stream>({ threadId: null, text: "" });
   const [online, setOnline] = useState(true);
+  const [updateSteps, setUpdateSteps] = useState<UpdateStep[]>([]);
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -45,6 +49,13 @@ export function useLiveMap(): Live {
         if (!ev.busy) setStream({ threadId: null, text: "" });
       } else if (ev.type === "delta") {
         setStream((s) => ({ threadId: ev.threadId, text: s.text + ev.text }));
+      } else if (ev.type === "update") {
+        const s: UpdateStep = {
+          step: ev.step,
+          state: ev.state,
+          message: ev.message,
+        };
+        setUpdateSteps((all) => [...all.filter((x) => x.step !== s.step), s]);
       } else if (ev.type === "busy") {
         setBusy(ev.busy);
         setWorking(ev.working);
@@ -98,5 +109,6 @@ export function useLiveMap(): Live {
     waiting,
     stream,
     online,
+    updateSteps,
   };
 }

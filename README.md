@@ -27,6 +27,12 @@ npm start
 
 Then open http://localhost:4317.
 
+### Updates
+
+Every push to `main` that passes CI publishes a release (`v0.1.<n>`).
+When a newer release is out, the header shows **Update available**: one click pulls it (`git pull --rebase`), installs (`npm ci`), builds and restarts, and the page reloads into it.
+It runs only on a clean checkout of `main`; otherwise the popover says what is in the way.
+
 Model calls go through your Claude Code account and count toward its usage. Each move is one short, stateless call; Living Map defaults to low effort, which you can change from the model and effort pickers.
 
 ## How it works

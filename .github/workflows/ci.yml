@@ -22,3 +22,22 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run build
+
+  # Every push to main that passes the checks becomes a release, named
+  # v<major.minor from app/package.json>.<run number>. Running apps compare
+  # themselves with the latest release and offer a one-click update.
+  release:
+    needs: app
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(node -p "require('./app/package.json').version.split('.').slice(0, 2).join('.')")
+          tag="v${base}.${{ github.run_number }}"
+          gh release create "$tag" --target "${{ github.sha }}" --title "Living Map $tag" --generate-notes

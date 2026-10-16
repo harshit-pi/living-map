@@ -13,10 +13,10 @@ Needs Node 23.6 or later and Claude Code (`claude`) on your PATH.
 
 ```bash
 npm install
-npm start          # builds, then serves http://localhost:4317
+npm start          # builds, then serves http://localhost:4317 (restarts itself after an update)
 ```
 
-`npm run dev` runs the server with reload plus Vite on :5173. `npm run check` runs lint, types, formatting and tests.
+`npm run server` serves without the launcher, so an update asks you to restart by hand. `npm run dev` runs the server with reload plus Vite on :5173. `npm run check` runs lint, types, formatting and tests.
 
 Maps are saved in `~/.living-map/maps/`; reopen any of them from **Maps ▾**.
 

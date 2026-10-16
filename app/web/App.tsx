@@ -4,6 +4,7 @@ import type { Action, Purpose, Settings } from "../shared/model.ts";
 import { Mark } from "./components/Logo.tsx";
 import { MapsMenu } from "./components/MapList.tsx";
 import { Segmented } from "./components/Segmented.tsx";
+import { UpdateButton } from "./components/UpdateButton.tsx";
 import { WorkingBar } from "./components/WorkingBar.tsx";
 import { act } from "./lib/api.ts";
 import { useLiveMap } from "./lib/live.ts";
@@ -159,6 +160,7 @@ export default function App() {
               Next ▸
             </button>
           )}
+          <UpdateButton steps={live.updateSteps} />
           <MapsMenu
             onOpen={(id) => {
               void openMap(id);

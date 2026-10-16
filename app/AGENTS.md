@@ -12,7 +12,8 @@ A local web app that drives a model (your own Claude Code by default) from a vis
 
 ```bash
 npm install
-npm start              # build the browser app, then serve http://localhost:4317
+npm start              # build, then serve http://localhost:4317 under server/launcher.ts
+                       # (exit code 75 = restart after a one-click update)
 npm run dev            # server with --watch, plus Vite on :5173
 npm run check          # ESLint, tsc, Prettier, Vitest: the same as the pre-commit hook
 npm test               # Vitest only

@@ -25,7 +25,7 @@
     "dev": "concurrently -k -n server,web \"node --watch server/index.ts\" \"vite\"",
     "build": "vite build",
     "server": "node server/index.ts",
-    "start": "vite build && node server/index.ts",
+    "start": "vite build && node server/launcher.ts",
     "test": "vitest run",
     "ts": "tsc --noEmit",
     "lint": "eslint . --fix",

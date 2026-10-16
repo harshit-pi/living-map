@@ -10,6 +10,7 @@ import { STATIC_DIR } from "./config.ts";
 import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
 import { listMaps } from "./store.ts";
+import { checkForUpdate, runUpdate } from "./update.ts";
 
 export function createApp(engine: Engine, hub: Hub) {
   const app = express();
@@ -44,6 +45,27 @@ export function createApp(engine: Engine, hub: Hub) {
   app.get("/api/provider", (_req, res) => {
     const { name, models, efforts } = engine.provider;
     res.json({ name, models, efforts } satisfies ProviderInfo);
+  });
+
+  // is a newer release out? (?refresh=1 asks GitHub again now)
+  app.get("/api/update", async (req, res) => {
+    res.json(await checkForUpdate({ force: req.query.refresh === "1" }));
+  });
+
+  // pull, install, build, restart; progress goes to every tab as "update" events
+  app.post("/api/update", (_req, res) => {
+    res.json({ started: true });
+    void runUpdate((s) => hub.emit({ type: "update", ...s }), {
+      beforeRestart: () => engine.stop(),
+    }).then((r) => {
+      if (!r.ok)
+        hub.emit({
+          type: "update",
+          step: "Update stopped",
+          state: "failed",
+          message: r.error,
+        });
+    });
   });
 
   app.use(express.static(STATIC_DIR));

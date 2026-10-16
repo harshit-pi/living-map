@@ -224,6 +224,27 @@ export type ActionResult = {
 
 // ---- events the server pushes ----------------------------------------------------
 
+// The running version, the latest release, and whether a one-click update can run.
+export type UpdateInfo = {
+  current: { version: string; sha: string };
+  latest: {
+    version: string;
+    notes: string;
+    url: string;
+    publishedAt: string;
+  } | null;
+  available: boolean; // the latest release is ahead of what runs here
+  behind: number; // commits between here and the latest release
+  canUpdate: boolean;
+  reason: string; // why an update cannot run here, if it cannot
+  restarts: boolean; // the launcher restarts the app after an update
+};
+export type UpdateStep = {
+  step: string;
+  state: "running" | "done" | "failed";
+  message?: string;
+};
+
 export type ServerEvent =
   | {
       type: "map";
@@ -240,4 +261,5 @@ export type ServerEvent =
       working: Working | null;
     }
   | { type: "delta"; text: string; threadId: string | null }
-  | { type: "ping" };
+  | { type: "ping" }
+  | ({ type: "update" } & UpdateStep);
