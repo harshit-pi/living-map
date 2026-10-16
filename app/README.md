@@ -2,27 +2,38 @@
 
 A local web app that drives your own Claude Code (`claude -p`) from a visual canvas.
 
-- **Decide:** a question tree. Choose, go deeper, challenge, and reply on any node in a side thread.
+- **Explore:** a question as a tree. Choose, go deeper, challenge, and reply on any node in a side thread.
 - **Learn:** a path of steps plus a topic diagram in the shape that fits the subject (sequence, concept map, timeline, structure, grid). Key parts are left blank; you type on the diagram and Claude checks it.
 - **Play a step:** do it by hand on a board, array or tree, move by move; clicks are checked instantly on the server. Coding problems end with **Write it**, where Claude traces your code.
 - **Click any part** of a diagram to have it explained in plain words, go deeper, or ask about it in a side thread.
 
 ## Run
 
+Needs Node 23.6 or later and Claude Code (`claude`) on your PATH.
+
 ```bash
 npm install
 npm start          # builds, then serves http://localhost:4317
 ```
 
+`npm run dev` runs the server with reload plus Vite on :5173. `npm run check` runs lint, types, formatting and tests.
+
 Maps are saved in `~/.living-map/maps/`; reopen any of them from **Maps ▾**.
 
-## Files
+## The model
 
-| File | What it holds |
-|---|---|
-| `REQUIREMENTS.md` | what v1 must do, and the done-when tests |
-| `server.mjs` | actions, Claude calls (stateless, streamed), live events |
-| `lib.mjs` | prompts, op parsing, map and diagram logic (`node --test lib.test.mjs`) |
-| `src/` | React frontend |
-| `eval/forms.mjs` | does Learn pick a fitting, concrete diagram, and how fast |
-| `research/visual-usefulness.md` | the evidence behind the canvas design |
+The canvas talks to the model through one interface, `server/providers/types.ts`. Claude Code (`claude -p`) is the default; another model is one new file implementing `ModelProvider`, chosen with `LIVING_MAP_PROVIDER`.
+
+## Layout
+
+| Path                                  | What it holds                                             |
+| ------------------------------------- | --------------------------------------------------------- |
+| `shared/model.ts`                     | every shape the server and browser exchange               |
+| `server/core/`                        | pure logic: prompts, reply parsing, map, diagram, scenes  |
+| `server/providers/`                   | the model behind the canvas                               |
+| `server/engine.ts`, `server/actions/` | the move queue, and one function per action               |
+| `web/`                                | React app: `screens/`, `components/`, `hooks/`, `lib/`    |
+| `eval/forms.ts`                       | does Learn pick a fitting, concrete diagram, and how fast |
+| `REQUIREMENTS.md`, `research/`        | what v1 must do, and the evidence behind the design       |
+
+Conventions for people and agents: [AGENTS.md](AGENTS.md).

@@ -4,21 +4,21 @@
 
 ## 1. Explorable explanations
 
-- **Patterns:** scrub a number and the model updates inline (Victor, *Explorable Explanations*, 2011); one system at several abstraction levels (Victor, *Ladder*, 2011); sandbox a model (Case, *Parable of the Polygons*); user-paced step-through (Distill, 3Blue1Brown).
+- **Patterns:** scrub a number and the model updates inline (Victor, _Explorable Explanations_, 2011); one system at several abstraction levels (Victor, _Ladder_, 2011); sandbox a model (Case, _Parable of the Polygons_); user-paced step-through (Distill, 3Blue1Brown).
 - **Evidence is thin.** Hohman et al. (Distill, 2020) report a "moderate" retention boost across ~60 articles, no pooled effect. Brilliant's "6x more effective" is unsourced.
 - **Hidden interaction goes unused.** NYT's Archie Tse (Malofiej 2016): readers scroll past steppers and tabs; ~85% never touch tooltips ⚠️ verify.
 
 ## 2. Retrieval and generation on diagrams
 
-| Technique | Evidence |
-|---|---|
-| Predict, then reveal the gap | Kim, Reinecke & Hullman, CHI 2017: drawing a prediction first improved recall and comprehension |
-| Build vs study a map | Schroeder et al. 2018 (142 effects, n=11,814): overall g=0.58; **constructing g=0.72, studying g=0.43** |
-| Partial map | Chang, Sung & Chen 2001: beat building from scratch. Mixed since: in one chemistry study static maps won, mediated by fill-in accuracy |
-| Retrieval vs mapping | Karpicke & Blunt, *Science* 2011: recall beat concept mapping a week later |
-| Generation effect | Bertsch et al. 2007 (86 studies): d=0.40 |
-| Worked-example fading | Helps near transfer; adding "which principle?" prompts gave medium-to-large far transfer (Atkinson, Renkl & Merrill 2003) |
-| Struggle first | Sinha & Kapur 2021 (53 studies): positive, larger with high fidelity; d=0.36/0.58 ⚠️ verify |
+| Technique                    | Evidence                                                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Predict, then reveal the gap | Kim, Reinecke & Hullman, CHI 2017: drawing a prediction first improved recall and comprehension                                        |
+| Build vs study a map         | Schroeder et al. 2018 (142 effects, n=11,814): overall g=0.58; **constructing g=0.72, studying g=0.43**                                |
+| Partial map                  | Chang, Sung & Chen 2001: beat building from scratch. Mixed since: in one chemistry study static maps won, mediated by fill-in accuracy |
+| Retrieval vs mapping         | Karpicke & Blunt, _Science_ 2011: recall beat concept mapping a week later                                                             |
+| Generation effect            | Bertsch et al. 2007 (86 studies): d=0.40                                                                                               |
+| Worked-example fading        | Helps near transfer; adding "which principle?" prompts gave medium-to-large far transfer (Atkinson, Renkl & Merrill 2003)              |
+| Struggle first               | Sinha & Kapur 2021 (53 studies): positive, larger with high fidelity; d=0.36/0.58 ⚠️ verify                                            |
 
 ## 3. Matching form to content
 
@@ -31,17 +31,17 @@
 
 ## 4. AI canvases today
 
-| Product | What the user does | Complaint / gap |
-|---|---|---|
-| tldraw make real / computer | sketch → live HTML; arrow-linked AI components; agents edit canvas | generated UI needs checking; heavy engineering |
-| Excalidraw AI | text → Mermaid → shapes | few free runs; diagram is a one-shot |
-| Heptabase | chat from a card, @-mention cards, drag replies onto board | single-user; AI reads, doesn't restructure |
-| Napkin | text → visual "sparks" | generic on unstructured text; **invents pros/cons** |
-| Miro AI | prompt → sketch diagram/mindmap; discard & retry | users ask to *edit existing* diagrams with AI |
-| Claude visuals (Mar 2026) | inline SVG/HTML, revised as chat continues | ephemeral by design |
-| ChatGPT dynamic visuals (Mar 2026) | sliders on 70+ math/science modules | fixed topic catalogue |
-| Gemini dynamic view (Nov 2025) | bespoke UI per prompt | raters preferred it *when speed ignored*: latency |
-| Flowith | branching nodes on canvas | "disorienting" first 15 min; desktop-first |
+| Product                            | What the user does                                                 | Complaint / gap                                     |
+| ---------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------- |
+| tldraw make real / computer        | sketch → live HTML; arrow-linked AI components; agents edit canvas | generated UI needs checking; heavy engineering      |
+| Excalidraw AI                      | text → Mermaid → shapes                                            | few free runs; diagram is a one-shot                |
+| Heptabase                          | chat from a card, @-mention cards, drag replies onto board         | single-user; AI reads, doesn't restructure          |
+| Napkin                             | text → visual "sparks"                                             | generic on unstructured text; **invents pros/cons** |
+| Miro AI                            | prompt → sketch diagram/mindmap; discard & retry                   | users ask to _edit existing_ diagrams with AI       |
+| Claude visuals (Mar 2026)          | inline SVG/HTML, revised as chat continues                         | ephemeral by design                                 |
+| ChatGPT dynamic visuals (Mar 2026) | sliders on 70+ math/science modules                                | fixed topic catalogue                               |
+| Gemini dynamic view (Nov 2025)     | bespoke UI per prompt                                              | raters preferred it _when speed ignored_: latency   |
+| Flowith                            | branching nodes on canvas                                          | "disorienting" first 15 min; desktop-first          |
 
 MindMap AI was not reviewed in depth.
 
@@ -72,4 +72,4 @@ MindMap AI was not reviewed in depth.
 
 ## Sources
 
-Victor worrydream.com/ExplorableExplanations, /LadderOfAbstraction · distill.pub/2020/communicating-with-interactive-articles · niemanlab.org/2016/03 (Malofiej) · idl.uw.edu/papers/explaining-the-gap · Schroeder et al., *Ed Psych Rev* 30(2) 2018 · Chang, Sung & Chen, *JCAL* 2001 · Karpicke & Blunt, *Science* 331 · Bertsch et al., *Mem Cogn* 35 · Sinha & Kapur, *RER* 2021 · Tversky, *TopiCS* 3 (2011) · Larkin & Simon, *Cog Sci* 11 · Hegarty, *TopiCS* 3 (2011) · Höffler & Leutner, *L&I* 17 · Rey et al., *Ed Psych Rev* 2019 · Dimara et al., aviz.fr/decoy, /deletion · Padilla et al., *CRPI* 3:29 · arxiv 2305.11483 (Sensecape), 2305.11473 (Graphologue), 2605.15848 (CanvasConvo) · claude.com/blog/claude-builds-visuals · openai.com/index/new-ways-to-learn-math-and-science-in-chatgpt · research.google/blog/generative-ui · tldraw.dev/docs/ai · wiki.heptabase.com/work-with-ai · community.miro.com/ideas/25943 · implicator.ai (Napkin) · listicler.com (Flowith) · tianpan.co/blog/2026-04-23-conversation-branching-first-class-primitive
+Victor worrydream.com/ExplorableExplanations, /LadderOfAbstraction · distill.pub/2020/communicating-with-interactive-articles · niemanlab.org/2016/03 (Malofiej) · idl.uw.edu/papers/explaining-the-gap · Schroeder et al., _Ed Psych Rev_ 30(2) 2018 · Chang, Sung & Chen, _JCAL_ 2001 · Karpicke & Blunt, _Science_ 331 · Bertsch et al., _Mem Cogn_ 35 · Sinha & Kapur, _RER_ 2021 · Tversky, _TopiCS_ 3 (2011) · Larkin & Simon, _Cog Sci_ 11 · Hegarty, _TopiCS_ 3 (2011) · Höffler & Leutner, _L&I_ 17 · Rey et al., _Ed Psych Rev_ 2019 · Dimara et al., aviz.fr/decoy, /deletion · Padilla et al., _CRPI_ 3:29 · arxiv 2305.11483 (Sensecape), 2305.11473 (Graphologue), 2605.15848 (CanvasConvo) · claude.com/blog/claude-builds-visuals · openai.com/index/new-ways-to-learn-math-and-science-in-chatgpt · research.google/blog/generative-ui · tldraw.dev/docs/ai · wiki.heptabase.com/work-with-ai · community.miro.com/ideas/25943 · implicator.ai (Napkin) · listicler.com (Flowith) · tianpan.co/blog/2026-04-23-conversation-branching-first-class-primitive

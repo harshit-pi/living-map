@@ -1,0 +1,24 @@
+# Only the app is checked; commits that touch nothing under app/ pass straight through.
+git diff --cached --name-only | grep -q '^app/' || exit 0
+cd app || exit 1
+
+echo "Running lint-staged (ESLint fix + Prettier on staged files)..."
+npx lint-staged || { echo "❌ lint-staged failed. Commit aborted."; exit 1; }
+
+echo "Running full app checks in parallel (ESLint, TypeScript, Prettier, Vitest)..."
+npx eslint . --max-warnings=0 --cache 2>&1 | sed 's/^/[eslint] /' &
+PID_ESLINT=$!
+npx tsc --noEmit 2>&1 | sed 's/^/[tsc] /' &
+PID_TSC=$!
+npx prettier --check . --cache 2>&1 | sed 's/^/[prettier] /' &
+PID_PRETTIER=$!
+npx vitest run --silent 2>&1 | sed 's/^/[vitest] /' &
+PID_TEST=$!
+
+FAILED=0
+wait $PID_ESLINT || { echo "❌ ESLint found errors."; FAILED=1; }
+wait $PID_TSC || { echo "❌ TypeScript errors found."; FAILED=1; }
+wait $PID_PRETTIER || { echo "❌ Prettier formatting issues found."; FAILED=1; }
+wait $PID_TEST || { echo "❌ Tests failed."; FAILED=1; }
+[ $FAILED -eq 0 ] || { echo "Commit aborted due to errors above."; exit 1; }
+echo "✅ All checks passed."

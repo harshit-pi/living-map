@@ -1,0 +1,369 @@
+// One move at a time: build what the model is sent, stream its reply onto the
+// canvas as ops complete, and keep every open tab in step. The engine knows the
+// model only through the ModelProvider interface.
+//
+//   action ──► queue ──► message (canvas + thread + action) ──► provider
+//                                                                  │ streams
+//   tabs ◄── events ◄── canvas ◄── ops as they complete ◄──────────┘
+
+import { randomUUID } from "node:crypto";
+
+import { DEBUG, HISTORY } from "./config.ts";
+import type {
+  ActionResult,
+  ChatLine,
+  MapDoc,
+  ServerEvent,
+  Settings,
+  View,
+  Waiting,
+  Working,
+} from "../shared/model.ts";
+import { applyOps, outline, pathTo } from "./core/canvas.ts";
+import { diagramOutline } from "./core/diagram.ts";
+import { systemPrompt, viewLine } from "./core/prompts.ts";
+import { completeOps, hasMapBlock, visiblePart } from "./core/reply.ts";
+import { sceneOutline, sceneView } from "./core/scene.ts";
+import type { StoredMap } from "./core/types.ts";
+import type { Hub } from "./events.ts";
+import type {
+  ModelCall,
+  ModelProvider,
+  ModelUsage,
+} from "./providers/types.ts";
+
+export type TurnOptions = {
+  text?: string;
+  selection?: string[];
+  threadId?: string | null; // the side thread the reply goes to (none: the main conversation)
+  label?: string; // what the working bar says
+  nodeId?: string | null; // the node the move is about, for the panel's working state
+  blankId?: string | null; // a blank being checked, cleared if the check never comes back
+  view?: View;
+};
+
+export type Engine = ReturnType<typeof createEngine>;
+
+export type Save = (m: StoredMap, opts?: { current?: boolean }) => void;
+
+export function createEngine({
+  provider,
+  hub,
+  initial,
+  save,
+}: {
+  provider: ModelProvider;
+  hub: Hub;
+  initial: StoredMap | null;
+  save: Save; // where maps are kept (the store on disk; a stub in tests)
+}) {
+  const state = {
+    map: initial,
+    busy: false,
+    working: null as Working | null,
+    waiting: [] as Waiting[],
+  };
+  let call: ModelCall | null = null;
+  let stopped = false;
+  let queue: Promise<unknown> = Promise.resolve();
+  let generation = 0; // bumped by Stop, New and Open: whatever is waiting is cancelled
+
+  // What the browser sees: everything but notes, and scenes without their answers.
+  const publicMap = (m: StoredMap | null): MapDoc | null =>
+    m && {
+      id: m.id,
+      title: m.title,
+      purpose: m.purpose,
+      nodes: m.nodes,
+      chat: m.chat,
+      threads: m.threads,
+      diagram: m.diagram,
+      diagramAt: m.diagramAt,
+      fills: m.fills,
+      usage: m.usage,
+      scenes: Object.fromEntries(
+        Object.entries(m.scenes).map(([id, sc]) => [
+          id,
+          sceneView(sc, m.play[id]),
+        ]),
+      ),
+    };
+
+  const snapshot = (): ServerEvent => ({
+    type: "map",
+    map: publicMap(state.map),
+    busy: state.busy,
+    working: state.working,
+    queued: state.waiting.length,
+    waiting: state.waiting,
+  });
+
+  function push() {
+    if (state.map) save(state.map);
+    hub.emit(snapshot());
+  }
+
+  // The main conversation is map.chat; side threads live in map.threads.
+  const threadOf = (
+    m: StoredMap,
+    threadId: string | null | undefined,
+  ): ChatLine[] =>
+    threadId && m.threads[threadId] ? m.threads[threadId].messages : m.chat;
+
+  function openThread(m: StoredMap, nodeId: string): string {
+    const id = randomUUID().slice(0, 8);
+    const count = Object.values(m.threads).filter(
+      (t) => t.nodeId === nodeId,
+    ).length;
+    m.threads[id] = {
+      id,
+      nodeId,
+      title: count ? `Fork ${count + 1}` : "Thread",
+      createdAt: Date.now(),
+      messages: [],
+    };
+    return id;
+  }
+
+  // Everything the model is sent for one move. Stateless: the canvas and the
+  // one thread this move belongs to, nothing else.
+  function message(
+    m: StoredMap,
+    action: string,
+    opts: TurnOptions,
+    scope: string | null,
+    history: ChatLine[],
+    notes: string[],
+  ) {
+    const sceneId = scope ?? opts.nodeId;
+    return [
+      `CANVAS (${m.purpose === "learn" ? "learning path" : "exploration map"}):\n${outline(m.nodes)}`,
+      m.purpose === "learn"
+        ? `TOPIC DIAGRAM:\n${diagramOutline(m.diagram, m.fills)}`
+        : "",
+      scope
+        ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(
+            m.nodes,
+            scope,
+          )
+            .map((n) => `"${n.title}"`)
+            .join(" → ")}. Stay on this node.`
+        : "",
+      history.length
+        ? `THIS THREAD SO FAR:\n${history.map((h) => `${h.role === "you" ? "USER" : h.role === "claude" ? "YOU" : "NOTE"}: ${h.text.slice(0, 1200)}`).join("\n")}`
+        : "",
+      notes.length
+        ? `WHAT THE USER DID ON THE CANVAS SINCE YOUR LAST REPLY:\n${notes.map((n) => `- ${n}`).join("\n")}`
+        : "",
+      sceneId && m.scenes[sceneId]
+        ? sceneOutline(m.scenes[sceneId], m.play[sceneId])
+        : "",
+      m.source
+        ? `THE MATERIAL THE USER PASTED AT THE START (the full problem or text):\n${m.source}`
+        : "",
+      `ACTION: ${action}`,
+      opts.selection?.length
+        ? `SELECTED NODES: ${opts.selection.map((id) => `[${id}] ${m.nodes[id]?.title ?? id}`).join("; ")}`
+        : "",
+      opts.text ? `USER SAYS: ${opts.text}` : "",
+      viewLine(opts.view ?? "visual"),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  function recordUsage(
+    m: StoredMap,
+    u: ModelUsage | null,
+    firstMs: number,
+    endMs: number,
+  ) {
+    if (!u) return;
+    m.usage.turns++;
+    m.usage.input += u.input;
+    m.usage.output += u.output;
+    m.usage.costUsd += u.costUsd;
+    m.usage.last = {
+      input: u.input,
+      output: u.output,
+      costUsd: u.costUsd,
+      ms: endMs,
+      firstMs,
+      model: u.model,
+      effort: u.effort,
+    };
+    if (m === state.map) push();
+    else save(m, { current: false });
+  }
+
+  async function run(
+    action: string,
+    settings: Settings,
+    opts: TurnOptions,
+  ): Promise<ActionResult> {
+    const m = state.map;
+    if (!m) return { error: "Start first." };
+    const threadId = opts.threadId ?? null;
+    const thread = threadId ? m.threads[threadId] : null;
+    const scope = thread?.nodeId ?? null;
+    state.busy = true;
+    stopped = false;
+    state.working = {
+      label: opts.label ?? "Thinking",
+      nodeId: opts.nodeId ?? scope,
+      threadId,
+      since: Date.now(),
+    };
+    hub.emit({ type: "busy", busy: true, threadId, working: state.working });
+
+    const messages = threadOf(m, threadId);
+    const notes = m.notes.splice(0);
+    const text = message(
+      m,
+      action,
+      opts,
+      scope,
+      messages.slice(-HISTORY - 1, -1),
+      notes,
+    );
+    for (const n of Object.values(m.nodes)) delete n.fresh;
+
+    let shown = "";
+    let applied = 0;
+    let lastPush = 0;
+    try {
+      call = provider.run(
+        { system: systemPrompt(m.purpose), message: text, ...settings },
+        (soFar) => {
+          const visible = visiblePart(soFar);
+          if (visible.length > shown.length) {
+            hub.emit({
+              type: "delta",
+              text: visible.slice(shown.length),
+              threadId,
+            });
+            shown = visible;
+          }
+          const ops = completeOps(soFar);
+          if (ops.length > applied) {
+            applyOps(m, ops.slice(applied), { scope });
+            applied = ops.length;
+            const now = Date.now();
+            if (now - lastPush > 120) {
+              lastPush = now;
+              push();
+            }
+          }
+        },
+      );
+      const reply = await call.reply;
+      if (stopped) {
+        messages.push({ role: "system", text: "Stopped.", ts: Date.now() });
+        return {};
+      }
+      if (DEBUG)
+        console.log(
+          "[move]",
+          JSON.stringify({
+            ok: reply.ok,
+            final: reply.final.slice(0, 400),
+            applied,
+          }),
+        );
+      if (!reply.ok) {
+        messages.push({
+          role: "system",
+          text: `Claude did not answer (${reply.error}). Try again.`,
+          ts: Date.now(),
+        });
+        m.notes.unshift(...notes);
+        return {};
+      }
+      const ops = completeOps(reply.final);
+      if (ops.length > applied) applyOps(m, ops.slice(applied), { scope });
+      const view = opts.view ?? "visual";
+      if (!hasMapBlock(reply.final) && view === "visual")
+        messages.push({
+          role: "system",
+          text: "Claude replied without changing the canvas.",
+          ts: Date.now(),
+        });
+      messages.push({
+        role: "claude",
+        text: visiblePart(reply.final).trim() || "(updated the canvas)",
+        ts: Date.now(),
+        view,
+      });
+      void reply.usage.then((u) =>
+        recordUsage(m, u, reply.firstMs, reply.endMs),
+      );
+      return {};
+    } finally {
+      call = null;
+      state.busy = false;
+      state.working = null;
+      // whatever scene this move was writing is now as long as it will get
+      for (const sc of Object.values(m.scenes))
+        if (sc.complete === false) sc.complete = true;
+      // a check that never came back (stopped, failed) must not leave its blank stuck on "checking"
+      if (opts.blankId && m.fills[opts.blankId]?.state === "pending")
+        delete m.fills[opts.blankId];
+      push();
+    }
+  }
+
+  // Moves run one at a time. Anything asked while the model is busy waits its
+  // turn instead of being refused, so nothing you type is lost.
+  function turn(
+    action: string,
+    settings: Settings,
+    opts: TurnOptions = {},
+  ): Promise<ActionResult> {
+    const gen = generation;
+    const forMap = state.map;
+    const ticket: Waiting = {
+      label: opts.label ?? "Thinking",
+      nodeId: opts.nodeId ?? null,
+    };
+    state.waiting.push(ticket);
+    if (state.busy) push();
+    const next = queue.then(async (): Promise<ActionResult> => {
+      state.waiting = state.waiting.filter((t) => t !== ticket);
+      if (gen !== generation || state.map !== forMap) {
+        if (opts.blankId && forMap?.fills[opts.blankId]?.state === "pending")
+          delete forMap.fills[opts.blankId];
+        return { error: "Cancelled." };
+      }
+      return run(action, settings, opts);
+    });
+    queue = next.catch(() => {});
+    return next;
+  }
+
+  // End the running move (what streamed so far stays on the canvas) and cancel what waits.
+  async function stop() {
+    generation++;
+    state.waiting = [];
+    if (!state.busy) return;
+    stopped = true;
+    call?.cancel();
+    for (let i = 0; i < 50 && state.busy; i++)
+      await new Promise((r) => setTimeout(r, 100));
+  }
+
+  const isQueuedOrRunning = (nodeId: string, label: string) =>
+    (state.working?.nodeId === nodeId && state.working.label === label) ||
+    state.waiting.some((t) => t.nodeId === nodeId && t.label === label);
+
+  return {
+    state,
+    provider,
+    push,
+    snapshot,
+    turn,
+    stop,
+    threadOf,
+    openThread,
+    isQueuedOrRunning,
+  };
+}

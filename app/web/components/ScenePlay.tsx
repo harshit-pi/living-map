@@ -1,0 +1,440 @@
+import dagre from "@dagrejs/dagre";
+import { Fragment, useEffect, useMemo, useState } from "react";
+
+import type {
+  ArrayState,
+  BoardState,
+  Scene,
+  Tone,
+  TreeState,
+} from "../../shared/model.ts";
+
+// One step played by hand. The same three shapes serve every subject: a board
+// of cells, a row of items with pointers, a tree. Each click goes to the server,
+// which checks it against the answers Claude wrote and replies at once.
+
+const TONE: Record<Tone, string> = {
+  focus: "ring-2 ring-cl-accent ring-inset",
+  attack: "bg-red-100/80 text-red-900",
+  good: "bg-teal-100 text-teal-900",
+  bad: "bg-red-200 text-red-900",
+  path: "bg-amber-100 text-amber-900",
+  dim: "opacity-40",
+};
+const toneClasses = (tones: Tone[]) => tones.map((t) => TONE[t]).join(" ");
+
+type Pick = (key: string) => void;
+type Flash = { key: string; ok: boolean } | null;
+
+function Board({
+  s,
+  pick,
+  flash,
+}: {
+  s: BoardState;
+  pick?: Pick;
+  flash: Flash;
+}) {
+  const rows = s.cells.length,
+    cols = Math.max(...s.cells.map((r) => r.length), 1);
+  const size = Math.max(
+    40,
+    Math.min(72, Math.floor(480 / Math.max(rows, cols))),
+  );
+  const marks = new Map<string, Tone[]>();
+  for (const m of s.marks) {
+    const k = `${m.at[0]},${m.at[1]}`;
+    marks.set(k, [...(marks.get(k) ?? []), m.tone]);
+  }
+  return (
+    <div
+      className="inline-grid gap-0 rounded-lg bg-cl-ink/80 p-1 shadow-md"
+      style={{ gridTemplateColumns: `20px repeat(${cols}, ${size}px)` }}
+    >
+      <div />
+      {Array.from({ length: cols }, (_, c) => (
+        <div
+          key={c}
+          className="pb-0.5 text-center font-mono text-[10px] text-white/60"
+        >
+          {c}
+        </div>
+      ))}
+      {s.cells.map((row, r) => (
+        <Fragment key={r}>
+          <div className="flex items-center justify-center font-mono text-[10px] text-white/60">
+            {r}
+          </div>
+          {Array.from({ length: cols }, (_, c) => {
+            const key = `${r},${c}`;
+            const f =
+              flash?.key === key
+                ? flash.ok
+                  ? "animate-[pop_.35s_ease-out] bg-teal-300"
+                  : "animate-[shake_.35s] bg-red-300"
+                : "";
+            return (
+              <button
+                key={key}
+                disabled={!pick}
+                onClick={() => pick?.(key)}
+                style={{ width: size, height: size }}
+                className={`flex items-center justify-center text-[22px] font-semibold transition ${(r + c) % 2 ? "bg-[#EDE9DF]" : "bg-[#FBFAF6]"} ${toneClasses(marks.get(key) ?? [])} ${pick ? "cursor-pointer hover:brightness-95" : "cursor-default"} ${f}`}
+              >
+                {row[c] ?? ""}
+              </button>
+            );
+          })}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function Row({ s, pick, flash }: { s: ArrayState; pick?: Pick; flash: Flash }) {
+  const marks = new Map<number, Tone[]>();
+  for (const m of s.marks)
+    marks.set(m.at, [...(marks.get(m.at) ?? []), m.tone]);
+  return (
+    <div className="inline-flex flex-col items-start">
+      <div className="flex">
+        {s.items.map((_, i) => (
+          <div
+            key={i}
+            className="flex h-9 w-16 flex-col items-center justify-end text-[11px] font-semibold text-cl-accentDk"
+          >
+            {s.pointers
+              .filter((p) => p.at === i)
+              .map((p) => p.name)
+              .join(", ")}
+            {s.pointers.some((p) => p.at === i) && <span>↓</span>}
+          </div>
+        ))}
+      </div>
+      <div className="flex overflow-hidden rounded-lg shadow-md ring-1 ring-cl-ink/60">
+        {s.items.map((v, i) => {
+          const k = String(i);
+          const f =
+            flash?.key === k
+              ? flash.ok
+                ? "bg-teal-300"
+                : "animate-[shake_.35s] bg-red-300"
+              : "";
+          return (
+            <button
+              key={i}
+              disabled={!pick}
+              onClick={() => pick?.(k)}
+              className={`flex h-14 w-16 items-center justify-center border-r border-cl-line2 bg-white font-mono text-[17px] last:border-r-0 ${toneClasses(marks.get(i) ?? [])} ${pick ? "cursor-pointer hover:bg-orange-50" : ""} ${f}`}
+            >
+              {v}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex">
+        {s.items.map((_, i) => (
+          <div
+            key={i}
+            className="w-16 pt-1 text-center font-mono text-[10px] text-cl-faint"
+          >
+            {i}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Tree({ s, pick, flash }: { s: TreeState; pick?: Pick; flash: Flash }) {
+  const laid = useMemo(() => {
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({
+      rankdir: "TB",
+      nodesep: 24,
+      ranksep: 44,
+      marginx: 8,
+      marginy: 8,
+    });
+    g.setDefaultEdgeLabel(() => ({}));
+    const ids = new Set(s.nodes.map((n) => n.id));
+    for (const n of s.nodes)
+      g.setNode(n.id, {
+        width: Math.max(56, n.label.length * 8 + 22),
+        height: 36,
+      });
+    for (const n of s.nodes)
+      if (n.parent && ids.has(n.parent)) g.setEdge(n.parent, n.id);
+    dagre.layout(g);
+    return {
+      g: g.graph() as { width: number; height: number },
+      pos: (id: string) => g.node(id),
+      edges: g
+        .edges()
+        .map((e) => g.edge(e) as { points: { x: number; y: number }[] }),
+    };
+  }, [s.nodes]);
+  const marks = new Map<string, Tone[]>();
+  for (const m of s.marks)
+    marks.set(m.at, [...(marks.get(m.at) ?? []), m.tone]);
+  return (
+    <div
+      className="relative"
+      style={{ width: laid.g.width, height: laid.g.height }}
+    >
+      <svg
+        className="absolute inset-0"
+        width={laid.g.width}
+        height={laid.g.height}
+      >
+        {laid.edges.map((e, i) => (
+          <path
+            key={i}
+            d={`M${e.points.map((p) => `${p.x},${p.y}`).join(" L")}`}
+            fill="none"
+            stroke="#A3A29A"
+            strokeWidth={1.5}
+          />
+        ))}
+      </svg>
+      {s.nodes.map((n) => {
+        const p = laid.pos(n.id);
+        if (!p) return null;
+        const f =
+          flash?.key === n.id.toLowerCase()
+            ? flash.ok
+              ? "bg-teal-300"
+              : "animate-[shake_.35s] bg-red-300"
+            : "";
+        return (
+          <button
+            key={n.id}
+            disabled={!pick}
+            onClick={() => pick?.(n.id)}
+            style={{
+              left: p.x - p.width / 2,
+              top: p.y - p.height / 2,
+              width: p.width,
+              height: p.height,
+            }}
+            className={`absolute flex items-center justify-center rounded-full border border-cl-line2 bg-white px-2 font-mono text-[13px] shadow-xs ${toneClasses(marks.get(n.id) ?? [])} ${pick ? "cursor-pointer hover:border-cl-accent" : ""} ${f}`}
+          >
+            {n.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ScenePlay({
+  scene,
+  stepTitle,
+  busy,
+  building,
+  onKey,
+  onShow,
+  onReplay,
+  onHint,
+  onNext,
+}: {
+  scene: Scene;
+  stepTitle: string;
+  busy: boolean;
+  building: boolean;
+  onKey: (key: string) => Promise<{ ok?: boolean }>;
+  onShow: () => void;
+  onReplay: () => void;
+  onHint: () => void;
+  onNext: () => void;
+}) {
+  const [flash, setFlash] = useState<Flash>(null);
+  const [text, setText] = useState("");
+  // each move starts with an empty answer box
+  const [atMove, setAtMove] = useState(scene.at);
+  if (atMove !== scene.at) {
+    setAtMove(scene.at);
+    setText("");
+  }
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 700);
+    return () => clearTimeout(t);
+  }, [flash]);
+  const play = async (key: string) => {
+    const r = await onKey(key);
+    setFlash({ key: key.toLowerCase(), ok: !!r.ok });
+  };
+  const t = scene.answerType;
+  const pickOn = (want: Scene["answerType"]) =>
+    !scene.done && t === want ? play : undefined;
+
+  return (
+    <div className="h-full overflow-auto">
+      <div className="mx-auto flex max-w-3xl flex-col items-center px-6 pb-40 pt-5">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-cl-faint">
+          Play · {stepTitle}
+        </div>
+        <h2 className="mt-0.5 text-center font-serif text-2xl text-cl-ink">
+          {scene.title}
+        </h2>
+        <div className="mt-2 flex gap-1">
+          {Array.from({ length: scene.total }, (_, i) => (
+            <span
+              key={i}
+              className={`h-1.5 w-6 rounded-full ${i < scene.at ? "bg-teal-600" : i === scene.at ? "bg-cl-accent" : "bg-cl-line2"}`}
+            />
+          ))}
+        </div>
+
+        <div
+          className={`mt-4 w-full max-w-xl rounded-xl px-4 py-3 text-center ${scene.done ? "bg-teal-50 ring-1 ring-teal-200" : "bg-white shadow-xs ring-1 ring-cl-line"}`}
+        >
+          {scene.done ? (
+            <>
+              <div className="text-[15px] font-semibold text-teal-900">
+                You played it through.
+              </div>
+              <div className="text-xs text-teal-800">
+                {scene.wrong} wrong tr{scene.wrong === 1 ? "y" : "ies"}
+                {scene.shown
+                  ? ` · ${scene.shown} move${scene.shown > 1 ? "s" : ""} shown`
+                  : ""}
+              </div>
+            </>
+          ) : scene.waiting ? (
+            <div className="animate-pulse py-1 text-sm text-cl-mute">
+              Claude is writing the next move…
+            </div>
+          ) : (
+            <>
+              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-cl-accentDk">
+                Move {scene.at + 1}
+                {scene.total > scene.at + 1 ? ` of ${scene.total}` : ""}
+              </div>
+              <div className="text-[16px] font-medium leading-snug text-cl-ink">
+                {scene.ask}
+              </div>
+            </>
+          )}
+        </div>
+        {scene.last && (
+          <div
+            className={`mt-2 max-w-xl text-center text-[13.5px] leading-snug ${scene.last.ok ? "text-teal-800" : "text-red-800"}`}
+          >
+            {scene.last.ok
+              ? scene.last.shown
+                ? `Shown: ${scene.last.key} · `
+                : "✓ "
+              : "✗ "}
+            {scene.last.text}
+          </div>
+        )}
+
+        <div className="mt-5">
+          {scene.kind === "board" && (
+            <Board
+              s={scene.state as BoardState}
+              pick={pickOn("cell")}
+              flash={flash}
+            />
+          )}
+          {scene.kind === "array" && (
+            <Row
+              s={scene.state as ArrayState}
+              pick={pickOn("index")}
+              flash={flash}
+            />
+          )}
+          {scene.kind === "tree" && (
+            <Tree
+              s={scene.state as TreeState}
+              pick={pickOn("node")}
+              flash={flash}
+            />
+          )}
+        </div>
+        {scene.state.note && (
+          <div className="mt-2 text-xs italic text-cl-mute">
+            {scene.state.note}
+          </div>
+        )}
+
+        {!scene.done && !scene.waiting && scene.choices.length > 0 && (
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {scene.choices.map((c) => (
+              <button
+                key={c}
+                onClick={() => {
+                  void play(c);
+                }}
+                className={`rounded-full border px-4 py-1.5 text-sm font-medium ${flash?.key === c.toLowerCase() && !flash.ok ? "animate-[shake_.35s] border-red-400 bg-red-50" : "border-cl-line2 bg-white hover:border-cl-accent hover:text-cl-accentDk"}`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+        {!scene.done && !scene.waiting && t === "text" && (
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="type, then Enter"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && text.trim()) void play(text.trim());
+            }}
+            className={`mt-4 w-64 rounded-lg border px-3 py-1.5 text-center outline-hidden focus:border-cl-accent ${flash && !flash.ok ? "border-red-400" : "border-cl-line2"}`}
+          />
+        )}
+        {!scene.done &&
+          !scene.waiting &&
+          (t === "cell" || t === "index" || t === "node") && (
+            <div className="mt-2 text-[11px] text-cl-faint">
+              Click{" "}
+              {t === "cell" ? "a square" : t === "index" ? "a box" : "a node"}
+            </div>
+          )}
+
+        <div className="mt-5 flex gap-2">
+          {scene.done ? (
+            <>
+              <button
+                onClick={onNext}
+                className="rounded-lg bg-cl-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-cl-accentDk"
+              >
+                Next step ▸
+              </button>
+              <button
+                onClick={onReplay}
+                className="rounded-lg border border-cl-line2 px-3 py-1.5 text-sm text-cl-text hover:bg-cl-panel"
+              >
+                Play again
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={onHint}
+                className="rounded-lg border border-cl-line2 px-3 py-1.5 text-sm text-cl-text hover:bg-cl-panel"
+              >
+                {busy ? "Hint (after Claude)" : "Hint"}
+              </button>
+              <button
+                onClick={onShow}
+                title="Counts as shown, not worked out"
+                className="rounded-lg border border-cl-line2 px-3 py-1.5 text-sm text-cl-mute hover:bg-cl-panel"
+              >
+                Show this move
+              </button>
+            </>
+          )}
+        </div>
+        {building && (
+          <div className="mt-4 animate-pulse text-sm text-cl-mute">
+            Claude is rebuilding this scene…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
