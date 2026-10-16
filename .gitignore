@@ -1,0 +1,10 @@
+out/
+cache/
+data/*
+!data/README.md
+!data/example_probes.json
+__pycache__/
+*.pyc
+.chrome-profile/
+.DS_Store
+plugin/.claude-plugin/types/
