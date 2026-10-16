@@ -27,6 +27,7 @@ export function fill(
     ctx.settings,
     {
       label: "Checking your answer",
+      sections: ["diagram"],
       blankId,
     },
   );
@@ -48,6 +49,7 @@ export function hint(ctx: Ctx, nodeId: string): Promise<ActionResult> {
     ctx.settings,
     {
       label: "Finding the next hint",
+      sections: ["diagram"],
       nodeId,
     },
   );
@@ -60,7 +62,7 @@ export async function answer(ctx: Ctx, nodeId: string): Promise<ActionResult> {
     ctx,
     nodeId,
     `SHOW ANSWER on step ${found?.named}. Required: an update op on "${nodeId}" with the full answer in its "detail" field; fill this step's blanks with judge ops (state right, with the label).`,
-    { label: "Writing the answer", nodeId },
+    { label: "Writing the answer", nodeId, sections: ["diagram"] },
   );
   // a shown answer is not one you earned: never credit it as solved; and only
   // mark it shown once an answer actually arrived
@@ -81,7 +83,7 @@ export function buildScene(
   return ctx.engine.turn(
     `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), on the same tiny example as the diagram where it fits.`,
     ctx.settings,
-    { label: "Building a playable scene", nodeId },
+    { label: "Building a playable scene", nodeId, sections: ["scene"] },
   );
 }
 

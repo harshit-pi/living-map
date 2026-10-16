@@ -26,6 +26,7 @@ export async function start(
       p === "learn"
         ? "Drawing the topic and your path"
         : "Laying out the options",
+    sections: ["diagram"],
   });
   if (!r.error && !r.stopped && !Object.keys(m.nodes).length && !m.diagram)
     return {
@@ -61,7 +62,7 @@ export function switchPurpose(
     return engine.turn(
       "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order (keep useful existing nodes, set the rest aside by removing them only if they are options), and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first.",
       ctx.settings,
-      { label: "Turning this into a learning path" },
+      { label: "Turning this into a learning path", sections: ["diagram"] },
     );
   return {};
 }

@@ -109,7 +109,13 @@ export async function thread(
       ? `the learner wrote in the thread on step ${found.named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`
       : `the user wrote in the thread on ${found.named}.`,
     ctx.settings,
-    { text, threadId: tid, label: "Replying in the thread", view: "thread" },
+    {
+      text,
+      threadId: tid,
+      label: "Replying in the thread",
+      sections: ["threads"],
+      view: "thread",
+    },
   );
   return { ...r, threadId: tid };
 }
@@ -132,7 +138,7 @@ export function explain(
     ctx,
     nodeId,
     `EXPLAIN ${found.named}${part}: write its detail. Required: an update op on "${nodeId}" with a "detail" field.`,
-    { label: EXPLAINING, nodeId },
+    { label: EXPLAINING, nodeId, sections: ["explain"] },
   );
 }
 
@@ -165,7 +171,7 @@ export function next(ctx: Ctx): Promise<ActionResult> {
       ? "next: point the learner at the next open step and make its first move clear, without solving it."
       : "next: take the most important open question and make it clearer or decidable, or if nothing is open, say what is settled and what remains.",
     ctx.settings,
-    { label: "Working out the next step" },
+    { label: "Working out the next step", sections: ["diagram"] },
   );
 }
 
@@ -182,6 +188,7 @@ export function message(
       text,
       selection,
       label: "Answering",
+      sections: ["diagram"],
     },
   );
 }

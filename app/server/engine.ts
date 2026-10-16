@@ -21,7 +21,7 @@ import type {
 } from "../shared/model.ts";
 import { applyOps, outline, pathTo } from "./core/canvas.ts";
 import { diagramOutline } from "./core/diagram.ts";
-import { systemPrompt, viewLine } from "./core/prompts.ts";
+import { systemPrompt, viewLine, type Section } from "./core/prompts.ts";
 import {
   completeOps,
   hasMapBlock,
@@ -45,6 +45,8 @@ export type TurnOptions = {
   nodeId?: string | null; // the node the move is about, for the panel's working state
   blankId?: string | null; // a blank being checked, cleared if the check never comes back
   view?: View;
+  // the instructions this move needs beyond the canvas's job (see prompts.ts)
+  sections?: readonly Section[];
 };
 
 export type Engine = ReturnType<typeof createEngine>;
@@ -247,7 +249,11 @@ export function createEngine({
       );
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
-        { system: systemPrompt(m.purpose), message: text, ...settings },
+        {
+          system: systemPrompt(m.purpose, opts.sections ?? []),
+          message: text,
+          ...settings,
+        },
         (soFar) => {
           const visible = visiblePart(soFar);
           if (visible.length > shown.length) {

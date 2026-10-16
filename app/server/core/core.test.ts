@@ -194,9 +194,18 @@ test("outline and prompts", () => {
   const m = fresh();
   applyOps(m, completeOps(FULL));
   assert.match(outline(m.nodes), /- \[q\] question · open/);
-  const learn = systemPrompt("learn");
+  const learn = systemPrompt("learn", ["diagram", "scene"]);
   assert.match(learn, /TOPIC DIAGRAM/);
   assert.match(learn, /PLAYABLE SCENE/);
+  const lean = systemPrompt("learn");
+  assert.doesNotMatch(
+    lean,
+    /TOPIC DIAGRAM \(learning maps only\)|PLAYABLE SCENE|EXPLAIN on a node|THREADS:/,
+  );
+  assert.ok(
+    lean.length < learn.length / 2,
+    "a move that needs no extras sends far less",
+  );
   assert.match(systemPrompt("explore"), /EXPLORATION CANVAS/);
   assert.doesNotMatch(systemPrompt("explore"), /TOPIC DIAGRAM/);
 });

@@ -361,3 +361,67 @@ test("a new map that draws nothing says so instead of loading forever", async ()
   const r = await done;
   assert.match(r.error ?? "", /did not lay anything out/);
 });
+
+test("each move sends only the instructions it needs", async () => {
+  const m = newMap("Learn", "learn");
+  m.nodes.root = {
+    id: "root",
+    parent: null,
+    kind: "question",
+    title: "Topic",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
+  m.nodes.step = {
+    id: "step",
+    parent: "root",
+    kind: "question",
+    title: "Step",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 1,
+  };
+  const { engine, calls } = setup(m);
+  const sent: Record<string, string> = {};
+  const run = async (
+    name: string,
+    action: Parameters<typeof act>[1],
+    target = "step",
+  ) => {
+    const n = calls.length;
+    const done = act(engine, action);
+    await settled(calls, n + 1);
+    sent[name] = calls[n].req.system;
+    calls[n].release(
+      `Ok.\n\`\`\`map\n{"ops":[{"op":"update","id":"${target}","detail":"d"}]}\n\`\`\``,
+    );
+    await done;
+  };
+  await run("fill", { type: "fill", blankId: "b1", text: "x" });
+  await run("scene", { type: "scene", nodeId: "step" });
+  await run("thread", { type: "thread", nodeId: "step", text: "why?" });
+  m.nodes.root.detail = "";
+  await run("explain", { type: "explain", nodeId: "root" }, "root");
+  const has = (name: string, re: RegExp) => re.test(sent[name]);
+  assert.ok(
+    has("fill", /TOPIC DIAGRAM \(learning/) && !has("fill", /PLAYABLE SCENE/),
+  );
+  assert.ok(
+    has("scene", /PLAYABLE SCENE/) && !has("scene", /TOPIC DIAGRAM \(learning/),
+  );
+  assert.ok(
+    has("thread", /THREADS:/) &&
+      !has("thread", /TOPIC DIAGRAM \(learning|PLAYABLE SCENE/),
+  );
+  assert.ok(
+    has("explain", /EXPLAIN on a node/) &&
+      !has("explain", /TOPIC DIAGRAM \(learning|PLAYABLE SCENE/),
+  );
+});

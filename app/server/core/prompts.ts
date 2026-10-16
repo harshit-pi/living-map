@@ -71,12 +71,24 @@ const EXPLAIN =
   "EXPLAIN on a node: write that node's detail with an update op (markdown, at most 180 words, the key point first). Assume the reader may not know the field: define every term in plain words and give one tiny concrete example. Refer to parts of the diagram by their labels, never by ids. The caption is one sentence.";
 
 const THREADS =
-  "THREADS: a message may come from a thread pinned to one node. Then stay on that node: answer from its path, and change only that node or nodes under it.";
+  "THREADS: a message may come from a thread pinned to one node. Then stay on that node: answer from its path, and change only that node or nodes under it. Refer to parts of the diagram and blanks by what they say, never by ids.";
 
-export function systemPrompt(purpose: Purpose): string {
+// The instructions a move carries beyond the canvas's own job: the topic
+// diagram's rules, the playable-scene format, how to explain a node, and how to
+// stay on a side thread. Each move sends only what it needs; the rest would be
+// paid for on every call and never used.
+export type Section = "diagram" | "scene" | "explain" | "threads";
+
+export function systemPrompt(
+  purpose: Purpose,
+  sections: readonly Section[] = [],
+): string {
   const parts = [PURPOSE[purpose] ?? PURPOSE.explore, OPS];
-  if (purpose === "learn") parts.push(DIAGRAM, SCENE);
-  parts.push(EXPLAIN, THREADS);
+  const learn = purpose === "learn";
+  if (learn && sections.includes("diagram")) parts.push(DIAGRAM);
+  if (learn && sections.includes("scene")) parts.push(SCENE);
+  if (sections.includes("explain")) parts.push(EXPLAIN);
+  if (sections.includes("threads")) parts.push(THREADS);
   return parts.join("\n\n");
 }
 

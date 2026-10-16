@@ -71,7 +71,7 @@ async function run(question: string, effort: string): Promise<Result> {
     viewLine("visual"),
   ].join("\n\n");
   const reply = await provider.run(
-    { system: systemPrompt("learn"), message, effort },
+    { system: systemPrompt("learn", ["diagram"]), message, effort },
     () => {},
   ).reply;
   const usage = await reply.usage;
