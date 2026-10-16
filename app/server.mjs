@@ -6,8 +6,8 @@
 //      ▲                            │
 //      └────── GET /api/events ◄────┘  (server-sent events: canvas, text deltas)
 //
-// Every Claude call is stateless: it carries the background, the canvas, and
-// the history of the one thread it belongs to. Input stays flat as you go.
+// Every Claude call is stateless: it carries the canvas and the history of the
+// one thread it belongs to. Input stays flat as you go.
 
 import express from 'express'
 import { spawn } from 'node:child_process'
@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  applyOps, choose, completeOps, diagramOutline, hasMapBlock, outline, pathTo, splitStart, startAction, systemPrompt, viewLine, visiblePart,
+  applyOps, choose, completeOps, diagramOutline, hasMapBlock, outline, pathTo, playMove, sceneOutline, sceneView, showMove, newPlay, splitStart, startAction, systemPrompt, viewLine, visiblePart,
 } from './lib.mjs'
 
 const PORT = Number(process.env.PORT ?? 4317)
@@ -26,7 +26,6 @@ const MAPS = path.join(HOME, 'maps')
 const CWD = process.env.LIVING_MAP_CWD ?? path.join(HOME, 'workspace')
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const EMPTY_MCP = path.join(HOME, 'empty-mcp.json')
-const CONTEXT = path.join(HOME, 'context.md')
 const CURRENT = path.join(HOME, 'current.txt')
 const TOOLS = 'Read,Glob,Grep,WebSearch,WebFetch'
 const MODELS = new Set(['', 'fable', 'opus', 'sonnet', 'haiku'])
@@ -35,7 +34,6 @@ const HISTORY = 14 // messages of a thread sent with each call
 for (const d of [MAPS, CWD]) fs.mkdirSync(d, { recursive: true })
 if (!fs.existsSync(EMPTY_MCP)) fs.writeFileSync(EMPTY_MCP, '{"mcpServers":{}}')
 
-const readContext = () => { try { return fs.readFileSync(CONTEXT, 'utf8').trim() } catch { return '' } }
 
 // ---- the store ----------------------------------------------------------------
 
@@ -44,7 +42,7 @@ const file = id => path.join(MAPS, `${id}.json`)
 function newMap(title, purpose) {
   return {
     id: randomUUID().slice(0, 8), title, purpose, createdAt: Date.now(),
-    nodes: {}, chat: [], threads: {}, diagram: null, fills: {}, notes: [], history: [],
+    nodes: {}, chat: [], threads: {}, diagram: null, fills: {}, scenes: {}, play: {}, notes: [],
     usage: { turns: 0, input: 0, output: 0, costUsd: 0, last: null },
   }
 }
@@ -52,7 +50,7 @@ function newMap(title, purpose) {
 function load() {
   try {
     const m = JSON.parse(fs.readFileSync(file(fs.readFileSync(CURRENT, 'utf8').trim()), 'utf8'))
-    m.purpose ??= 'decide'; m.threads ??= {}; m.fills ??= {}; m.diagram ??= null
+    m.purpose ??= 'decide'; m.threads ??= {}; m.fills ??= {}; m.diagram ??= null; m.scenes ??= {}; m.play ??= {}
     return m
   } catch {
     return null
@@ -71,10 +69,6 @@ let working = null // what Claude is doing now, for every open tab: { label, nod
 let child = null   // the running claude process, so Stop can end it
 let stopped = false
 
-const snapshot = () => {
-  map.history.push(JSON.stringify({ nodes: map.nodes, diagram: map.diagram, fills: map.fills }))
-  if (map.history.length > 40) map.history.shift()
-}
 
 // ---- events -------------------------------------------------------------------
 
@@ -83,8 +77,12 @@ function emit(event) {
   const data = `data: ${JSON.stringify(event)}\n\n`
   for (const res of clients) res.write(data)
 }
-const publicMap = () => map && { ...map, history: undefined, notes: undefined, canUndo: map.history.length > 0 }
-const pushMap = () => { save(); emit({ type: 'map', map: publicMap(), busy, working }) }
+// What the browser sees: everything but notes, and scenes without their answers.
+const publicMap = () => map && {
+  ...map, history: undefined, notes: undefined, play: undefined,
+  scenes: Object.fromEntries(Object.entries(map.scenes ?? {}).map(([id, sc]) => [id, sceneView(sc, map.play?.[id])])),
+}
+const pushMap = () => { save(); emit({ type: 'map', map: publicMap(), busy, working, queued }) }
 
 // ---- threads --------------------------------------------------------------------
 
@@ -106,7 +104,7 @@ function openThread(nodeId) {
 function runClaude(message, settings, onText) {
   return new Promise(resolve => {
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-      '--append-system-prompt', systemPrompt({ purpose: map.purpose, context: readContext() }),
+      '--append-system-prompt', systemPrompt({ purpose: map.purpose }),
       '--tools', TOOLS, '--allowedTools', TOOLS, '--no-session-persistence',
       '--strict-mcp-config', '--mcp-config', EMPTY_MCP, '--setting-sources', '']
     if (settings.model) args.push('--model', settings.model)
@@ -172,8 +170,29 @@ function recordUsage(m, r, settings, firstMs, endMs) {
 
 // One move. `thread` names where the reply goes (null = main) and, for a node
 // thread, scopes Claude's changes to that node's subtree.
-async function claudeTurn(action, settings, { text, selection, threadId = null, label = 'Thinking', nodeId = null } = {}) {
-  if (busy) return { error: 'Claude is still working. Wait, or press Stop.' }
+// Moves run one at a time. Anything asked while Claude is busy waits its turn
+// instead of being refused, so nothing you type is lost. Stop, New and opening
+// another map cancel what is waiting.
+let queue = Promise.resolve()
+let queued = 0
+let gen = 0
+function claudeTurn(action, settings, opts = {}) {
+  const myGen = gen, forMap = map
+  queued++
+  if (busy) pushMap()
+  const run = queue.then(async () => {
+    queued--
+    if (myGen !== gen || map !== forMap) {
+      if (opts.blankId && forMap.fills?.[opts.blankId]?.state === 'pending') delete forMap.fills[opts.blankId]
+      return { error: 'Cancelled.' }
+    }
+    return runTurn(action, settings, opts)
+  })
+  queue = run.catch(() => {})
+  return run
+}
+
+async function runTurn(action, settings, { text, selection, threadId = null, label = 'Thinking', nodeId = null, blankId = null } = {}) {
   busy = true
   stopped = false
   const thread = threadId ? map.threads[threadId] : null
@@ -189,6 +208,7 @@ async function claudeTurn(action, settings, { text, selection, threadId = null, 
     scope ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(map.nodes, scope).map(n => `"${n.title}"`).join(' → ')}. Stay on this node.` : '',
     history.length ? `THIS THREAD SO FAR:\n${history.map(m => `${m.role === 'you' ? 'USER' : m.role === 'claude' ? 'YOU' : 'NOTE'}: ${m.text.slice(0, 1200)}`).join('\n')}` : '',
     notes.length ? `WHAT THE USER DID ON THE CANVAS SINCE YOUR LAST REPLY:\n${notes.map(n => `- ${n}`).join('\n')}` : '',
+    (() => { const sid = scope ?? nodeId; return sid && map.scenes?.[sid] ? sceneOutline(map.scenes[sid], map.play?.[sid]) : '' })(),
     map.source ? `THE MATERIAL THE USER PASTED AT THE START (the full problem or text):\n${map.source}` : '',
     `ACTION: ${action}`,
     selection?.length ? `SELECTED NODES: ${selection.map(id => `[${id}] ${map.nodes[id]?.title ?? id}`).join('; ')}` : '',
@@ -197,7 +217,6 @@ async function claudeTurn(action, settings, { text, selection, threadId = null, 
   ].filter(Boolean).join('\n\n')
 
   for (const n of Object.values(map.nodes)) delete n.fresh
-  snapshot()
   let shown = '', applied = 0, lastPush = 0
   try {
     const { ended, text: streamed, lastText, firstMs, endMs, late } = await runClaude(msg, settings, full => {
@@ -237,14 +256,27 @@ async function claudeTurn(action, settings, { text, selection, threadId = null, 
   } finally {
     busy = false
     working = null
-    // a check that never came back (stopped, failed) must not leave a blank stuck on "checking"
-    for (const [id, f] of Object.entries(map.fills ?? {})) if (f.state === 'pending') delete map.fills[id]
+    // whatever scene this move was writing is now as long as it will get
+    for (const sc of Object.values(map.scenes ?? {})) if (sc.complete === false) sc.complete = true
+    // a check that never came back (stopped, failed) must not leave its blank stuck on "checking"
+    if (blankId && map.fills?.[blankId]?.state === 'pending') delete map.fills[blankId]
     pushMap()
   }
 }
 
+// A finished scene counts as worked out by you unless most of it was shown.
+function finishScene(node, p) {
+  const total = map.scenes[node.id].moves.length
+  if (node.kind === 'question' && !node.revealed) {
+    if (p.shown * 2 > total) node.revealed = true
+    else node.status = 'answered'
+  }
+  map.notes.push(`Played the scene on "${node.title}": ${total} moves, ${p.wrong} wrong tries, ${p.shown} shown.`)
+}
+
 // End the running turn; what streamed so far stays on the canvas.
 async function stop() {
+  gen++ // whatever is waiting is cancelled too
   if (!busy) return
   stopped = true
   child?.kill('SIGTERM')
@@ -262,13 +294,12 @@ function clean(settings = {}) {
 }
 
 function local(fn) {
-  snapshot()
   fn()
   pushMap()
   return {}
 }
 
-async function act({ type, nodeId, threadId, blankId, mapId, text, selection, settings: raw, purpose }) {
+async function act({ type, nodeId, threadId, blankId, mapId, key, text, selection, settings: raw, purpose }) {
   const settings = clean(raw)
   if (type === 'stop') { await stop(); return {} }
   if (type === 'open') {
@@ -277,7 +308,7 @@ async function act({ type, nodeId, threadId, blankId, mapId, text, selection, se
     if (!/^[\w-]+$/.test(id) || !fs.existsSync(file(id))) return { error: 'That map is gone.' }
     await stop()
     try { map = JSON.parse(fs.readFileSync(file(id), 'utf8')) } catch { return { error: 'That map could not be read.' } }
-    map.purpose ??= 'decide'; map.threads ??= {}; map.fills ??= {}; map.diagram ??= null; map.notes ??= []; map.history ??= []
+    map.purpose ??= 'decide'; map.threads ??= {}; map.fills ??= {}; map.diagram ??= null; map.scenes ??= {}; map.play ??= {}; map.notes ??= []
     pushMap()
     return {}
   }
@@ -328,14 +359,6 @@ async function act({ type, nodeId, threadId, blankId, mapId, text, selection, se
         if (node.kind === 'question' && !node.revealed) node.status = 'open'
         map.notes.push(`Restored "${node.title}".`)
       })
-    case 'undo': {
-      if (!map.history.length) return {}
-      const prev = JSON.parse(map.history.pop())
-      map.nodes = prev.nodes; map.diagram = prev.diagram; map.fills = prev.fills
-      map.notes.push('Undid the last change to the canvas.')
-      pushMap()
-      return {}
-    }
     case 'fork': {
       if (!node) return { error: 'No such node.' }
       const id = openThread(nodeId)
@@ -359,8 +382,37 @@ async function act({ type, nodeId, threadId, blankId, mapId, text, selection, se
       map.fills[blankId] = { text: String(text ?? '').slice(0, 200), state: 'pending' }
       map.chat.push({ role: 'you', text: `Filled a blank: ${text}`, ts: Date.now() })
       pushMap()
-      return claudeTurn(`FILL: the learner wrote "${text}" in blank ${blankId} on the topic diagram. Judge it with a judge op.`, settings, { label: 'Checking your answer' })
+      return claudeTurn(`FILL: the learner wrote "${text}" in blank ${blankId} on the topic diagram. Judge it with a judge op.`, settings, { label: 'Checking your answer', blankId })
     }
+    case 'scene':
+      if (!node) return { error: 'No such step.' }
+      return claudeTurn(`SCENE for step ${named}: build a playable scene for this step (op "scene", step "${nodeId}"), on the same tiny example as the diagram where it fits.`, settings, { label: 'Building a playable scene', nodeId })
+    case 'play': {
+      // checked here, instantly, against the answers Claude wrote: no Claude call
+      const sc = map.scenes?.[nodeId]
+      if (!sc || !node) return { error: 'No scene on that step.' }
+      const before = map.play[nodeId] ?? newPlay()
+      const p = playMove(sc, before, String(key ?? ''))
+      map.play[nodeId] = p
+      if (p.at >= sc.moves.length && before.at < sc.moves.length) finishScene(node, p)
+      pushMap()
+      return { ok: p.last?.ok ?? false }
+    }
+    case 'playshow': {
+      const sc = map.scenes?.[nodeId]
+      if (!sc || !node) return { error: 'No scene on that step.' }
+      const before = map.play[nodeId] ?? newPlay()
+      const p = showMove(sc, before)
+      map.play[nodeId] = p
+      if (p.at >= sc.moves.length && before.at < sc.moves.length) finishScene(node, p)
+      pushMap()
+      return {}
+    }
+    case 'replay':
+      if (!map.scenes?.[nodeId]) return { error: 'No scene on that step.' }
+      map.play[nodeId] = newPlay()
+      pushMap()
+      return {}
     case 'explain':
       if (!node) return { error: 'No such node.' }
       return claudeTurn(`EXPLAIN ${named}: write its detail. Required: an update op on "${nodeId}" with a "detail" field.`, settings, { label: 'Writing the explanation', nodeId })
@@ -372,12 +424,14 @@ async function act({ type, nodeId, threadId, blankId, mapId, text, selection, se
       return claudeTurn(`challenge ${named}: does it still hold?`, settings, { label: 'Re-checking it', nodeId })
     case 'hint':
       say(`Hint: ${node?.title}`)
+      if (map.scenes?.[nodeId] && (map.play?.[nodeId]?.at ?? 0) < map.scenes[nodeId].moves.length)
+        return claudeTurn(`HINT on the scene for step ${named}: the learner is stuck on its current move. Add a fact under the step titled "Hint ${Object.values(map.nodes).filter(n => n.parent === nodeId && /^hint\b/i.test(n.title)).length + 1}" with one pointed question about THIS move (use their wrong tries), never the answer.`, settings, { label: 'Finding a hint for this move', nodeId })
       return claudeTurn(`HINT on step ${named}: the next rung of the ladder (it has ${Object.values(map.nodes).filter(n => n.parent === nodeId && /^hint\b/i.test(n.title)).length} hint(s) so far).`, settings, { label: 'Finding the next hint', nodeId })
     case 'answer': {
       say(`Show answer: ${node?.title}`)
       const r = await claudeTurn(`SHOW ANSWER on step ${named}. Required: an update op on "${nodeId}" with the full answer in its "detail" field; fill this step's blanks with judge ops (state right, with the label).`, settings, { label: 'Writing the answer', nodeId })
       // a shown answer is not one the learner earned: never credit it as solved
-      if (map.nodes[nodeId]) { map.nodes[nodeId].revealed = true; pushMap() }
+      if (!r.error && map.nodes[nodeId]) { map.nodes[nodeId].revealed = true; pushMap() }
       return r
     }
     case 'next':
@@ -401,9 +455,11 @@ app.get('/api/events', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
   res.flushHeaders()
   clients.add(res)
-  res.write(`data: ${JSON.stringify({ type: 'map', map: publicMap(), busy, working })}\n\n`)
+  res.write(`data: ${JSON.stringify({ type: 'map', map: publicMap(), busy, working, queued })}\n\n`)
   req.on('close', () => clients.delete(res))
 })
+// a heartbeat, so a page can tell a quiet server from a gone one and reconnect
+setInterval(() => emit({ type: 'ping' }), 10000).unref()
 app.post('/api/action', async (req, res) => res.json(await act(req.body ?? {})))
 // Every saved map, newest first, for the list in the header and on the start screen.
 app.get('/api/maps', (_, res) => {
@@ -423,11 +479,6 @@ app.get('/api/maps', (_, res) => {
     } catch { /* skip a broken file */ }
   }
   res.json(out.sort((a, b) => b.updatedAt - a.updatedAt))
-})
-app.get('/api/context', (_, res) => res.json({ text: readContext() }))
-app.post('/api/context', (req, res) => {
-  fs.writeFileSync(CONTEXT, String(req.body?.text ?? ''))
-  res.json({ ok: true })
 })
 app.use(express.static(path.join(HERE, 'dist')))
 app.get('*', (_, res) => res.sendFile(path.join(HERE, 'dist', 'index.html')))

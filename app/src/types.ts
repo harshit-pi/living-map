@@ -38,6 +38,20 @@ export type Diagram =
   | { form: 'grid'; title: string; columns: string[]; rows: { label: string; cells: Cell[] }[] }
 export type Fill = { text: string; state: 'pending' | 'right' | 'wrong' }
 
+// A playable scene as the browser sees it: the state now and the move in front
+// of you. The answers stay on the server.
+export type Tone = 'focus' | 'attack' | 'good' | 'bad' | 'path' | 'dim'
+export type BoardState = { cells: string[][]; marks: { at: [number, number]; tone: Tone }[]; note: string }
+export type ArrayState = { items: string[]; pointers: { name: string; at: number }[]; marks: { at: number; tone: Tone }[]; note: string }
+export type TreeState = { nodes: { id: string; label: string; parent: string | null }[]; marks: { at: string; tone: Tone }[]; note: string }
+export type Scene = {
+  kind: 'board' | 'array' | 'tree'; title: string; total: number; at: number; done: boolean; waiting?: boolean
+  state: BoardState | ArrayState | TreeState
+  ask: string; choices: string[]; answerType: 'cell' | 'index' | 'node' | 'choice' | 'text' | null
+  last: { ok: boolean; text: string; shown?: boolean; key?: string } | null
+  wrong: number; shown: number
+}
+
 export type Usage = {
   turns: number; input: number; output: number; costUsd: number
   last: { input: number; output: number; costUsd: number; ms: number; firstMs?: number; model?: string; effort?: string } | null
@@ -53,8 +67,8 @@ export type MapDoc = {
   diagram: Diagram | null
   diagramAt?: number
   fills: Record<string, Fill>
+  scenes: Record<string, Scene>
   usage: Usage
-  canUndo: boolean
 }
 
 export type Working = { label: string; nodeId: string | null; threadId: string | null; since: number }
@@ -71,8 +85,10 @@ export type Action =
   | { type: 'fill'; blankId: string; text: string }
   | { type: 'message'; text: string; selection: string[] }
   | { type: 'purpose'; purpose: Purpose }
-  | { type: 'next' | 'undo' | 'stop' }
+  | { type: 'next' | 'stop' }
   | { type: 'open'; mapId: string }
+  | { type: 'scene' | 'playshow' | 'replay'; nodeId: string }
+  | { type: 'play'; nodeId: string; key: string }
 
 export type MapSummary = {
   id: string; title: string; purpose: Purpose; updatedAt: number

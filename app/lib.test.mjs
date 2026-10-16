@@ -107,3 +107,44 @@ test('a sequence step naming a party outside the lanes gets its own lane', () =>
   const spec = cleanSpec({ form: 'sequence', lanes: ['Virus', 'Cell'], steps: [{ id: 's1', from: 'Virus', to: 'Cell', label: 'enters' }, { id: 's2', from: 'T cell', to: 'cell', label: 'kills' }] })
   assert.deepEqual(spec.lanes, ['Virus', 'Cell', 'T cell'])
 })
+
+test('a scene is played move by move; answers never reach the browser', async () => {
+  const { cleanScene, newPlay, playMove, showMove, sceneView, sceneOutline } = await import('./lib.mjs')
+  const sc = cleanScene({
+    kind: 'board', title: '4 queens', start: { cells: [['', '', '', ''], ['', '', '', '']] },
+    moves: [
+      { ask: 'Place the row-0 queen', answer: { cells: [[0, 1], [0, 2]] }, then: { cells: [['', 'Q', '', ''], ['', '', '', '']], marks: [{ at: [1, 0], tone: 'attack' }] }, why: 'Leftmost safe start that works', wrong: { '0,0': 'That one dead-ends later' } },
+      { ask: 'Stuck?', choices: ['Place here', 'Backtrack'], answer: { choice: 'Backtrack' }, then: { cells: [['', '', '', ''], ['', '', '', '']] }, why: 'No safe square left' },
+    ],
+  })
+  let p = newPlay()
+  const before = JSON.stringify(sceneView(sc, p))
+  assert.doesNotMatch(before, /0,1|Backtrack"|keys/, 'no answers in the view')
+  p = playMove(sc, p, '0,0')
+  assert.equal(p.last.ok, false)
+  assert.equal(p.last.text, 'That one dead-ends later')
+  p = playMove(sc, p, '0, 2')
+  assert.equal(p.at, 1)
+  assert.equal(sceneView(sc, p).state.cells[0][1], 'Q')
+  assert.match(sceneOutline(sc, p), /backtrack/)
+  p = showMove(sc, p)
+  assert.equal(sceneView(sc, p).done, true)
+  assert.equal(p.shown, 1)
+  assert.equal(cleanScene({ kind: 'pie', moves: [] }), null)
+})
+
+test('a scene streamed move by move is playable before it is complete', async () => {
+  const { sceneView } = await import('./lib.mjs')
+  const m = { nodes: { s: { id: 's', parent: null, kind: 'question', title: 'S' } }, diagram: null, fills: {} }
+  applyOps(m, [{ op: 'scene', step: 's', spec: { kind: 'array', title: 'Find 7', start: { items: ['2', '7', '11'], pointers: [{ name: 'lo', at: 0 }] } } }])
+  applyOps(m, [{ op: 'move', step: 's', ask: 'Where is 7?', answer: { index: 1 }, why: 'Yes' }])
+  let v = sceneView(m.scenes.s, m.play.s)
+  assert.equal(v.done, false)
+  assert.equal(v.ask, 'Where is 7?')
+  assert.deepEqual(m.scenes.s.moves[0].then.items, ['2', '7', '11'], 'a move without "then" keeps the picture')
+  m.play.s = { ...m.play.s, at: 1 }
+  v = sceneView(m.scenes.s, m.play.s)
+  assert.equal(v.waiting, true, 'past the last written move, it waits instead of finishing')
+  m.scenes.s.complete = true
+  assert.equal(sceneView(m.scenes.s, m.play.s).done, true)
+})

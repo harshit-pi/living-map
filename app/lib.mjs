@@ -35,6 +35,17 @@ Edit in place: when you send the diagram again, keep every element and id that s
 When the learner fills a blank (FILL), judge it with {"op":"judge","id":"blank id","state":"right"|"wrong","label":"the correct text, ONLY when right"}. If wrong, say what is off in the caption without giving the answer.
 In anything the learner reads, refer to a blank by what it asks, never by its id.`
 
+const SCENE = `PLAYABLE SCENE (only when the ACTION asks for one): the learner DOES one step by hand, move by move, on a tiny concrete example. In the map block write the scene header FIRST, {"op":"scene","step":"<step id>","spec":{"kind":…,"title":…,"start":<state>}}, then ONE op per move, {"op":"move","step":"<step id>",<move fields>}, so the learner can start playing while you write. Nothing else in the block.
+Pick the kind that fits; every scene is data for one of three shapes:
+- "board": a grid of cells (chess boards, grids, matrices, DP tables, Punnett squares, truth tables). State: {"cells":[["","Q"],["",""]],"marks":[{"at":[1,0],"tone":"attack"}],"note":"≤12 words"}
+- "array": a row of items with named pointers (two pointers, binary search, sorting, stacks, queues, sliding windows). State: {"items":["2","7","11"],"pointers":[{"name":"lo","at":0}],"marks":[{"at":2,"tone":"focus"}],"note":"…"}
+- "tree": nodes with parents (recursion, backtracking, BSTs, heaps, decision trees). State: {"nodes":[{"id":"r","label":"[]","parent":null}],"marks":[{"at":"r","tone":"focus"}],"note":"…"}
+Tones: focus, attack, good, bad, path, dim.
+Move fields: "ask" (≤14 words: what to do now, not how), "answer", "then" (the full state after the right move; omit it if nothing on the picture changes), "why" (≤20 words, shown after a right move), "wrong" ({"<key>":"≤15 words"} for likely wrong picks), "choices" (optional buttons). Keep notes short.
+Marks: every state shows the consequences so far (on a board, every attacked, visited or blocked cell; in an array, the live window or range), so the picture explains itself. A mark must NEVER point at the answer of the move that comes next: no focus on the square to click. Focus only what just changed.
+Answers (exact; the browser checks them without you): {"cell":[r,c]} or {"cells":[[r,c],…]} (any of), {"index":i}, {"node":"id"}, {"choice":"one of the choices"}, {"text":["accepted","answers"]}. Wrong keys: "r,c", "i", node id, or the choice/text.
+5-10 moves. The moves make the learner carry out the process (place, pick, compare, move a pointer, backtrack, expand), not recall facts. Include at least one move where the obvious pick is wrong, with its "wrong" note. Use "choices" for decisions such as ["Place here","Backtrack"] alongside board clicks. Marks show consequences (attacked squares, visited cells, the window), so the picture explains itself after each move.`
+
 const PURPOSE = {
   decide: `You are the engine behind a visual DECISION CANVAS: the user decides by acting on a map of questions and options; you answer by changing the map.
 - Go deeper on a node: add 2-4 children (sub-questions, options or facts) that make it decidable.
@@ -48,7 +59,8 @@ const PURPOSE = {
 - When the learner answers a step (USER SAYS on a step), judge it: if right, set the step answered and say what they got right; if not, say which part is off, without the fix.
 - SHOW ANSWER on a step: write the full answer in that step's detail (key idea first) and fill the step's blanks on the diagram.
 - Prefer tiny concrete examples written as plain text.
-- Talk to the learner as "you", never "the learner".`,
+- Talk to the learner as "you", never "the learner".
+- For a coding problem, the LAST step is titled "Write it" (summary: what the code must do). When the learner sends code there, trace it on the example: say which line first goes wrong and why, or that it works and its cost. Never rewrite their code unless SHOW ANSWER.`,
 }
 
 const VIEW = {
@@ -59,7 +71,7 @@ const VIEW = {
 
 export function systemPrompt({ purpose = 'decide', context = '' }) {
   const parts = [PURPOSE[purpose] ?? PURPOSE.decide, OPS]
-  if (purpose === 'learn') parts.push(DIAGRAM)
+  if (purpose === 'learn') parts.push(DIAGRAM, SCENE)
   parts.push('EXPLAIN on a node: write that node\'s detail with an update op (markdown, at most 180 words, the key point first); the caption is one sentence.')
   parts.push('THREADS: a message may come from a thread pinned to one node. Then stay on that node: answer from its path, and change only that node or nodes under it.')
   if (context) parts.push(`BACKGROUND THE USER HAS ALREADY ESTABLISHED. Build on it, use its facts and numbers, and do not re-ask what it settles:\n\n${context}`)
@@ -163,6 +175,21 @@ export function applyOps(map, ops, { scope = null, now = Date.now() } = {}) {
     if (op?.op === 'diagram') {
       const spec = cleanSpec(op.spec)
       if (spec) { keepFilled(spec, map.fills ?? {}); map.diagram = spec; map.diagramAt = now; changed++ }
+      continue
+    }
+    if (op?.op === 'scene') {
+      const step = String(op.step ?? '')
+      const scene = cleanScene(op.spec)
+      if (scene && nodes[step]) {
+        map.scenes ??= {}; map.play ??= {}
+        map.scenes[step] = scene
+        map.play[step] = newPlay()
+        changed++
+      }
+      continue
+    }
+    if (op?.op === 'move') {
+      if (addMove(map.scenes?.[String(op.step ?? '')], op)) changed++
       continue
     }
     if (op?.op === 'judge') {
@@ -342,5 +369,135 @@ export function diagramOutline(spec, fills = {}) {
     lines.push(`columns: ${spec.columns.join(' | ')}`)
     for (const r of spec.rows) lines.push(`- ${r.label}: ${r.cells.map(c => (c.blank ? b(c) : c.text)).join(' | ')}`)
   }
+  return lines.join('\n')
+}
+
+// ---- playable scenes ----------------------------------------------------------
+// One step of a learning path, played move by move on a generic board, array or
+// tree. Claude writes the scene once, answers included; the answers stay on the
+// server, which checks each click instantly. Nothing here is specific to one
+// problem: every scene is data for the same three shapes.
+
+export const SCENE_KINDS = new Set(['board', 'array', 'tree'])
+const TONES = new Set(['focus', 'attack', 'good', 'bad', 'path', 'dim'])
+
+// Answers compare as plain keys: "r,c" for a cell, "i" for an index, a node id,
+// or normalised text for a choice or a typed answer.
+export const normKey = k => String(k ?? '').toLowerCase().replace(/[\s"'`.]/g, '').replace(/[,;]+/g, ',')
+
+function cleanState(kind, s) {
+  s = s && typeof s === 'object' ? s : {}
+  const marks = (Array.isArray(s.marks) ? s.marks : []).slice(0, 40)
+    .map(m => ({ at: Array.isArray(m?.at) ? m.at.slice(0, 2).map(Number) : kind === 'array' ? Number(m?.at) : str(String(m?.at ?? ''), 40), tone: TONES.has(m?.tone) ? m.tone : 'focus' }))
+  const note = str(s.note, 120)
+  if (kind === 'board') {
+    const cells = (Array.isArray(s.cells) ? s.cells : []).slice(0, 10).map(r => (Array.isArray(r) ? r : []).slice(0, 10).map(c => str(String(c ?? ''), 6)))
+    return { cells, marks, note }
+  }
+  if (kind === 'array') {
+    return {
+      items: (Array.isArray(s.items) ? s.items : []).slice(0, 16).map(c => str(String(c ?? ''), 12)),
+      pointers: (Array.isArray(s.pointers) ? s.pointers : []).slice(0, 6).map(p => ({ name: str(p?.name, 10), at: Number(p?.at) })),
+      marks, note,
+    }
+  }
+  return {
+    nodes: (Array.isArray(s.nodes) ? s.nodes : []).slice(0, 24).map(n => ({ id: str(String(n?.id ?? ''), 30), label: str(String(n?.label ?? ''), 30), parent: n?.parent == null ? null : str(String(n.parent), 30) })),
+    marks, note,
+  }
+}
+
+function cleanAnswer(a) {
+  a = a && typeof a === 'object' ? a : {}
+  if (Array.isArray(a.cell)) return { type: 'cell', keys: [a.cell.slice(0, 2).join(',')] }
+  if (Array.isArray(a.cells)) return { type: 'cell', keys: a.cells.slice(0, 20).map(c => (Array.isArray(c) ? c.slice(0, 2).join(',') : '')).filter(Boolean) }
+  if (a.index != null) return { type: 'index', keys: [String(Number(a.index))] }
+  if (Array.isArray(a.indexes)) return { type: 'index', keys: a.indexes.map(i => String(Number(i))) }
+  if (a.node != null) return { type: 'node', keys: [normKey(a.node)] }
+  if (a.choice != null) return { type: 'choice', keys: [normKey(a.choice)] }
+  if (a.text != null) return { type: 'text', keys: (Array.isArray(a.text) ? a.text : [a.text]).slice(0, 8).map(normKey) }
+  return null
+}
+
+export function cleanMove(kind, m, prev) {
+  const answer = cleanAnswer(m?.answer)
+  if (!answer) return null
+  const wrong = {}
+  for (const [k, v] of Object.entries(m?.wrong ?? {}).slice(0, 12)) wrong[normKey(k)] = str(String(v ?? ''), 140)
+  return {
+    ask: str(m?.ask, 160), answer, why: str(m?.why, 200), wrong,
+    choices: (Array.isArray(m?.choices) ? m.choices : []).slice(0, 4).map(c => str(String(c ?? ''), 40)).filter(Boolean),
+    then: m?.then && typeof m.then === 'object' ? cleanState(kind, m.then) : prev,
+  }
+}
+
+// A scene may come whole, or as a header followed by one "move" op per move
+// while Claude writes; then it is playable from its first move.
+export function cleanScene(spec) {
+  if (!spec || !SCENE_KINDS.has(spec.kind)) return null
+  const kind = spec.kind
+  const start = cleanState(kind, spec.start)
+  const moves = []
+  for (const m of (Array.isArray(spec.moves) ? spec.moves : []).slice(0, 12)) {
+    const mv = cleanMove(kind, m, moves.length ? moves[moves.length - 1].then : start)
+    if (mv) moves.push(mv)
+  }
+  return { kind, title: str(spec.title, 90), start, moves, complete: moves.length > 0 && Array.isArray(spec.moves) }
+}
+
+export function addMove(scene, m) {
+  if (!scene || scene.moves.length >= 12) return false
+  const mv = cleanMove(scene.kind, m, scene.moves.length ? scene.moves[scene.moves.length - 1].then : scene.start)
+  if (mv) scene.moves.push(mv)
+  return !!mv
+}
+
+export const newPlay = () => ({ at: 0, wrong: 0, tries: 0, shown: 0, misses: [], last: null })
+
+// Check one move. Returns the new play record; never touches the scene.
+export function playMove(scene, play, key) {
+  const p = { ...play, misses: [...play.misses] }
+  const move = scene.moves[p.at]
+  if (!move) return p
+  const k = normKey(key)
+  p.tries++
+  if (move.answer.keys.includes(k)) {
+    p.at++
+    p.last = { ok: true, text: move.why }
+  } else {
+    p.wrong++
+    p.misses.push(`move ${p.at + 1}: ${key}`)
+    p.last = { ok: false, text: move.wrong[k] || 'Not that one. Look at what the board already tells you.' }
+  }
+  return p
+}
+
+export function showMove(scene, play) {
+  const move = scene.moves[play.at]
+  if (!move) return play
+  return { ...play, at: play.at + 1, shown: play.shown + 1, last: { ok: true, shown: true, key: move.answer.keys[0], text: move.why } }
+}
+
+// What the browser gets: the board as it stands and the question in front of
+// you, never the answers.
+export function sceneView(scene, play = newPlay()) {
+  const done = scene.complete !== false && play.at >= scene.moves.length
+  const move = scene.moves[play.at]
+  return {
+    kind: scene.kind, title: scene.title, total: scene.moves.length, at: play.at, done,
+    waiting: !done && !move, // Claude is still writing the next move
+    state: play.at === 0 ? scene.start : scene.moves[play.at - 1].then,
+    ask: move?.ask ?? '', choices: move?.choices ?? [], answerType: move?.answer.type ?? null,
+    last: play.last, wrong: play.wrong, shown: play.shown,
+  }
+}
+
+// The scene as Claude reads it back when you ask for help on that step.
+export function sceneOutline(scene, play = newPlay()) {
+  const move = scene.moves[play.at]
+  const lines = [`SCENE (${scene.kind}) "${scene.title}": the learner is on move ${Math.min(play.at + 1, scene.moves.length)} of ${scene.moves.length}${play.at >= scene.moves.length ? ' (finished)' : ''}.`]
+  if (move) lines.push(`Current move asks: "${move.ask}". Its answer (do not reveal unless SHOW ANSWER): ${move.answer.keys.join(' or ')}.`)
+  if (play.misses.length) lines.push(`Their wrong tries so far: ${play.misses.slice(-6).join('; ')}.`)
+  if (play.shown) lines.push(`${play.shown} move(s) were shown to them.`)
   return lines.join('\n')
 }

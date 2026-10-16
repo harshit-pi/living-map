@@ -6,6 +6,8 @@ function stateOf(map: MapDoc, n: MapNode) {
   if (n.dropped) return { mark: '–', cls: 'border-cl-line2 text-cl-faint', word: 'set aside' }
   if (n.revealed) return { mark: '◉', cls: 'border-violet-400 bg-violet-50 text-violet-700', word: 'answer shown' }
   if (n.kind === 'question' && n.status === 'answered') return { mark: '✓', cls: 'border-teal-600 bg-teal-600 text-white', word: 'got it' }
+  const sc = map.scenes?.[n.id]
+  if (sc && !sc.done && sc.at > 0) return { mark: '▶', cls: 'border-cl-accent bg-orange-50 text-cl-accentDk', word: `playing · ${sc.at} of ${sc.total}` }
   const h = hintsOf(map, n.id)
   if (h) return { mark: String(h), cls: 'border-amber-500 bg-amber-50 text-amber-800', word: `${h} hint${h > 1 ? 's' : ''} used` }
   return { mark: '', cls: 'border-amber-500 bg-white text-amber-700', word: 'to do' }

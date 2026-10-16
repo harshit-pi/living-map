@@ -28,13 +28,14 @@ export const Composer = forwardRef<ComposerHandle, {
   rows?: number
   compact?: boolean
   onStop?: () => void
-}>(function Composer({ busy, settings, onSettings, onSend, placeholder, chips, rows = 2, compact, onStop }, ref) {
+  code?: boolean
+}>(function Composer({ busy, settings, onSettings, onSend, placeholder, chips, rows = 2, compact, onStop, code }, ref) {
   const [text, setText] = useState('')
   const input = useRef<HTMLTextAreaElement>(null)
   useImperativeHandle(ref, () => ({ focus: () => input.current?.focus() }), [])
   const send = () => {
     const t = text.trim()
-    if (!t || busy) return
+    if (!t) return
     onSend(t)
     setText('')
   }
@@ -43,17 +44,23 @@ export const Composer = forwardRef<ComposerHandle, {
       {chips && <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">{chips}</div>}
       <textarea ref={input} value={text} rows={rows} placeholder={placeholder}
         onChange={e => setText(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-        className={`block w-full resize-none border-0 bg-transparent px-4 pt-3 text-cl-ink outline-none placeholder:text-cl-faint focus:ring-0 ${compact ? 'text-[14px]' : 'text-[15px]'}`} />
+        onKeyDown={e => {
+          // code keeps Enter for new lines; ⌘↩ or Ctrl↩ sends
+          if (e.key === 'Enter' && (code ? e.metaKey || e.ctrlKey : !e.shiftKey)) { e.preventDefault(); send() }
+          if (code && e.key === 'Tab') { e.preventDefault(); setText(t => t + '  ') }
+        }}
+        spellCheck={!code}
+        className={`block w-full resize-none border-0 bg-transparent px-4 pt-3 text-cl-ink outline-none placeholder:text-cl-faint focus:ring-0 ${code ? 'font-mono text-[13px] leading-relaxed' : compact ? 'text-[14px]' : 'text-[15px]'}`} />
       <div className="flex items-center gap-1 px-2 pb-2">
+        {code && <span className="pl-2 text-[11px] text-cl-faint">⌘↩ to send · any language or pseudocode</span>}
         <div className="flex-1" />
         {!compact && <Picker title="Model" value={settings.model} options={MODELS} onChange={model => onSettings({ model })} />}
         {!compact && <Picker title="Reasoning effort" value={settings.effort} options={EFFORTS} onChange={effort => onSettings({ effort })} />}
-        {busy && onStop ? (
+        {busy && onStop && !text.trim() ? (
           <button onClick={onStop} title="Stop Claude"
             className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-cl-ink text-white hover:bg-black"><span className="h-2.5 w-2.5 rounded-[2px] bg-white" /></button>
         ) : (
-          <button onClick={send} disabled={busy || !text.trim()} title={busy ? 'Claude is working' : 'Send'}
+          <button onClick={send} disabled={!text.trim()} title={busy ? 'Send (runs when Claude finishes)' : 'Send'}
             className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-cl-accent text-white hover:bg-cl-accentDk disabled:opacity-40">↑</button>
         )}
       </div>

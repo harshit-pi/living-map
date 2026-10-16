@@ -9,7 +9,7 @@ type Run = (a: Action) => Promise<{ threadId?: string }>
 
 function Btn({ children, onClick, primary, disabled, title }: { children: string; onClick: () => void; primary?: boolean; disabled?: boolean; title?: string }) {
   return (
-    <button disabled={disabled} onClick={onClick} title={disabled ? 'Claude is working. Wait, or press Stop.' : title}
+    <button disabled={disabled} onClick={onClick} title={title}
       className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
         primary ? 'bg-cl-accent text-white hover:bg-cl-accentDk' : 'border border-cl-line2 bg-white text-cl-text hover:border-cl-accent hover:text-cl-accentDk'}`}>
       {children}
@@ -64,6 +64,7 @@ export function NodePanel({ map, node, busy, working, stream, settings, onSettin
   const openStep = learn && node.kind === 'question' && node.status === 'open' && !node.revealed
   const path = pathOf(map.nodes, node.id)
   const act = (type: NodeAction) => { void run({ type, nodeId: node.id }) }
+  const writeIt = learn && /^write it/i.test(node.title)
 
   return (
     <aside className="absolute bottom-3 right-3 top-3 z-20 flex w-[min(420px,calc(100%-24px))] flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-cl-line">
@@ -80,11 +81,11 @@ export function NodePanel({ map, node, busy, working, stream, settings, onSettin
           {gone ? <Btn onClick={() => act('restore')}>Restore</Btn> : (
             <>
               {node.kind === 'option' && node.status !== 'chosen' && <Btn primary onClick={() => act('choose')}>{learn ? 'Try this' : 'Choose'}</Btn>}
-              {openStep && <Btn primary disabled={busy || hints.length >= 3} onClick={() => act('hint')} title="Each press gives a little more">{hints.length >= 3 ? 'No more hints' : `Hint ${hints.length + 1} of 3`}</Btn>}
-              <Btn disabled={busy} onClick={() => act('deeper')}>{learn ? 'Smaller steps' : 'Go deeper'}</Btn>
-              {!learn && (node.kind !== 'option' || node.status === 'chosen') && <Btn disabled={busy} onClick={() => act('challenge')}>Challenge</Btn>}
-              {!node.detail && <Btn disabled={busy} onClick={() => { setExplaining(true); act('explain') }}>Explain</Btn>}
-              {openStep && <Btn disabled={busy} onClick={() => act('answer')} title="Shown answers are not counted as yours">Show answer</Btn>}
+              {openStep && <Btn primary disabled={hints.length >= 3} onClick={() => act('hint')} title="Each press gives a little more">{hints.length >= 3 ? 'No more hints' : `Hint ${hints.length + 1} of 3`}</Btn>}
+              <Btn onClick={() => act('deeper')}>{learn ? 'Smaller steps' : 'Go deeper'}</Btn>
+              {!learn && (node.kind !== 'option' || node.status === 'chosen') && <Btn onClick={() => act('challenge')}>Challenge</Btn>}
+              {!node.detail && <Btn onClick={() => { setExplaining(true); act('explain') }}>Explain</Btn>}
+              {openStep && <Btn onClick={() => act('answer')} title="Shown answers are not counted as yours">Show answer</Btn>}
               <Btn onClick={() => act('drop')}>Set aside</Btn>
             </>
           )}
@@ -143,13 +144,13 @@ export function NodePanel({ map, node, busy, working, stream, settings, onSettin
           {!threads.length && <span className="text-xs text-cl-mute">Side thread</span>}
           <div className="flex-1" />
           {threads.length > 0 && (
-            <button disabled={busy} title="Start a fresh thread on this node; the others stay as they are"
+            <button title="Start a fresh thread on this node; the others stay as they are"
               onClick={async () => { const r = await run({ type: 'fork', nodeId: node.id }); if (r.threadId) { setActiveId(r.threadId); composer.current?.focus() } }}
               className="rounded-md px-2 py-0.5 text-xs text-cl-accentDk hover:bg-orange-50 disabled:opacity-40">⑂ Fork</button>
           )}
         </div>
         <div className="mb-2 text-[11px] leading-snug text-cl-faint" title="What Claude is sent for this thread">
-          Claude sees: your background · the map · {path.map(p => p.title).join(' → ')} · this thread only
+          Claude sees: the map · {path.map(p => p.title).join(' → ')} · this thread only
         </div>
         <div className="space-y-3">
           {active?.messages.map((m, i) => m.role === 'you' ? (
@@ -169,9 +170,9 @@ export function NodePanel({ map, node, busy, working, stream, settings, onSettin
       </div>
 
       <div className="border-t border-cl-line p-2.5">
-        <Composer ref={composer} compact rows={2} busy={busy} settings={settings} onSettings={onSettings} onStop={() => { void run({ type: 'stop' }) }}
-          placeholder={openStep ? 'Your answer, or a question about this step…' : `Ask about “${node.title}”…`}
-          onSend={text => { void run({ type: 'thread', nodeId: node.id, threadId: active?.id, text }) }} />
+        <Composer ref={composer} compact rows={writeIt ? 10 : 2} code={writeIt} busy={busy} settings={settings} onSettings={onSettings} onStop={() => { void run({ type: 'stop' }) }}
+          placeholder={writeIt ? 'Write your solution here. Claude traces it on the example and tells you where it breaks.' : openStep ? 'Your answer, or a question about this step…' : `Ask about “${node.title}”…`}
+          onSend={text => { void run({ type: 'thread', nodeId: node.id, threadId: active?.id, text: writeIt ? `My code:\n\`\`\`\n${text}\n\`\`\`` : text }) }} />
       </div>
     </aside>
   )

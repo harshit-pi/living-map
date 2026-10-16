@@ -5,11 +5,11 @@ import remarkGfm from 'remark-gfm'
 import { act, store, stored, useLiveMap } from './api'
 import { Canvas } from './components/Canvas'
 import { Chip, Composer } from './components/Composer'
-import { ContextPanel } from './components/ContextPanel'
 import { DiagramView } from './components/DiagramView'
 import { MapRows, MapsMenu, useMaps } from './components/MapList'
 import { NodePanel } from './components/NodePanel'
 import { PathRail } from './components/PathRail'
+import { ScenePlay } from './components/ScenePlay'
 import { TextView } from './components/TextView'
 import type { Action, MapDoc, Purpose, Settings, View, Working } from './types'
 
@@ -78,7 +78,7 @@ function Start({ error, onStart, onCancel, onOpen }: { error: string; onStart: (
 
 // What Claude is doing right now, in both views: a moving bar, the task, the
 // seconds so far, and Stop.
-function WorkingBar({ working, onStop }: { working: Working | null; onStop: () => void }) {
+function WorkingBar({ working, queued, onStop }: { working: Working | null; queued: number; onStop: () => void }) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (!working) return
@@ -92,7 +92,7 @@ function WorkingBar({ working, onStop }: { working: Working | null; onStop: () =
       <div className="working-bar" />
       <div className="absolute left-1/2 top-1.5 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white py-1 pl-3 pr-1 text-xs text-cl-text shadow-md ring-1 ring-cl-line">
         <span className="h-2 w-2 animate-pulse rounded-full bg-cl-accent" />
-        <span>Claude · {working.label}… <span className="tabular-nums text-cl-faint">{secs}s</span></span>
+        <span>Claude · {working.label}… <span className="tabular-nums text-cl-faint">{secs}s</span>{queued > 0 && <span className="text-cl-accentDk"> · {queued} waiting</span>}</span>
         <button onClick={onStop} className="rounded-full px-2 py-0.5 text-cl-mute hover:bg-cl-panel hover:text-cl-ink">Stop</button>
       </div>
     </div>
@@ -121,15 +121,16 @@ function useCaption(map: MapDoc | null, busy: boolean, stream: { threadId: strin
 }
 
 export default function App() {
-  const { map, busy, working, stream, online } = useLiveMap()
+  const { map, busy, working, queued, stream, online } = useLiveMap()
   const [selection, setSelection] = useState<string[]>([])
   const [showDropped, setShowDropped] = useState(true)
-  const [showContext, setShowContext] = useState(false)
   const [starting, setStarting] = useState(false)
   // a new map on its way: the map it replaces, so the loading screen shows until the new one lands
   const [launch, setLaunch] = useState<{ from: string | null } | null>(null)
   const [startError, setStartError] = useState('')
   const [lastFill, setLastFill] = useState<string | null>(null)
+  const [centre, setCentre] = useState<'play' | 'topic'>('play')
+  const [panelOpen, setPanelOpen] = useState(true)
   const [error, setError] = useState('')
   const [settings, setSettings] = useState<Settings>(() => stored('settings', DEFAULTS))
   const caption = useCaption(map, busy, stream)
@@ -160,7 +161,8 @@ export default function App() {
     if (r.error) setStartError(r.error)
     else setStarting(false)
   }
-  // a node that disappears (undo, remove) closes its panel
+  useEffect(() => { setCentre('play'); setPanelOpen(window.innerWidth >= 1200) }, [selection])
+  // a node that disappears (removed by Claude) closes its panel
   useEffect(() => { if (map) setSelection(s => s.filter(id => map.nodes[id])) }, [map])
 
   // a map has something to show once it has a node or (Learn) the diagram, which is written first
@@ -168,7 +170,7 @@ export default function App() {
   if (launch || (!starting && empty && busy)) {
     return (
       <div className="flex h-full flex-col bg-cl-bg">
-        <WorkingBar working={working} onStop={stop} />
+        <WorkingBar working={working} queued={queued} onStop={stop} />
         <div className="flex flex-1 items-center justify-center text-cl-mute">
           <div className="max-w-md text-center">
             <div className="animate-pulse">{working?.label ?? 'Starting'}…</div>
@@ -195,16 +197,27 @@ export default function App() {
 
   // on a narrow window the panel floats over the work instead of pushing it aside
   const roomy = typeof window !== 'undefined' && window.innerWidth >= 1200
-  const u = map.usage
   const learn = map.purpose === 'learn'
   const view = settings.view
   const one = selection.length === 1 ? map.nodes[selection[0]] : undefined
   const select = (id: string) => setSelection(s => (s.length === 1 && s[0] === id ? [] : [id]))
   const lastClaude = [...map.chat].reverse().find(c => c.role === 'claude')?.text ?? ''
 
-  const panel = one && (
+  // Learn: the step in view, its scene, and the step after it
+  const step = learn && one && one.parent ? one : undefined
+  const scene = step ? map.scenes?.[step.id] : undefined
+  const building = step && working?.nodeId === step.id && working.label === 'Building a playable scene'
+  const nextStep = (id: string) => {
+    const s = map.nodes[id]
+    const sibs = Object.values(map.nodes).filter(n => n.parent === s?.parent && n.kind === 'question' && !n.dropped).sort((a, b) => a.order - b.order)
+    return sibs.slice(sibs.findIndex(n => n.id === id) + 1).find(n => n.status === 'open')?.id ?? sibs[sibs.findIndex(n => n.id === id) + 1]?.id
+  }
+
+  // in a narrow window the board needs the room: the panel tucks away while you play
+  const tucked = !!(scene && centre === 'play' && !roomy && !panelOpen)
+  const panel = one && !tucked && (
     <NodePanel map={map} node={one} busy={busy} working={working} stream={stream} settings={settings} onSettings={updateSettings}
-      run={run} onSelect={id => setSelection([id])} onClose={() => setSelection([])} />
+      run={run} onSelect={id => setSelection([id])} onClose={() => (scene && !roomy ? setPanelOpen(false) : setSelection([]))} />
   )
 
   const floating = (
@@ -228,11 +241,6 @@ export default function App() {
       <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-cl-line px-4 py-2">
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold text-cl-ink">{map.title}</div>
-          <div className="truncate text-[11.5px] text-cl-mute">
-            {u.turns} moves · ${u.costUsd.toFixed(2)}
-            {u.last && ` · last ${(u.last.ms / 1000).toFixed(0)}s (first words ${((u.last.firstMs ?? 0) / 1000).toFixed(1)}s), ${(u.last.input / 1000).toFixed(1)}k in / ${u.last.output} out, ${u.last.model?.replace('claude-', '') ?? ''}`}
-            {!online && <span className="ml-2 text-amber-700">· server offline</span>}
-          </div>
         </div>
         <Segmented value={view} options={[['visual', '◫ Visual'], ['text', '☰ Text']]} onChange={setView} />
         <div className="flex items-center justify-end gap-2">
@@ -241,13 +249,11 @@ export default function App() {
             <label className="flex items-center gap-1 text-xs text-cl-mute"><input type="checkbox" checked={showDropped} onChange={e => setShowDropped(e.target.checked)} /> Set aside</label>
           )}
           {!learn && <button onClick={() => { void run({ type: 'next' }) }} disabled={busy} className="rounded-lg bg-cl-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-cl-accentDk disabled:opacity-40">Next ▸</button>}
-          <button onClick={() => { void run({ type: 'undo' }) }} disabled={!map.canUndo || busy} className="rounded-lg border border-cl-line2 px-2.5 py-1.5 text-sm text-cl-text hover:bg-cl-panel disabled:opacity-40">Undo</button>
           <MapsMenu onOpen={id => { void openMap(id) }} />
-          <button onClick={() => setShowContext(v => !v)} className="rounded-lg border border-cl-line2 px-2.5 py-1.5 text-sm text-cl-text hover:bg-cl-panel">Context</button>
           <button onClick={() => { setStartError(''); setStarting(true) }} className="rounded-lg border border-cl-line2 px-2.5 py-1.5 text-sm text-cl-text hover:bg-cl-panel disabled:opacity-40">New</button>
         </div>
       </header>
-      <WorkingBar working={working} onStop={stop} />
+      <WorkingBar working={working} queued={queued} onStop={stop} />
       {!online && <div className="bg-amber-50 px-4 py-1.5 text-sm text-amber-900">Lost the connection to the Living Map server; reconnecting…</div>}
       {error && <div className="flex items-center bg-amber-50 px-4 py-1.5 text-sm text-amber-900"><span className="flex-1">{error}</span><button onClick={() => setError('')} className="text-amber-700">×</button></div>}
 
@@ -258,10 +264,40 @@ export default function App() {
         ) : learn ? (
           <div className="flex h-full">
             <PathRail map={map} selected={one?.id ?? null} onSelect={select} busy={busy} workingId={working?.nodeId ?? null} onNext={() => { void run({ type: 'next' }) }} />
-            <div className="relative min-w-0 flex-1" onClick={() => setSelection([])}>
-              <div className="h-full transition-[padding]" style={{ paddingRight: one && roomy ? 440 : 0 }}>
-                <DiagramView diagram={map.diagram} fills={map.fills ?? {}} busy={busy} lastFill={lastFill} caption={busy ? (stream.threadId === null ? stream.text : '') : lastClaude}
-                  onFill={(blankId, text) => { setLastFill(blankId); void run({ type: 'fill', blankId, text }) }} />
+            <div className="relative min-w-0 flex-1">
+              <div className="flex h-full flex-col transition-[padding]" style={{ paddingRight: one && roomy ? 440 : 0 }}>
+                {step && (scene || building || step.kind === 'question') && (
+                  <div className="relative flex items-center justify-center gap-2 pt-3">
+                    {tucked && <button onClick={() => setPanelOpen(true)} className="absolute right-3 top-3 rounded-lg border border-cl-line2 bg-white px-2.5 py-1 text-xs text-cl-text hover:border-cl-accent">💬 Hints &amp; thread</button>}
+                    {scene ? (
+                      <div className="flex rounded-lg bg-cl-panel p-0.5 text-[13px]">
+                        {([['play', '▶ Play this step'], ['topic', '◧ Topic diagram']] as const).map(([v, l]) => (
+                          <button key={v} onClick={() => setCentre(v)} className={`rounded-md px-3 py-1 ${centre === v ? 'bg-white text-cl-ink shadow-sm' : 'text-cl-mute hover:text-cl-ink'}`}>{l}</button>
+                        ))}
+                      </div>
+                    ) : building ? (
+                      <div className="animate-pulse rounded-full bg-orange-50 px-4 py-1.5 text-sm text-cl-accentDk ring-1 ring-orange-200">Building a playable scene for this step…</div>
+                    ) : (
+                      <button onClick={() => { void run({ type: 'scene', nodeId: step.id }) }}
+                        className="rounded-full bg-cl-accent px-4 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-cl-accentDk">▶ Play this step by hand</button>
+                    )}
+                  </div>
+                )}
+                <div className="min-h-0 flex-1">
+                  {scene && step && centre === 'play' ? (
+                    <ScenePlay scene={scene} stepTitle={step.title} busy={busy} building={!!building}
+                      onKey={key => act({ type: 'play', nodeId: step.id, key }, settings)}
+                      onShow={() => { void run({ type: 'playshow', nodeId: step.id }) }}
+                      onReplay={() => { void run({ type: 'replay', nodeId: step.id }) }}
+                      onHint={() => { void run({ type: 'hint', nodeId: step.id }) }}
+                      onNext={() => { const n = nextStep(step.id); if (n) setSelection([n]) }} />
+                  ) : (
+                    <div className="h-full" onClick={() => setSelection([])}>
+                      <DiagramView diagram={map.diagram} fills={map.fills ?? {}} busy={busy} lastFill={lastFill} caption={busy ? (stream.threadId === null ? stream.text : '') : lastClaude}
+                        onFill={(blankId, text) => { setLastFill(blankId); void run({ type: 'fill', blankId, text }) }} />
+                    </div>
+                  )}
+                </div>
               </div>
               <div onClick={e => e.stopPropagation()}>{panel}{floating}</div>
             </div>
@@ -275,7 +311,6 @@ export default function App() {
             {floating}
           </>
         )}
-        {showContext && <ContextPanel onClose={() => setShowContext(false)} />}
       </main>
     </div>
   )

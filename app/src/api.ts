@@ -8,13 +8,16 @@ export function useLiveMap() {
   const [map, setMap] = useState<MapDoc | null>(null)
   const [busy, setBusy] = useState(false)
   const [working, setWorking] = useState<Working | null>(null)
+  const [queued, setQueued] = useState(0)
   const [stream, setStream] = useState<{ threadId: string | null; text: string }>({ threadId: null, text: '' })
   const [online, setOnline] = useState(true)
   useEffect(() => {
     let es: EventSource | null = null
     let retry: ReturnType<typeof setTimeout> | undefined
     let closed = false
+    let heard = Date.now()
     const connect = () => {
+      heard = Date.now()
       es = new EventSource('/api/events')
       es.onopen = () => setOnline(true)
       es.onerror = () => {
@@ -23,11 +26,14 @@ export function useLiveMap() {
         if (es?.readyState === EventSource.CLOSED && !closed) { es.close(); retry = setTimeout(connect, 1500) }
       }
       es.onmessage = m => {
+        heard = Date.now()
+        setOnline(true)
         const ev = JSON.parse(m.data)
         if (ev.type === 'map') {
           setMap(ev.map)
           setBusy(ev.busy)
           setWorking(ev.working ?? null)
+          setQueued(ev.queued ?? 0)
           if (!ev.busy) setStream({ threadId: null, text: '' })
         } else if (ev.type === 'delta') setStream(s => ({ threadId: ev.threadId ?? null, text: s.text + ev.text }))
         else if (ev.type === 'busy') {
@@ -38,12 +44,17 @@ export function useLiveMap() {
       }
     }
     connect()
-    return () => { closed = true; clearTimeout(retry); es?.close() }
+    // the server pings every 10s; silence means the connection is dead even if
+    // the browser has not noticed, so start a fresh one (it brings the live state)
+    const watch = setInterval(() => {
+      if (Date.now() - heard > 25000) { setOnline(false); es?.close(); connect() }
+    }, 5000)
+    return () => { closed = true; clearTimeout(retry); clearInterval(watch); es?.close() }
   }, [])
-  return { map, busy, working, stream, online }
+  return { map, busy, working, queued, stream, online }
 }
 
-export async function act(action: Action, settings: Settings): Promise<{ error?: string; threadId?: string }> {
+export async function act(action: Action, settings: Settings): Promise<{ error?: string; threadId?: string; ok?: boolean }> {
   try {
     const r = await fetch('/api/action', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...action, settings }),

@@ -18,7 +18,7 @@ function BlankBox({ el, ctx, className = '' }: { el: Blank; ctx: Ctx; className?
       <div className={`text-[10.5px] font-semibold leading-tight ${wrong ? 'text-red-700' : 'text-cl-accentDk'}`}>
         {wrong ? 'Not quite. ' : '? '}{el.prompt || 'Fill this in'}
       </div>
-      <input value={text} disabled={pending || ctx.busy} placeholder={pending ? 'checking…' : 'type, then Enter'}
+      <input value={text} disabled={pending} placeholder={pending ? 'checking…' : 'type, then Enter'}
         onChange={e => setText(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && text.trim()) ctx.onFill(el.id, text.trim()) }}
         className="mt-1 w-full rounded border border-cl-line2 bg-white px-1.5 py-0.5 text-[13px] text-cl-ink outline-none focus:border-cl-accent disabled:bg-cl-panel" />

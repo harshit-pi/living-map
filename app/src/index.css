@@ -35,3 +35,4 @@ body { background: #FAF9F5; color: #141413; }
 .skeleton { border-radius: 6px; height: 10px; background: linear-gradient(90deg, #EFEDE6 25%, #F8F7F3 50%, #EFEDE6 75%); background-size: 600px 100%; animation: shimmer 1.4s linear infinite; }
 @keyframes ring { 0%, 100% { box-shadow: 0 0 0 0 rgba(217,119,87,.45) } 50% { box-shadow: 0 0 0 6px rgba(217,119,87,0) } }
 .is-working { animation: ring 1.4s ease-in-out infinite; }
+@keyframes shake { 0%, 100% { transform: translateX(0) } 25% { transform: translateX(-4px) } 75% { transform: translateX(4px) } }
