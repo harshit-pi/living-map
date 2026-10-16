@@ -293,13 +293,14 @@ IGNORE_MARKER = "agent-docs: ignore"
 
 def check_references(root, report):
     top_level = {p.name for p in root.iterdir()}
+    # scripts from the package.json at the root or one folder down (app/)
     scripts = None
-    package = root / "package.json"
-    if package.is_file():
+    for package in [root / "package.json", *sorted(root.glob("*/package.json"))]:
         try:
-            scripts = set(json.loads(package.read_text()).get("scripts", {}))
-        except ValueError:
-            scripts = None
+            found = json.loads(package.read_text()).get("scripts", {})
+        except (OSError, ValueError):
+            continue
+        scripts = (scripts or set()) | set(found)
 
     for path in doc_files(root):
         rel = path.relative_to(root).as_posix()

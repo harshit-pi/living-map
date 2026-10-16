@@ -133,9 +133,9 @@ def open_items(pr):
         who = author(first, claude)
         if who in (None, "agent") or author(last, claude) == "agent":
             continue
+        # open while a person spoke last, even if the agent answered earlier;
+        # the id stays the first comment's, the only one GitHub lets you reply to
         item_id = f"t{first['databaseId']}"
-        if item_id in done:
-            continue
         line = first.get("line") or first.get("originalLine")
         items.append(
             {
