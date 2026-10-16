@@ -26,11 +26,12 @@ function pathOf(nodes: Record<string, MapNode>, id: string) {
 // Everything about one node in one place: what it is, what you can do with it,
 // what is under it, and the side threads pinned to it. Selecting a node opens
 // this with the cursor in its thread, so you reply on the visual itself.
-export function NodePanel({ map, node, busy, working, stream, settings, onSettings, run, onSelect, onClose }: {
+export function NodePanel({ map, node, busy, working, waiting = [], stream, settings, onSettings, run, onSelect, onClose }: {
   map: MapDoc
   node: MapNode
   busy: boolean
   working: Working | null
+  waiting?: { label: string; nodeId: string | null }[]
   stream: { threadId: string | null; text: string }
   settings: Settings
   onSettings: (s: Partial<Settings>) => void
@@ -82,17 +83,27 @@ export function NodePanel({ map, node, busy, working, stream, settings, onSettin
             <>
               {node.kind === 'option' && node.status !== 'chosen' && <Btn primary onClick={() => act('choose')}>{learn ? 'Try this' : 'Choose'}</Btn>}
               {openStep && <Btn primary disabled={hints.length >= 3} onClick={() => act('hint')} title="Each press gives a little more">{hints.length >= 3 ? 'No more hints' : `Hint ${hints.length + 1} of 3`}</Btn>}
-              <Btn onClick={() => act('deeper')}>{learn ? 'Smaller steps' : 'Go deeper'}</Btn>
+              <Btn onClick={() => act('deeper')}>{learn && node.kind === 'question' ? 'Smaller steps' : 'Go deeper'}</Btn>
               {!learn && (node.kind !== 'option' || node.status === 'chosen') && <Btn onClick={() => act('challenge')}>Challenge</Btn>}
               {!node.detail && <Btn onClick={() => { setExplaining(true); act('explain') }}>Explain</Btn>}
               {openStep && <Btn onClick={() => act('answer')} title="Shown answers are not counted as yours">Show answer</Btn>}
-              <Btn onClick={() => act('drop')}>Set aside</Btn>
+              <Btn onClick={() => act('drop')}
+                title={learn ? (node.kind === 'question' ? 'Skip this step: it is greyed out and Claude stops raising it' : 'Remove it from what you looked into') : 'Rule this out: it is greyed out and Claude stops raising it'}>
+                {learn ? (node.kind === 'question' ? 'Skip this step' : 'Remove') : 'Set aside'}
+              </Btn>
             </>
           )}
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {!(working && working.nodeId === node.id) && waiting.some(w => w.nodeId === node.id) && (
+          <div className="mb-3 rounded-lg border border-cl-line bg-cl-panel px-3 py-2.5 text-xs text-cl-mute">
+            <span className="font-medium text-cl-text">Next in line.</span> Claude is first finishing {working
+              ? <>{working.label.charAt(0).toLowerCase() + working.label.slice(1)}{working.nodeId && map.nodes[working.nodeId] ? <> for “{map.nodes[working.nodeId].title}”</> : null}</>
+              : 'another move'}; this one starts right after.
+          </div>
+        )}
         {working && working.nodeId === node.id && !working.threadId && (
           <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50/60 px-3 py-2.5">
             <div className="mb-2 flex items-center gap-2 text-xs font-medium text-cl-accentDk">
@@ -112,7 +123,7 @@ export function NodePanel({ map, node, busy, working, stream, settings, onSettin
             ))}
           </div>
         )}
-        {(node.detail || (explaining && !(working && working.nodeId === node.id))) && (
+        {(node.detail || (explaining && !(working && working.nodeId === node.id) && !waiting.some(w => w.nodeId === node.id))) && (
           <details open className="mb-3 rounded-lg border border-cl-line bg-cl-panel px-3 py-2">
             <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-cl-mute">{node.revealed ? 'Answer (shown)' : 'Explanation'}</summary>
             {node.detail

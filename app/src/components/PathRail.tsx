@@ -52,6 +52,7 @@ export function PathRail({ map, selected, onSelect, busy, workingId, onNext }: {
             </li>
           )
         })}
+        {notes.length > 0 && <li className="mt-3 px-3 text-[10px] font-semibold uppercase tracking-wide text-cl-faint">You looked into</li>}
         {notes.map(n => (
           <li key={n.id}>
             <button onClick={() => onSelect(n.id)} className={`mt-1 w-full rounded-lg px-3 py-1.5 text-left text-xs ${selected === n.id ? 'bg-white ring-1 ring-cl-accent' : 'text-cl-mute hover:bg-cl-panel'}`}>

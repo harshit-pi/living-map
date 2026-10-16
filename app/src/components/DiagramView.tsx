@@ -3,7 +3,46 @@ import dagre from '@dagrejs/dagre'
 import type { Diagram, Fill, Link } from '../types'
 
 type Blank = { id: string; blank?: boolean; prompt?: string; filled?: boolean }
-type Ctx = { fills: Record<string, Fill>; busy: boolean; onFill: (id: string, text: string) => void; lastFill: string | null; caption: string }
+type Ctx = {
+  fills: Record<string, Fill>; busy: boolean; onFill: (id: string, text: string) => void; lastFill: string | null; caption: string
+  onOpen: (id: string, label: string) => void // a part was clicked: explain it, go deeper, talk about it
+  openId: string | null
+}
+
+// Any labelled part of the diagram: click it to have it explained and to talk about it.
+function Part({ ctx, id, label, children, className = '' }: { ctx: Ctx; id: string; label: string; children: ReactNode; className?: string }) {
+  const on = ctx.openId === id
+  return (
+    <div role="button" tabIndex={0} title="Click to explain this, go deeper, or ask about it"
+      onClick={e => { e.stopPropagation(); ctx.onOpen(id, label) }}
+      onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); ctx.onOpen(id, label) } }}
+      className={`cursor-pointer rounded-lg transition hover:ring-2 hover:ring-cl-accent/60 ${on ? 'ring-2 ring-cl-accent' : ''} ${className}`}>
+      {children}
+    </div>
+  )
+}
+
+// Shrinks a wide drawing to the space it has (never below 55%; past that, scroll).
+function Fit({ width, children }: { width: number; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
+  const [room, setRoom] = useState(0)
+  const [h, setH] = useState(0)
+  useEffect(() => {
+    const ro = new ResizeObserver(() => { setRoom(box.current?.clientWidth ?? 0); setH(inner.current?.offsetHeight ?? 0) })
+    if (box.current) ro.observe(box.current)
+    if (inner.current) ro.observe(inner.current)
+    return () => ro.disconnect()
+  }, [])
+  const k = room ? Math.max(0.55, Math.min(1, room / width)) : 1
+  return (
+    <div ref={box} className="w-full">
+      <div style={{ width: width * k, height: h ? h * k : undefined }} className="mx-auto">
+        <div ref={inner} className="origin-top-left" style={{ width, transform: k < 1 ? `scale(${k})` : undefined }}>{children}</div>
+      </div>
+    </div>
+  )
+}
 
 // A part of the diagram the learner fills: type on the diagram, Enter, Claude checks.
 function BlankBox({ el, ctx, className = '' }: { el: Blank; ctx: Ctx; className?: string }) {
@@ -16,7 +55,7 @@ function BlankBox({ el, ctx, className = '' }: { el: Blank; ctx: Ctx; className?
     <div className={`rounded-lg border-2 border-dashed px-2 py-1.5 text-left ${wrong ? 'border-red-400 bg-red-50' : 'border-cl-accent bg-orange-50/70'} ${className}`}
       onClick={e => e.stopPropagation()}>
       <div className={`text-[10.5px] font-semibold leading-tight ${wrong ? 'text-red-700' : 'text-cl-accentDk'}`}>
-        {wrong ? 'Not quite. ' : '? '}{el.prompt || 'Fill this in'}
+        {wrong ? 'Not quite. ' : ''}{el.prompt || 'Fill this in'}
       </div>
       <input value={text} disabled={pending} placeholder={pending ? 'checking…' : 'type, then Enter'}
         onChange={e => setText(e.target.value)}
@@ -39,11 +78,14 @@ function Sequence({ d, ctx }: { d: Extract<Diagram, { form: 'sequence' }>; ctx: 
   const W = PAD * 2 + GAP * (lanes.length - 1)
   const x = (name: string) => PAD + GAP * Math.max(0, lanes.findIndex(l => l.toLowerCase() === name.toLowerCase()))
   return (
-    <div style={{ width: W }} className="relative mx-auto">
-      {lanes.map(l => <div key={l} style={{ left: x(l) }} className="absolute bottom-0 top-10 border-l-2 border-dashed border-cl-line2" />)}
-      <div className="relative h-12">
+    <Fit width={W}>
+    <div style={{ width: W }} className="relative">
+      {lanes.map(l => <div key={l} style={{ left: x(l) }} className="absolute bottom-0 top-14 border-l-2 border-dashed border-cl-line2" />)}
+      <div className="relative h-16">
         {lanes.map(l => (
-          <div key={l} style={{ left: x(l) - 80, width: 160 }} className="absolute top-0 rounded-lg border border-cl-line2 bg-white py-2 text-center text-[13.5px] font-semibold text-cl-ink shadow-sm">{l}</div>
+          <div key={l} style={{ left: x(l) - 80, width: 160 }} className="absolute top-0">
+            <Part ctx={ctx} id={`lane:${l}`} label={l}><div className="rounded-lg border border-cl-line2 bg-white px-2 py-1.5 text-center text-[12.5px] font-semibold leading-tight text-cl-ink shadow-sm">{l}</div></Part>
+          </div>
         ))}
       </div>
       {d.steps.map((s, i) => {
@@ -56,7 +98,7 @@ function Sequence({ d, ctx }: { d: Extract<Diagram, { form: 'sequence' }>; ctx: 
             <div className="absolute bottom-[15px] left-1 text-[10px] text-cl-faint">{i + 1}</div>
             <div style={{ marginLeft: left, width }} className="flex justify-center">
               {s.blank ? <BlankBox el={s} ctx={ctx} className="w-full max-w-[260px]" /> : (
-                <span className={`rounded px-1.5 text-center text-[13.5px] leading-tight ${s.filled ? 'bg-teal-50 font-medium text-teal-900' : 'bg-cl-bg text-cl-ink'}`}>{s.label}<Got el={s} /></span>
+                <Part ctx={ctx} id={s.id} label={s.label}><span className={`block rounded px-1.5 text-center text-[13.5px] leading-tight ${s.filled ? 'bg-teal-50 font-medium text-teal-900' : 'bg-cl-bg text-cl-ink'}`}>{s.label}<Got el={s} /></span></Part>
               )}
             </div>
             {self ? (
@@ -70,6 +112,7 @@ function Sequence({ d, ctx }: { d: Extract<Diagram, { form: 'sequence' }>; ctx: 
         )
       })}
     </div>
+    </Fit>
   )
 }
 
@@ -131,10 +174,12 @@ function Concept({ d, ctx }: { d: Extract<Diagram, { form: 'concept' }>; ctx: Ct
     : {
         id: n.id, label: n.label, w: 190, h: n.note ? 64 : 42,
         body: (
-          <div className={`rounded-xl border px-3 py-2 text-center shadow-sm ${n.filled ? 'border-teal-600 bg-teal-50' : 'border-cl-line2 bg-white'}`}>
-            <div className="text-[13.5px] font-semibold leading-tight text-cl-ink">{n.label}<Got el={n} /></div>
-            {n.note && <div className="mt-0.5 text-[11.5px] leading-tight text-cl-mute">{n.note}</div>}
-          </div>
+          <Part ctx={ctx} id={n.id} label={n.label} className="rounded-xl">
+            <div className={`rounded-xl border px-3 py-2 text-center shadow-sm ${n.filled ? 'border-teal-600 bg-teal-50' : 'border-cl-line2 bg-white'}`}>
+              <div className="text-[13.5px] font-semibold leading-tight text-cl-ink">{n.label}<Got el={n} /></div>
+              {n.note && <div className="mt-0.5 text-[11.5px] leading-tight text-cl-mute">{n.note}</div>}
+            </div>
+          </Part>
         ),
       })
   return <Graph nodes={nodes} links={d.links} />
@@ -146,10 +191,12 @@ function Structure({ d, ctx }: { d: Extract<Diagram, { form: 'structure' }>; ctx
     : {
         id: b.id, label: b.label, w: 200, h: 34 + (b.rows?.length ?? 0) * 21,
         body: (
-          <div className={`overflow-hidden rounded-lg border-2 shadow-sm ${b.filled ? 'border-teal-600 bg-teal-50' : 'border-cl-ink/70 bg-white'}`}>
-            <div className="bg-cl-panel px-2 py-1 text-[12.5px] font-semibold text-cl-ink">{b.label}<Got el={b} /></div>
-            {b.rows?.map((r, i) => <div key={i} className="border-t border-cl-line px-2 py-0.5 font-mono text-[11.5px] text-cl-text">{r}</div>)}
-          </div>
+          <Part ctx={ctx} id={b.id} label={b.label}>
+            <div className={`overflow-hidden rounded-lg border-2 shadow-sm ${b.filled ? 'border-teal-600 bg-teal-50' : 'border-cl-ink/70 bg-white'}`}>
+              <div className="bg-cl-panel px-2 py-1 text-[12.5px] font-semibold text-cl-ink">{b.label}<Got el={b} /></div>
+              {b.rows?.map((r, i) => <div key={i} className="border-t border-cl-line px-2 py-0.5 font-mono text-[11.5px] text-cl-text">{r}</div>)}
+            </div>
+          </Part>
         ),
       })
   return <Graph nodes={nodes} links={d.arrows} />
@@ -162,10 +209,12 @@ function Timeline({ d, ctx }: { d: Extract<Diagram, { form: 'timeline' }>; ctx: 
       <div className="absolute bottom-0 left-1/2 top-0 w-0.5 -translate-x-1/2 bg-cl-line2" />
       {d.events.map((e, i) => {
         const card = e.blank ? <BlankBox el={e} ctx={ctx} className="w-full max-w-[260px]" /> : (
-          <div className={`inline-block max-w-[300px] rounded-lg border px-3 py-1.5 text-left shadow-sm ${e.filled ? 'border-teal-600 bg-teal-50' : 'border-cl-line2 bg-white'}`}>
-            <div className="text-[13.5px] font-semibold leading-snug text-cl-ink">{e.label}<Got el={e} /></div>
-            {e.note && <div className="text-[12px] leading-snug text-cl-mute">{e.note}</div>}
-          </div>
+          <Part ctx={ctx} id={e.id} label={`${e.when}: ${e.label}`} className="inline-block">
+            <div className={`max-w-[300px] rounded-lg border px-3 py-1.5 text-left shadow-sm ${e.filled ? 'border-teal-600 bg-teal-50' : 'border-cl-line2 bg-white'}`}>
+              <div className="text-[13.5px] font-semibold leading-snug text-cl-ink">{e.label}<Got el={e} /></div>
+              {e.note && <div className="text-[12px] leading-snug text-cl-mute">{e.note}</div>}
+            </div>
+          </Part>
         )
         return (
           <div key={e.id ?? i} className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-2">
@@ -184,15 +233,15 @@ function Grid({ d, ctx }: { d: Extract<Diagram, { form: 'grid' }>; ctx: Ctx }) {
   return (
     <table className="mx-auto border-separate border-spacing-0 overflow-hidden rounded-xl bg-white text-[13.5px] shadow-sm ring-1 ring-cl-line">
       <thead>
-        <tr><th className="bg-cl-panel" />{d.columns.map(c => <th key={c} className="bg-cl-panel px-4 py-2 text-left font-semibold text-cl-ink">{c}</th>)}</tr>
+        <tr><th className="bg-cl-panel" />{d.columns.map(c => <th key={c} className="bg-cl-panel px-2 py-1.5 text-left font-semibold text-cl-ink"><Part ctx={ctx} id={`col:${c}`} label={c} className="px-2 py-0.5">{c}</Part></th>)}</tr>
       </thead>
       <tbody>
         {d.rows.map((r, i) => (
           <tr key={i}>
-            <th className="border-t border-cl-line bg-cl-panel px-4 py-2 text-left font-medium text-cl-text">{r.label}</th>
+            <th className="border-t border-cl-line bg-cl-panel px-2 py-1.5 text-left font-medium text-cl-text"><Part ctx={ctx} id={`row:${r.label}`} label={r.label} className="px-2 py-0.5">{r.label}</Part></th>
             {r.cells.map((c, j) => (
               <td key={c.id ?? j} className={`min-w-[150px] border-t border-cl-line px-3 py-2 align-top ${c.filled ? 'bg-teal-50' : ''}`}>
-                {c.blank ? <BlankBox el={c} ctx={ctx} /> : <>{c.text}<Got el={c} /></>}
+                {c.blank ? <BlankBox el={c} ctx={ctx} /> : <Part ctx={ctx} id={c.id} label={`${r.label}, ${d.columns[j] ?? ''}: ${c.text}`} className="-mx-1 px-1">{c.text}<Got el={c} /></Part>}
               </td>
             ))}
           </tr>
@@ -239,12 +288,11 @@ export function DiagramView({ diagram, ...ctx }: { diagram: Diagram | null } & C
           <h2 className="font-serif text-2xl text-cl-ink">{diagram.title}</h2>
           <span className="rounded-full bg-cl-panel px-2 py-0.5 text-[11px] text-cl-mute ring-1 ring-cl-line">{NAMES[diagram.form]}</span>
         </div>
-        {(open > 0 || done > 0) && (
-          <div className="-mt-3 mb-5 text-center text-xs text-cl-mute">
-            {open > 0 ? <>{open} part{open > 1 ? 's' : ''} for you to fill <span className="text-cl-faint">(dashed: type there, press Enter)</span></> : 'All parts filled'}
-            {done > 0 && <span className="text-teal-700"> · {done} filled ✓</span>}
-          </div>
-        )}
+        <div className="-mt-3 mb-5 text-center text-xs text-cl-mute">
+          Click any part to have it explained or to ask about it
+          {open > 0 && <> · {open} dashed part{open > 1 ? 's' : ''} for you to fill</>}
+          {done > 0 && <span className="text-teal-700"> · {done} filled ✓</span>}
+        </div>
         {diagram.form === 'sequence' && <Sequence d={diagram} ctx={ctx} />}
         {diagram.form === 'concept' && <Concept d={diagram} ctx={ctx} />}
         {diagram.form === 'structure' && <Structure d={diagram} ctx={ctx} />}

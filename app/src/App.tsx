@@ -10,8 +10,7 @@ import { MapRows, MapsMenu, useMaps } from './components/MapList'
 import { NodePanel } from './components/NodePanel'
 import { PathRail } from './components/PathRail'
 import { ScenePlay } from './components/ScenePlay'
-import { TextView } from './components/TextView'
-import type { Action, MapDoc, Purpose, Settings, View, Working } from './types'
+import type { Action, MapDoc, Purpose, Settings, Working } from './types'
 
 const DEFAULTS: Settings = { model: '', effort: '', view: 'visual' }
 
@@ -121,7 +120,7 @@ function useCaption(map: MapDoc | null, busy: boolean, stream: { threadId: strin
 }
 
 export default function App() {
-  const { map, busy, working, queued, stream, online } = useLiveMap()
+  const { map, busy, working, queued, waiting, stream, online } = useLiveMap()
   const [selection, setSelection] = useState<string[]>([])
   const [showDropped, setShowDropped] = useState(true)
   const [starting, setStarting] = useState(false)
@@ -132,13 +131,12 @@ export default function App() {
   const [centre, setCentre] = useState<'play' | 'topic'>('play')
   const [panelOpen, setPanelOpen] = useState(true)
   const [error, setError] = useState('')
-  const [settings, setSettings] = useState<Settings>(() => stored('settings', DEFAULTS))
+  const [settings, setSettings] = useState<Settings>(() => ({ ...stored('settings', DEFAULTS), view: 'visual' }))
   const caption = useCaption(map, busy, stream)
 
   const updateSettings = useCallback((s: Partial<Settings>) => {
     setSettings(prev => { const next = { ...prev, ...s }; store('settings', next); return next })
   }, [])
-  const setView = (view: View) => updateSettings({ view })
 
   const run = useCallback(async (a: Action) => {
     const r = await act(a, settings)
@@ -155,6 +153,12 @@ export default function App() {
     if (launch && map && map.id !== launch.from && (Object.keys(map.nodes).length || map.diagram)) setLaunch(null)
   }, [launch, map])
   const stop = () => { void act({ type: 'stop' }, settings) }
+  const openPart = async (anchor: string, label: string) => {
+    const r = await act({ type: 'focus', blankId: anchor, text: label }, settings)
+    if (!r.nodeId) { setError(r.error ?? ''); return }
+    setSelection([r.nodeId])
+    if (!map?.nodes[r.nodeId]?.detail) void act({ type: 'explain', nodeId: r.nodeId }, settings)
+  }
   const openMap = async (mapId: string) => {
     setSelection([])
     const r = await act({ type: 'open', mapId }, settings)
@@ -198,7 +202,6 @@ export default function App() {
   // on a narrow window the panel floats over the work instead of pushing it aside
   const roomy = typeof window !== 'undefined' && window.innerWidth >= 1200
   const learn = map.purpose === 'learn'
-  const view = settings.view
   const one = selection.length === 1 ? map.nodes[selection[0]] : undefined
   const select = (id: string) => setSelection(s => (s.length === 1 && s[0] === id ? [] : [id]))
   const lastClaude = [...map.chat].reverse().find(c => c.role === 'claude')?.text ?? ''
@@ -207,6 +210,13 @@ export default function App() {
   const step = learn && one && one.parent ? one : undefined
   const scene = step ? map.scenes?.[step.id] : undefined
   const building = step && working?.nodeId === step.id && working.label === 'Building a playable scene'
+  // the first open step after the one in view (or the first open step at all)
+  const nextOpenStep = (id?: string) => {
+    const root = Object.values(map.nodes).find(n => !n.parent)
+    const steps = Object.values(map.nodes).filter(n => n.parent === root?.id && n.kind === 'question' && !n.dropped).sort((a, b) => a.order - b.order)
+    const from = id ? steps.findIndex(n => n.id === id) + 1 : 0
+    return [...steps.slice(from), ...steps.slice(0, from)].find(n => n.status === 'open' && !n.revealed)?.id ?? steps[from]?.id
+  }
   const nextStep = (id: string) => {
     const s = map.nodes[id]
     const sibs = Object.values(map.nodes).filter(n => n.parent === s?.parent && n.kind === 'question' && !n.dropped).sort((a, b) => a.order - b.order)
@@ -216,13 +226,13 @@ export default function App() {
   // in a narrow window the board needs the room: the panel tucks away while you play
   const tucked = !!(scene && centre === 'play' && !roomy && !panelOpen)
   const panel = one && !tucked && (
-    <NodePanel map={map} node={one} busy={busy} working={working} stream={stream} settings={settings} onSettings={updateSettings}
+    <NodePanel map={map} node={one} busy={busy} working={working} waiting={waiting} stream={stream} settings={settings} onSettings={updateSettings}
       run={run} onSelect={id => setSelection([id])} onClose={() => (scene && !roomy ? setPanelOpen(false) : setSelection([]))} />
   )
 
   const floating = (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 px-4 pb-4" style={{ paddingRight: one && roomy ? 450 : undefined }}>
-      {caption.text && (
+      {caption.text && !(caption.live && working?.nodeId && working.nodeId === one?.id) && (
         <div onClick={caption.clear} className="pointer-events-auto max-w-2xl cursor-pointer rounded-2xl bg-white/95 px-4 py-2.5 shadow-lg ring-1 ring-cl-line backdrop-blur">
           <div className="answer answer-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{caption.text}</ReactMarkdown></div>
         </div>
@@ -242,10 +252,10 @@ export default function App() {
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold text-cl-ink">{map.title}</div>
         </div>
-        <Segmented value={view} options={[['visual', '◫ Visual'], ['text', '☰ Text']]} onChange={setView} />
+        <div />
         <div className="flex items-center justify-end gap-2">
           <Segmented value={map.purpose} options={[['decide', 'Decide'], ['learn', 'Learn']]} onChange={purpose => { void run({ type: 'purpose', purpose }) }} />
-          {!learn && view === 'visual' && (
+          {!learn && (
             <label className="flex items-center gap-1 text-xs text-cl-mute"><input type="checkbox" checked={showDropped} onChange={e => setShowDropped(e.target.checked)} /> Set aside</label>
           )}
           {!learn && <button onClick={() => { void run({ type: 'next' }) }} disabled={busy} className="rounded-lg bg-cl-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-cl-accentDk disabled:opacity-40">Next ▸</button>}
@@ -258,15 +268,12 @@ export default function App() {
       {error && <div className="flex items-center bg-amber-50 px-4 py-1.5 text-sm text-amber-900"><span className="flex-1">{error}</span><button onClick={() => setError('')} className="text-amber-700">×</button></div>}
 
       <main className="relative min-h-0 flex-1">
-        {view === 'text' ? (
-          <TextView map={map} busy={busy} stream={stream} settings={settings} onSettings={updateSettings}
-            onSend={text => { void run({ type: 'message', text, selection: [] }) }} onVisual={() => setView('visual')} onStop={stop} />
-        ) : learn ? (
+        {learn ? (
           <div className="flex h-full">
-            <PathRail map={map} selected={one?.id ?? null} onSelect={select} busy={busy} workingId={working?.nodeId ?? null} onNext={() => { void run({ type: 'next' }) }} />
+            <PathRail map={map} selected={one?.id ?? null} onSelect={select} busy={busy} workingId={working?.nodeId ?? null} onNext={() => { const n = nextOpenStep(one?.id); if (n) setSelection([n]) }} />
             <div className="relative min-w-0 flex-1">
               <div className="flex h-full flex-col transition-[padding]" style={{ paddingRight: one && roomy ? 440 : 0 }}>
-                {step && (scene || building || step.kind === 'question') && (
+                {step && (scene || building || (step.kind === 'question' && !/^write it/i.test(step.title))) && (
                   <div className="relative flex items-center justify-center gap-2 pt-3">
                     {tucked && <button onClick={() => setPanelOpen(true)} className="absolute right-3 top-3 rounded-lg border border-cl-line2 bg-white px-2.5 py-1 text-xs text-cl-text hover:border-cl-accent">💬 Hints &amp; thread</button>}
                     {scene ? (
@@ -294,6 +301,7 @@ export default function App() {
                   ) : (
                     <div className="h-full" onClick={() => setSelection([])}>
                       <DiagramView diagram={map.diagram} fills={map.fills ?? {}} busy={busy} lastFill={lastFill} caption={busy ? (stream.threadId === null ? stream.text : '') : lastClaude}
+                        openId={one?.anchor ?? null} onOpen={(anchor, label) => { void openPart(anchor, label) }}
                         onFill={(blankId, text) => { setLastFill(blankId); void run({ type: 'fill', blankId, text }) }} />
                     </div>
                   )}

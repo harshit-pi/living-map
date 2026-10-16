@@ -17,6 +17,7 @@ export type MapNode = {
   dropped?: boolean
   fresh?: boolean
   revealed?: boolean
+  anchor?: string
 }
 
 export type ChatLine = { role: 'you' | 'claude' | 'system'; text: string; ts: number; view?: View | 'thread' }
@@ -87,6 +88,7 @@ export type Action =
   | { type: 'purpose'; purpose: Purpose }
   | { type: 'next' | 'stop' }
   | { type: 'open'; mapId: string }
+  | { type: 'focus'; blankId: string; text: string }
   | { type: 'scene' | 'playshow' | 'replay'; nodeId: string }
   | { type: 'play'; nodeId: string; key: string }
 

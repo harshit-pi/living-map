@@ -5,7 +5,7 @@ A local web app that drives your own Claude Code (`claude -p`) from a visual can
 - **Decide:** a question tree. Choose, go deeper, challenge, and reply on any node in a side thread.
 - **Learn:** a path of steps plus a topic diagram in the shape that fits the subject (sequence, concept map, timeline, structure, grid). Key parts are left blank; you type on the diagram and Claude checks it.
 - **Play a step:** do it by hand on a board, array or tree, move by move; clicks are checked instantly on the server. Coding problems end with **Write it**, where Claude traces your code.
-- **Visual | Text:** each takes the full screen. Text is a Claude-style chat of the main thread.
+- **Click any part** of a diagram to have it explained in plain words, go deeper, or ask about it in a side thread.
 
 ## Run
 

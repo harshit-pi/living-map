@@ -29,6 +29,7 @@ const DIAGRAM = `TOPIC DIAGRAM (learning maps only). Replace it whole with {"op"
   {"form":"grid","title":"…","columns":["SQL","NoSQL"],"rows":[{"label":"Schema","cells":[{"id":"c1","text":"Fixed"},{"id":"c2","text":"Flexible"}]}]}
 DRAW IT ON A TINY CONCRETE EXAMPLE: real values, real names, real dates, real messages (e.g. the actual input words and the groups they land in; the actual packets with their numbers). A blank is then something the learner can work out by hand: a value, a key, a pointer, a message, a cause. Never a generic pipeline of abstract stages ("Input feeds Step feeds Output").
 For coding problems, prefer the data the algorithm builds (a grid of input → computed key → where it goes, or the structure's actual state) over a flowchart of the code.
+TEACH BEFORE YOU TEST: a blank must be something the learner can work out from what the diagram already shows plus everyday sense, never something that needs a term or fact they have not been shown. If the question reads as new to the subject ("explain X", "what is X", "how does X work"), draw the whole picture with every label filled and at most ONE blank, the most inferable one; labels name what each part does in plain words ("Vector DB: finds the stored text closest in meaning"), not bare jargon.
 BLANKS: any step, node, event, box or cell may be a blank the learner fills: give it an "id", set "blank":true and a "prompt" (≤10 words), and leave its label/text EMPTY. Never put a blank's answer anywhere in the spec.
 At most 12 elements in a diagram; short labels. Arrows mean ONE thing per diagram, and every arrow has a label.
 Edit in place: when you send the diagram again, keep every element and id that stays, keep filled parts filled, and change only what the move needs.
@@ -72,7 +73,7 @@ const VIEW = {
 export function systemPrompt({ purpose = 'decide', context = '' }) {
   const parts = [PURPOSE[purpose] ?? PURPOSE.decide, OPS]
   if (purpose === 'learn') parts.push(DIAGRAM, SCENE)
-  parts.push('EXPLAIN on a node: write that node\'s detail with an update op (markdown, at most 180 words, the key point first); the caption is one sentence.')
+  parts.push('EXPLAIN on a node: write that node\'s detail with an update op (markdown, at most 180 words, the key point first). Assume the reader may not know the field: define every term in plain words and give one tiny concrete example. Refer to parts of the diagram by their labels, never by ids. The caption is one sentence.')
   parts.push('THREADS: a message may come from a thread pinned to one node. Then stay on that node: answer from its path, and change only that node or nodes under it.')
   if (context) parts.push(`BACKGROUND THE USER HAS ALREADY ESTABLISHED. Build on it, use its facts and numbers, and do not re-ask what it settles:\n\n${context}`)
   return parts.join('\n\n')
@@ -282,13 +283,13 @@ export function cleanSpec(spec) {
   switch (spec.form) {
     case 'sequence': {
       // every party a step names gets a lane, even if Claude left it out of "lanes"
-      const lanes = cap(spec.lanes, 6).map(l => str(l, 30)).filter(Boolean)
-      for (const st of cap(spec.steps, 14)) for (const who of [str(st?.from, 30), str(st?.to, 30)])
+      const lanes = cap(spec.lanes, 6).map(l => str(l, 50)).filter(Boolean)
+      for (const st of cap(spec.steps, 14)) for (const who of [str(st?.from, 50), str(st?.to, 50)])
         if (who && lanes.length < 6 && !lanes.some(l => l.toLowerCase() === who.toLowerCase())) lanes.push(who)
       return {
         form: 'sequence', title, lanes,
-        steps: cap(spec.steps, 14).map((s, i) => blankOf(s, 'label') ? { ...blankOf(s, 'label'), from: str(s.from, 30), to: str(s.to, 30) }
-          : { id: str(s.id, 40) || `s${i}`, from: str(s.from, 30), to: str(s.to, 30), label: str(s.label, 60) }),
+        steps: cap(spec.steps, 14).map((s, i) => blankOf(s, 'label') ? { ...blankOf(s, 'label'), from: str(s.from, 50), to: str(s.to, 50) }
+          : { id: str(s.id, 40) || `s${i}`, from: str(s.from, 50), to: str(s.to, 50), label: str(s.label, 60) }),
       }
     }
     case 'concept':

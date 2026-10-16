@@ -82,7 +82,7 @@ const publicMap = () => map && {
   ...map, history: undefined, notes: undefined, play: undefined,
   scenes: Object.fromEntries(Object.entries(map.scenes ?? {}).map(([id, sc]) => [id, sceneView(sc, map.play?.[id])])),
 }
-const pushMap = () => { save(); emit({ type: 'map', map: publicMap(), busy, working, queued }) }
+const pushMap = () => { save(); emit({ type: 'map', map: publicMap(), busy, working, queued: waitingList.length, waiting: waitingList }) }
 
 // ---- threads --------------------------------------------------------------------
 
@@ -174,14 +174,15 @@ function recordUsage(m, r, settings, firstMs, endMs) {
 // instead of being refused, so nothing you type is lost. Stop, New and opening
 // another map cancel what is waiting.
 let queue = Promise.resolve()
-let queued = 0
+let waitingList = [] // moves waiting their turn: { label, nodeId }
 let gen = 0
 function claudeTurn(action, settings, opts = {}) {
   const myGen = gen, forMap = map
-  queued++
+  const ticket = { label: opts.label ?? 'Thinking', nodeId: opts.nodeId ?? null }
+  waitingList.push(ticket)
   if (busy) pushMap()
   const run = queue.then(async () => {
-    queued--
+    waitingList = waitingList.filter(t => t !== ticket)
     if (myGen !== gen || map !== forMap) {
       if (opts.blankId && forMap.fills?.[opts.blankId]?.state === 'pending') delete forMap.fills[opts.blankId]
       return { error: 'Cancelled.' }
@@ -277,6 +278,7 @@ function finishScene(node, p) {
 // End the running turn; what streamed so far stays on the canvas.
 async function stop() {
   gen++ // whatever is waiting is cancelled too
+  waitingList = []
   if (!busy) return
   stopped = true
   child?.kill('SIGTERM')
@@ -384,6 +386,22 @@ async function act({ type, nodeId, threadId, blankId, mapId, key, text, selectio
       pushMap()
       return claudeTurn(`FILL: the learner wrote "${text}" in blank ${blankId} on the topic diagram. Judge it with a judge op.`, settings, { label: 'Checking your answer', blankId })
     }
+    case 'focus': {
+      // a part of the topic diagram you clicked becomes a node you can open,
+      // explain, go deeper on and talk about, listed under what you looked into
+      const anchor = String(blankId ?? '').slice(0, 60)
+      if (!anchor) return { error: 'Nothing to open.' }
+      const found = Object.values(map.nodes).find(n => n.anchor === anchor)
+      if (found) return { nodeId: found.id }
+      const root = Object.values(map.nodes).find(n => !n.parent)
+      const id = `el-${anchor.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'part'}`
+      map.nodes[id] = {
+        id, parent: root?.id ?? null, kind: 'fact', title: String(text ?? anchor).slice(0, 80), summary: '', detail: '',
+        status: 'info', by: 'you', updatedAt: Date.now(), order: Object.keys(map.nodes).length, anchor,
+      }
+      pushMap()
+      return { nodeId: id }
+    }
     case 'scene':
       if (!node) return { error: 'No such step.' }
       return claudeTurn(`SCENE for step ${named}: build a playable scene for this step (op "scene", step "${nodeId}"), on the same tiny example as the diagram where it fits.`, settings, { label: 'Building a playable scene', nodeId })
@@ -415,7 +433,8 @@ async function act({ type, nodeId, threadId, blankId, mapId, key, text, selectio
       return {}
     case 'explain':
       if (!node) return { error: 'No such node.' }
-      return claudeTurn(`EXPLAIN ${named}: write its detail. Required: an update op on "${nodeId}" with a "detail" field.`, settings, { label: 'Writing the explanation', nodeId })
+      if (node.detail || (working?.nodeId === nodeId && working.label === 'Writing the explanation') || waitingList.some(t => t.nodeId === nodeId && t.label === 'Writing the explanation')) return {}
+      return claudeTurn(`EXPLAIN ${named}${node.anchor ? ` (a part of the topic diagram the learner clicked: say what it is, what it does in THIS diagram, and what it receives and returns there)` : ''}: write its detail. Required: an update op on "${nodeId}" with a "detail" field.`, settings, { label: 'Writing the explanation', nodeId })
     case 'deeper':
       say(`Go deeper: ${node?.title}`)
       return claudeTurn(`go deeper on ${named}.`, settings, { label: map.purpose === 'learn' ? 'Breaking it into smaller steps' : 'Going deeper', nodeId })
@@ -455,7 +474,7 @@ app.get('/api/events', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
   res.flushHeaders()
   clients.add(res)
-  res.write(`data: ${JSON.stringify({ type: 'map', map: publicMap(), busy, working, queued })}\n\n`)
+  res.write(`data: ${JSON.stringify({ type: 'map', map: publicMap(), busy, working, queued: waitingList.length, waiting: waitingList })}\n\n`)
   req.on('close', () => clients.delete(res))
 })
 // a heartbeat, so a page can tell a quiet server from a gone one and reconnect

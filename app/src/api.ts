@@ -9,6 +9,7 @@ export function useLiveMap() {
   const [busy, setBusy] = useState(false)
   const [working, setWorking] = useState<Working | null>(null)
   const [queued, setQueued] = useState(0)
+  const [waiting, setWaiting] = useState<{ label: string; nodeId: string | null }[]>([])
   const [stream, setStream] = useState<{ threadId: string | null; text: string }>({ threadId: null, text: '' })
   const [online, setOnline] = useState(true)
   useEffect(() => {
@@ -34,6 +35,7 @@ export function useLiveMap() {
           setBusy(ev.busy)
           setWorking(ev.working ?? null)
           setQueued(ev.queued ?? 0)
+          setWaiting(ev.waiting ?? [])
           if (!ev.busy) setStream({ threadId: null, text: '' })
         } else if (ev.type === 'delta') setStream(s => ({ threadId: ev.threadId ?? null, text: s.text + ev.text }))
         else if (ev.type === 'busy') {
@@ -51,10 +53,10 @@ export function useLiveMap() {
     }, 5000)
     return () => { closed = true; clearTimeout(retry); clearInterval(watch); es?.close() }
   }, [])
-  return { map, busy, working, queued, stream, online }
+  return { map, busy, working, queued, waiting, stream, online }
 }
 
-export async function act(action: Action, settings: Settings): Promise<{ error?: string; threadId?: string; ok?: boolean }> {
+export async function act(action: Action, settings: Settings): Promise<{ error?: string; threadId?: string; ok?: boolean; nodeId?: string }> {
   try {
     const r = await fetch('/api/action', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...action, settings }),
