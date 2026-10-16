@@ -4,13 +4,14 @@ import remarkGfm from "remark-gfm";
 
 import { Composer, type ComposerHandle } from "./Composer.tsx";
 import { lookOf } from "./look.ts";
-import type {
-  Action,
-  MapDoc,
-  MapNode,
-  NodeAction,
-  Settings,
-  Working,
+import {
+  ASK_ANSWER,
+  type Action,
+  type MapDoc,
+  type MapNode,
+  type NodeAction,
+  type Settings,
+  type Working,
 } from "../../shared/model.ts";
 
 type Run = (a: Action) => Promise<{ threadId?: string }>;
@@ -137,6 +138,11 @@ export function NodePanel({
     void run({ type, nodeId: node.id });
   };
   const writeIt = learn && /^write it/i.test(node.title);
+  // a shown answer is read in the thread it was asked in; older maps kept it
+  // only in the detail block
+  const answerInThread =
+    node.revealed &&
+    threads.some((t) => t.messages.some((m) => m.text === ASK_ANSWER));
 
   return (
     <aside className="absolute bottom-3 right-3 top-3 z-20 flex w-[min(420px,calc(100%-24px))] flex-col overflow-hidden rounded-2xl bg-surface shadow-xl ring-1 ring-line">
@@ -201,7 +207,15 @@ export function NodePanel({
               )}
               {openStep && (
                 <Btn
-                  onClick={() => act("answer")}
+                  onClick={async () => {
+                    // the answer arrives in this step's thread: show that one
+                    const r = await run({
+                      type: "answer",
+                      nodeId: node.id,
+                      threadId: active?.id,
+                    });
+                    if (r.threadId) setActiveId(r.threadId);
+                  }}
                   title="Shown answers are not counted as yours"
                 >
                   Show answer
@@ -283,7 +297,7 @@ export function NodePanel({
             ))}
           </div>
         )}
-        {node.detail && (
+        {node.detail && !answerInThread && (
           <details
             open
             className="mb-3 rounded-lg border border-line bg-panel px-3 py-2"

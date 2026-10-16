@@ -267,9 +267,15 @@ test("Show answer asks once more when the answer did not arrive, and only then m
   calls[1].release(
     'Done.\n```map\n{"ops":[{"op":"update","id":"step","detail":"The owner frees it."}]}\n```',
   );
-  await done;
+  const r = await done;
   assert.equal(m.nodes.step.detail, "The owner frees it.");
   assert.equal(m.nodes.step.revealed, true);
+  // asked and answered in the step's thread, not the main conversation
+  const thread = m.threads[r.threadId ?? ""];
+  assert.equal(thread?.nodeId, "step");
+  assert.equal(thread.messages[0].text, "Show me the answer.");
+  assert.equal(thread.messages.at(-1)?.role, "claude");
+  assert.equal(m.chat.length, 0);
 });
 
 test("Stop during an explanation does not start a second try", async () => {

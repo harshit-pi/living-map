@@ -199,9 +199,13 @@ export type NodeAction =
   | "playshow"
   | "replay";
 
+// what Show answer says in the step's thread; the panel uses it to tell that
+// the answer is already there
+export const ASK_ANSWER = "Show me the answer.";
+
 export type Action =
   | { type: "new"; text: string; purpose: Purpose }
-  | { type: NodeAction; nodeId: string }
+  | { type: NodeAction; nodeId: string; threadId?: string }
   | { type: "thread"; nodeId: string; threadId?: string; text: string }
   | { type: "fork"; nodeId: string }
   | { type: "fill"; blankId: string; text: string }

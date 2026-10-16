@@ -2,7 +2,11 @@
 // playable scenes (checked here, with no model call).
 
 import { hintCount, withDetail, type Ctx } from "./context.ts";
-import type { ActionResult, MapNode } from "../../shared/model.ts";
+import {
+  ASK_ANSWER,
+  type ActionResult,
+  type MapNode,
+} from "../../shared/model.ts";
 import { accepts, revealBlank } from "../core/diagram.ts";
 import { newPlay, playMove, showMove } from "../core/scene.ts";
 import { own, type Play } from "../core/types.ts";
@@ -73,14 +77,35 @@ export function hint(ctx: Ctx, nodeId: string): Promise<ActionResult> {
   );
 }
 
-export async function answer(ctx: Ctx, nodeId: string): Promise<ActionResult> {
+// The answer is written in the step's thread, where you were working on it,
+// not as a caption over the canvas.
+export async function answer(
+  ctx: Ctx,
+  nodeId: string,
+  threadId?: string,
+): Promise<ActionResult> {
   const found = ctx.node(nodeId);
-  ctx.say(`Show answer: ${found?.node.title}`);
+  if (!found) return { error: "No such node." };
+  const given = threadId ? own(ctx.map.threads, threadId) : undefined;
+  const tid =
+    given?.nodeId === nodeId
+      ? given.id
+      : (Object.values(ctx.map.threads)
+          .filter((t) => t.nodeId === nodeId)
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .at(-1)?.id ?? ctx.engine.openThread(ctx.map, nodeId));
+  ctx.say(ASK_ANSWER, tid);
   const r = await withDetail(
     ctx,
     nodeId,
-    `SHOW ANSWER on step ${found?.named}. Required: an update op on "${nodeId}" with the full answer in its "detail" field; fill this step's blanks with judge ops (state right, with the label).`,
-    { label: "Writing the answer", nodeId, sections: ["diagram"] },
+    `SHOW ANSWER on step ${found.named}, asked in its thread. Reply with the full answer, worked through for this example. Required: an update op on "${nodeId}" with the same answer in its "detail" field; fill this step's blanks with judge ops (state right, with the label).`,
+    {
+      label: "Writing the answer",
+      nodeId,
+      threadId: tid,
+      view: "thread",
+      sections: ["diagram", "threads"],
+    },
   );
   // a shown answer is not one you earned: never credit it as solved; and only
   // mark it shown once an answer actually arrived
@@ -89,7 +114,7 @@ export async function answer(ctx: Ctx, nodeId: string): Promise<ActionResult> {
     node.revealed = true;
     ctx.engine.push();
   }
-  return r;
+  return { ...r, threadId: tid };
 }
 
 export function buildScene(
