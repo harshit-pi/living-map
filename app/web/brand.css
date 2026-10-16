@@ -2,6 +2,10 @@
   Living Map brand: every colour and font the app uses, by role.
   Change the look here; components only ever name these roles
   (bg-canvas, text-ink, bg-primary, border-success-line, …).
+
+  Values follow claude.ai's light palette (colour version 2), read from its CSS
+  variables; the claude.ai token each one comes from is noted. Tints claude.ai
+  does not define are mixed from its colours over white.
 */
 
 @theme static {
@@ -12,48 +16,48 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* surfaces */
-  --color-canvas: #faf9f5; /* page background */
-  --color-surface: #ffffff; /* cards, panels, inputs */
-  --color-panel: #f5f4ee; /* subtle fills: headers, chips, hover */
-  --color-bubble: #f0eee6; /* your messages */
-  --color-board-light: #fbfaf6; /* playable board squares */
-  --color-board-dark: #ede9df;
+  --color-canvas: #f9f9f7; /* page background (bg-100) */
+  --color-surface: #ffffff; /* cards, panels, inputs (bg-000) */
+  --color-panel: #f3f3f0; /* subtle fills: headers, chips, hover (bg-200) */
+  --color-bubble: #f0efec; /* your messages (bg-300) */
+  --color-board-light: #fcfcfb; /* playable board squares */
+  --color-board-dark: #e7e6e1; /* (bg-400) */
 
-  /* lines */
-  --color-line: #e8e6dc;
-  --color-line-strong: #d9d6c9;
+  /* lines: near-black at low opacity, as claude.ai draws borders */
+  --color-line: rgb(11 11 11 / 0.1);
+  --color-line-strong: rgb(11 11 11 / 0.2);
 
   /* text */
-  --color-ink: #141413; /* titles and strong text */
-  --color-body: #3d3d3a; /* running text */
-  --color-muted: #73726c; /* secondary text */
-  --color-faint: #a3a29a; /* hints, placeholders */
+  --color-ink: #131313; /* titles and strong text (text-000) */
+  --color-body: #383835; /* running text (text-200) */
+  --color-muted: #7b7974; /* secondary text (text-400) */
+  --color-faint: #a3a19b; /* placeholders, the quietest text */
 
   /* primary: buttons, focus, the thing to do next */
-  --color-primary: #d97757;
-  --color-primary-strong: #c6613f;
-  --color-primary-soft: #fff7ed;
-  --color-primary-line: #fed7aa;
-  --color-on-primary: #ffffff;
+  --color-primary: #d97757; /* (accent-brand) */
+  --color-primary-strong: #c6613f; /* hover, text on soft (brand-000) */
+  --color-primary-soft: #fbf1ee; /* primary at 10% */
+  --color-primary-line: #f4d6cd; /* primary at 30% */
+  --color-on-primary: #ffffff; /* (oncolor-100) */
 
   /* states */
-  --color-success: #0d9488; /* got it, filled, chosen */
-  --color-success-strong: #134e4a;
-  --color-success-soft: #f0fdfa;
-  --color-success-line: #99f6e4;
+  --color-success: #009300; /* got it, filled, chosen (success-100) */
+  --color-success-strong: #006300; /* (success-000) */
+  --color-success-soft: #edf7ed;
+  --color-success-line: #caeac7; /* (success-900) */
 
-  --color-warning: #f59e0b; /* open, to figure out */
-  --color-warning-strong: #92400e;
-  --color-warning-soft: #fffbeb;
-  --color-warning-line: #fde68a;
+  --color-warning: #a66a00; /* open, to figure out (warning-100) */
+  --color-warning-strong: #734500; /* (warning-000) */
+  --color-warning-soft: #fdf6e8;
+  --color-warning-line: #f9dca4; /* (warning-900) */
 
-  --color-danger: #f87171; /* wrong, attacked */
-  --color-danger-strong: #991b1b;
-  --color-danger-soft: #fef2f2;
-  --color-danger-line: #fecaca;
+  --color-danger: #d03b3b; /* wrong, attacked (danger-100) */
+  --color-danger-strong: #8e2626; /* (danger-000) */
+  --color-danger-soft: #fcf1f1;
+  --color-danger-line: #fad6d6; /* (danger-900) */
 
-  --color-hint: #a78bfa; /* hints, answers shown */
-  --color-hint-strong: #5b21b6;
-  --color-hint-soft: #f5f3ff;
-  --color-hint-line: #ddd6fe;
+  --color-hint: #7161e0; /* hints, answers shown (accent-pro-100) */
+  --color-hint-strong: #4a3aa7; /* (accent-pro-000) */
+  --color-hint-soft: #f2f1fe;
+  --color-hint-line: #dfdbfd; /* (accent-pro-900) */
 }

@@ -6,10 +6,10 @@ export function setFavicon() {
   const css = getComputedStyle(document.documentElement);
   const color = (name: string, fallback: string) =>
     css.getPropertyValue(`--color-${name}`).trim() || fallback;
-  const ink = color("ink", "#141413");
+  const ink = color("ink", "#131313");
   const surface = color("surface", "#ffffff");
   const primary = color("primary", "#d97757");
-  const muted = color("muted", "#73726c");
+  const muted = color("muted", "#7b7974");
   const stops = MARK_PATHS.stops
     .map(
       (s) =>
@@ -33,6 +33,6 @@ export function setFavicon() {
     theme.name = "theme-color";
     document.head.appendChild(theme);
   }
-  theme.content = color("canvas", "#faf9f5");
+  theme.content = color("canvas", "#f9f9f7");
   link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
