@@ -22,6 +22,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run build
+      # the agent docs (AGENTS.md, CLAUDE.md, skills) still match the code
+      - run: python3 ../.github/agent-docs/check.py ..
 
   # Every push to main that passes the checks becomes a release, named
   # v<major.minor from app/package.json>.<run number>. Running apps compare

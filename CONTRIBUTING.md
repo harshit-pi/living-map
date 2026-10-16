@@ -26,7 +26,7 @@ The same checks run in the pre-commit hook and in CI. Please don't bypass the ho
 
 ## Conventions
 
-The full list is in [app/AGENTS.md](app/AGENTS.md). The main ones:
+The full list is in [AGENTS.md](AGENTS.md). The main ones:
 
 - Shared types live in `app/shared/model.ts`, used by both server and browser.
 - Anything model-specific stays in `app/server/providers/`; the engine never names Claude.
