@@ -76,5 +76,9 @@
     "*.{css,json,md,html}": [
       "prettier --write"
     ]
+  },
+  "allowScripts": {
+    "fsevents": false,
+    "unrs-resolver": false
   }
 }
