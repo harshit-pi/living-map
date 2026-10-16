@@ -52,10 +52,11 @@ function threadBlock(all: MapItems, th: string, x: number, y0: number, w: number
   let y = y0
   const kind = (i: MapItem) => i.kind ?? 'decision'
   const list = byThread(all, th)
-  const attention = list.filter(i => i.status === 'waiting' || i.status === 'open')
+  const attention = list.filter(i => (i.status === 'waiting' || i.status === 'open') && !i.userDropped)
+    .sort((a, b) => Number(!a.pinned) - Number(!b.pinned))
   const settled = list
     .filter(i => (kind(i) === 'decision' || kind(i) === 'rule') && (i.status === 'decided' || i.status === 'done'))
-    .sort((a, b) => Number(kind(a) !== 'rule') - Number(kind(b) !== 'rule') || b.turn - a.turn)
+    .sort((a, b) => Number(!a.pinned) - Number(!b.pinned) || Number(kind(a) !== 'rule') - Number(kind(b) !== 'rule') || b.turn - a.turn)
   const tasks = list.filter(i => kind(i) === 'task' && (i.status === 'decided' || i.status === 'done'))
   const parked = list.filter(i => i.status === 'parked')
   const dropped = list.filter(i => i.status === 'dropped')
@@ -71,7 +72,7 @@ function threadBlock(all: MapItems, th: string, x: number, y0: number, w: number
   for (const i of attention.slice(0, MAX_CARDS)) {
     const c = COLOR[i.status]
     const inner = w - 22
-    const title = wrap(i.title, inner, 8, 2)
+    const title = wrap(`${i.pinned ? '◆ ' : ''}${i.title}`, inner, 8, 2)
     const value = wrap(i.value, inner, 7, 4)
     const h = 12 + 14 + title.length * 18 + value.length * 17 + 8
     out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" class="card"/>`)
@@ -98,7 +99,7 @@ function threadBlock(all: MapItems, th: string, x: number, y0: number, w: number
     const c = i.status === 'done' ? COLOR.done : COLOR.decided
     const mark = kind(i) === 'rule' ? '★' : ICON[i.status]
     const was = priorValues(i)
-    const head = wrap(`${mark} ${i.title}`, w, 7.6, 2)
+    const head = wrap(`${i.pinned ? '◆ ' : ''}${mark} ${i.title}`, w, 7.6, 2)
     const value = wrap(i.value, w - 12, 6.8, 3)
     for (const l of head) { y += 17; out.push(`<text x="${x}" y="${y}" font-size="13" font-weight="600" fill="${c}">${esc(l)}</text>`) }
     for (const l of value) { y += 16; out.push(`<text x="${x + 12}" y="${y}" class="t" font-size="12.5">${esc(l)}</text>`) }

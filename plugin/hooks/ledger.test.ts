@@ -31,3 +31,34 @@ test('threads are ordered by most recent activity', () => {
   ])
   expect(threads(items)).toEqual(['New', 'Old'])
 })
+
+import { lookup, sourceOf, summaryText } from './ledger'
+
+const sample = () => applyOps({}, [
+  { op: 'add', id: 'merge-rule', thread: 'Working rules', title: 'PR merges', value: 'Never wait for a merge; branch from the last PR', status: 'decided', turn: 4, kind: 'rule' },
+  { op: 'add', id: 'datastore', thread: 'Infra', title: 'Datastore', value: 'DynamoDB plus S3 vectors', status: 'decided', turn: 9, kind: 'decision' },
+  { op: 'add', id: 'app-store', thread: 'Release', title: 'App Store setup', value: 'Register bundle id and API key', status: 'waiting', turn: 11, kind: 'task' },
+], { 9: sourceOf({ idx: 9, human: 'Go with Dynamo, not Aurora', ai: 'Switching to DynamoDB.' }) }).items
+
+test('the summary Claude gets leads with what waits on the user and names the lookup tool', () => {
+  const s = summaryText(sample(), 'mcp__living-map__map_lookup')
+  expect(s).toContain('Waiting on the user')
+  expect(s).toContain('Standing rules')
+  expect(s).toContain('mcp__living-map__map_lookup')
+})
+
+test('a pinned item is always in the summary; a dropped one never is', () => {
+  const items = sample()
+  items['datastore']!.pinned = true
+  items['app-store']!.userDropped = true
+  const s = summaryText(items, 't')
+  expect(s).toContain('[pinned]')
+  expect(s).not.toContain('App Store setup')
+})
+
+test('lookup finds by topic words and shows where it came from', () => {
+  const r = lookup(sample(), 'which datastore')
+  expect(r).toContain('DynamoDB')
+  expect(r).toContain('Go with Dynamo')
+  expect(lookup(sample(), 'kubernetes cluster')).toContain('Nothing in the ledger matches')
+})

@@ -1,6 +1,6 @@
 {
   "name": "living-map",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": { "name": "Harshit Khandelwal" },
   "description": "Keeps a decision ledger of the conversation, puts it back after compaction or /clear, and shows it as a board (/map).",
   "types": "./types/index.d.ts"

@@ -42,16 +42,20 @@ then `/reload-plugins` in any open session.
 | Command | What it does |
 |---|---|
 | `/map` | Opens the board; the first time in a session it maps the conversation so far, including what compaction removed |
-| `/map-ledger` | Prints the ledger Claude re-reads after a compaction or `/clear` |
+| `/map-doctor` | Health check (capture, last extraction, lookup tool, what Claude gets, store size) plus a spot-check of 5 recent items against the turns they came from |
+| `/map-ledger` | Prints the short summary Claude gets, and the full ledger |
 | `/map-history` | Maps only the part of the conversation compaction removed |
 | `/map-reset` | Forgets this folder's ledger |
 
+On the board, pick an item under **Details** to see where it came from (your words, then Claude's) and how it changed; **Pin** keeps it in every summary Claude gets, **Drop** takes it off.
+
 What runs on its own:
 
-- **Capture.** Every 3 turns (or after 90 s idle) Haiku turns the new turns into ledger ops: decisions, standing rules, open questions, tasks, things waiting on you. Values that change keep their history.
-- **Before a compaction** pending turns are flushed (at most 30 s); **after it** the ledger is appended to the compacted conversation.
-- **A fresh session or `/clear`** in the same folder gets the ledger with the first prompt.
-- **The board** draws as SVG cards on the desktop app and as text in the terminal; the status line shows `map: N waiting · N open · N settled`.
+- **Capture.** Every 3 turns (or after 90 s idle) Haiku turns the new turns into ledger ops: decisions, standing rules, open questions, tasks, things waiting on you. Values that change keep their history, and each item keeps the turn it came from.
+- **What Claude gets** is a short summary: pinned items, what waits on you, open questions, standing rules and the latest decisions. Everything else is one `map_lookup` call away: the plugin registers that tool, and Claude calls it before re-asking something you may have decided.
+- **Before a compaction** pending turns are flushed (at most 30 s); **after it** the summary is appended to the compacted conversation.
+- **A fresh session or `/clear`** in the same folder gets the summary with the first prompt.
+- **The board** draws as SVG cards on the desktop app and as text in the terminal; a band above the prompt shows what is waiting on you, and the status line shows `map: N waiting · N open · N settled`.
 
 The ledger is stored per folder in the plugin's store (`$.store`). Known limit: a batch Haiku cannot answer in JSON stays queued and is retried on the next trigger; the board shows the error.
 

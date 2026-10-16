@@ -83,7 +83,7 @@ export function clipTurn(t: MapTurn): MapTurn {
 
 const KINDS = ['decision', 'rule', 'task', 'question']
 
-export function applyOps(items: MapItems, ops: Op[]): { items: MapItems; changed: number } {
+export function applyOps(items: MapItems, ops: Op[], sources: Record<number, string> = {}): { items: MapItems; changed: number } {
   const next: MapItems = JSON.parse(JSON.stringify(items))
   let changed = 0
   for (const op of ops) {
@@ -97,6 +97,7 @@ export function applyOps(items: MapItems, ops: Op[]): { items: MapItems; changed
       next[id] = {
         id, thread: op.thread || 'General', title: op.title, value: op.value, status,
         turn: op.turn, first_turn: op.turn, history: [], ...(kind ? { kind } : {}),
+        ...(sources[op.turn] ? { source: sources[op.turn] } : {}),
       }
       changed++
       continue
@@ -107,6 +108,8 @@ export function applyOps(items: MapItems, ops: Op[]): { items: MapItems; changed
       cur.value = value
       cur.status = status
       cur.turn = op.turn
+      if (sources[op.turn]) cur.source = sources[op.turn]
+      if (status !== 'dropped') delete cur.userDropped
       changed++
     }
     if (op.thread) cur.thread = op.thread
@@ -153,4 +156,76 @@ export function counts(items: MapItems): Record<MapStatus, number> {
   const c = { waiting: 0, open: 0, decided: 0, done: 0, parked: 0, dropped: 0 }
   for (const i of Object.values(items)) c[i.status]++
   return c
+}
+
+// What a turn contributes as an item's source: the user's words, then the AI's.
+export function sourceOf(t: MapTurn): string {
+  const one = (x: string, n: number) => x.replace(/\s+/g, ' ').trim().slice(0, n)
+  return `You: "${one(t.human, 220)}"` + (t.ai ? ` · Claude: "${one(t.ai, 220)}"` : '')
+}
+
+const rank = (i: MapItem) => (i.pinned ? 0 : 1)
+
+// The short form Claude gets with a first prompt and after a compaction:
+// pinned items, what waits on the user, open questions, standing rules and the
+// latest decisions. Everything else stays one map_lookup call away.
+export function summaryText(items: MapItems, tool: string): string {
+  const all = Object.values(items).filter(i => !i.userDropped)
+  if (!all.length) return ''
+  const line = (i: MapItem) => {
+    const was = priorValues(i)
+    return `- ${i.pinned ? '[pinned] ' : ''}[${STATUS_LABEL[i.status]}] ${i.title}: ${i.value}${was.length ? ` (was: ${was.slice(-2).join(' → ')})` : ''}`
+  }
+  const pick = (f: (i: MapItem) => boolean, n: number) =>
+    all.filter(f).sort((a, b) => rank(a) - rank(b) || b.turn - a.turn).slice(0, n)
+  const pinned = pick(i => !!i.pinned, 10)
+  const seen = new Set(pinned.map(i => i.id))
+  const fresh = (f: (i: MapItem) => boolean) => (i: MapItem) => !seen.has(i.id) && f(i)
+  const groups: [string, MapItem[]][] = [
+    ['Pinned', pinned],
+    ['Waiting on the user', pick(fresh(i => i.status === 'waiting'), 8)],
+    ['Open questions', pick(fresh(i => i.status === 'open'), 8)],
+    ['Standing rules', pick(fresh(i => i.kind === 'rule' && (i.status === 'decided' || i.status === 'done')), 10)],
+    ['Latest decisions', pick(fresh(i => (i.kind ?? 'decision') === 'decision' && (i.status === 'decided' || i.status === 'done')), 10)],
+  ]
+  const c = counts(items)
+  const out = [
+    `DECISION LEDGER (living-map): what is settled in this project. The user's decisions win over anything older.`,
+    `${all.length} items in all (${c.waiting} waiting, ${c.open} open, ${c.decided} decided not built, ${c.done} done). ` +
+      `Before re-asking the user about something they may have decided, call ${tool} with a few words of the topic.`,
+  ]
+  for (const [name, list] of groups) {
+    if (!list.length) continue
+    out.push(`\n## ${name}`)
+    for (const i of list) { seen.add(i.id); out.push(line(i)) }
+  }
+  return out.join('\n')
+}
+
+// map_lookup: items whose words match the query, best first, with history and
+// source; an empty query lists the workstreams.
+export function lookup(items: MapItems, query: string): string {
+  const all = Object.values(items)
+  if (!all.length) return 'The ledger is empty: nothing has been settled in this project yet.'
+  const words = query.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2)
+  if (!words.length) {
+    return threads(items).map(th => {
+      const list = byThread(items, th)
+      return `## ${th} (${list.length})\n` + list.slice(0, 6).map(i => `- [${STATUS_LABEL[i.status]}] ${i.title}: ${i.value}`).join('\n')
+    }).join('\n\n')
+  }
+  const score = (i: MapItem) => {
+    const hay = `${i.title} ${i.title} ${i.value} ${i.thread} ${i.source ?? ''} ${i.history.map(h => h.value).join(' ')}`.toLowerCase()
+    return words.reduce((n, w) => n + (hay.includes(w) ? 1 : 0), 0) + (i.pinned ? 0.5 : 0)
+  }
+  const hits = all.map(i => [score(i), i] as const).filter(([s]) => s > 0).sort((a, b) => b[0] - a[0] || b[1].turn - a[1].turn).slice(0, 8)
+  if (!hits.length) return `Nothing in the ledger matches "${query}". It may never have been decided: ask the user.`
+  return hits.map(([, i]) => {
+    const was = priorValues(i)
+    return [
+      `- [${STATUS_LABEL[i.status]}${i.userDropped ? ', dropped by the user' : ''}] ${i.title} (${i.thread}): ${i.value}`,
+      was.length ? `  changed from: ${was.join(' → ')}` : '',
+      i.source ? `  source (turn ${i.turn}): ${i.source}` : '',
+    ].filter(Boolean).join('\n')
+  }).join('\n')
 }
