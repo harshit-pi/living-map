@@ -255,3 +255,15 @@ def lint_score(lint):
         "status_not_colour_only": True,  # by construction: colour + icon + word
     }
     return sum(checks.values()) / len(checks), checks
+
+
+def screenshot_raw(page, png_path, width, height):
+    """Screenshot an exact-size page (no board padding)."""
+    png_path = pathlib.Path(png_path)
+    html_path = png_path.with_suffix(".html")
+    html_path.write_text(page, encoding="utf-8")
+    profile = png_path.parent.parent / ".chrome-profile"
+    subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                    f"--user-data-dir={profile}", f"--window-size={int(width)},{int(height)}",
+                    f"--screenshot={png_path}", html_path.as_uri()], capture_output=True, timeout=120)
+    return png_path
