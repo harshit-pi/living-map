@@ -1,7 +1,7 @@
 // The topic diagram: cleaning what the model drew, keeping what you solved,
 // and reading it back to the model.
 
-import { list, str, type Raw } from "./types.ts";
+import { list, str, type BlankAnswer, type Raw } from "./types.ts";
 import type { Diagram, DiagramForm, Fill } from "../../shared/model.ts";
 
 export const FORMS = new Set<DiagramForm>([
@@ -21,6 +21,10 @@ type Element = {
   text?: string;
 };
 
+// A blank keeps its accepted answers only until cleanSpec moves them aside:
+// they never stay in the diagram the browser gets.
+type Pending = { _accept?: string[]; _why?: string };
+
 function blankOf(x: Raw, field: "label" | "text") {
   if (!x?.blank) return null;
   return {
@@ -28,8 +32,27 @@ function blankOf(x: Raw, field: "label" | "text") {
     blank: true,
     prompt: str(x.prompt, 90),
     [field]: "",
+    _accept: list(x.accept, 6)
+      .map((a) => str(String(a ?? ""), 60))
+      .filter(Boolean),
+    _why: str(x.why, 200),
   };
 }
+
+// The same answer typed differently: case, spacing, brackets, quotes and the
+// typographic minus do not matter.
+export const normAnswer = (s: unknown): string =>
+  String(s ?? "")
+    .toLowerCase()
+    .replace(/[\u2212\u2013\u2014]/g, "-")
+    .replace(/[\s()[\]{}"'`]/g, "")
+    .replace(/[.!]+$/, "");
+
+export const accepts = (a: BlankAnswer | undefined, text: string): boolean =>
+  !!a &&
+  a.accept.some(
+    (x) => normAnswer(x) === normAnswer(text) && normAnswer(x) !== "",
+  );
 
 // Keep only what each form needs, cap sizes, and strip any text from blanks so
 // an answer can never reach the browser.
@@ -145,16 +168,28 @@ function cleanForm(spec: Raw): Diagram | null {
 // Every part of a diagram gets an id of its own: you click parts by id, blanks
 // are checked by id, and React keys rows by id.
 export function cleanSpec(spec: Raw): Diagram | null {
+  return cleanSpecWithAnswers(spec)?.diagram ?? null;
+}
+
+// The diagram for the browser, and each blank's accepted answers kept apart.
+export function cleanSpecWithAnswers(
+  spec: Raw,
+): { diagram: Diagram; answers: Record<string, BlankAnswer> } | null {
   const d = cleanForm(spec);
   if (!d) return null;
   const seen = new Set<string>();
-  for (const el of elementsOf(d)) {
+  const answers: Record<string, BlankAnswer> = {};
+  for (const el of elementsOf(d) as (Element & Pending)[]) {
     let id = el.id || "part";
     for (let n = 2; seen.has(id); n++) id = `${el.id || "part"}-${n}`;
     el.id = id;
     seen.add(id);
+    if (el._accept?.length)
+      answers[id] = { accept: el._accept, why: el._why ?? "" };
+    delete el._accept;
+    delete el._why;
   }
-  return d;
+  return { diagram: d, answers };
 }
 
 export function elementsOf(spec: Diagram): Element[] {
@@ -207,11 +242,14 @@ export function revealBlank(spec: Diagram | null, id: string, label: string) {
 export function diagramOutline(
   spec: Diagram | null,
   fills: Record<string, Fill> = {},
+  answers: Record<string, BlankAnswer> = {},
 ): string {
   if (!spec) return "(no diagram yet)";
+  // the model sees what each blank accepts, so it judges consistently and keeps
+  // the answers when it redraws (the browser never gets this)
   const b = (el: Element) =>
     el.blank
-      ? `[BLANK ${el.id}: "${el.prompt}"${fills[el.id]?.text ? `, learner wrote "${fills[el.id].text}" (${fills[el.id].state ?? "unjudged"})` : ""}]`
+      ? `[BLANK ${el.id}: "${el.prompt}"${answers[el.id] ? `, accepts ${answers[el.id].accept.map((a) => `"${a}"`).join(" | ")}` : ""}${fills[el.id]?.text ? `, learner wrote "${fills[el.id].text}" (${fills[el.id].state ?? "unjudged"})` : ""}]`
       : "";
   const lines = [`form: ${spec.form} · ${spec.title}`];
   if (spec.form === "sequence") {

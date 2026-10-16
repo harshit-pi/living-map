@@ -10,6 +10,8 @@ type Ctx = {
   onFill: (id: string, text: string) => void;
   // what Claude said about each blank's latest answer, by blank id
   verdict: (id: string) => string;
+  // where to go once every blank is filled
+  next?: { title: string; go: () => void } | null;
   onOpen: (id: string, label: string) => void; // a part was clicked: explain it, go deeper, talk about it
   openId: string | null;
 };
@@ -674,6 +676,24 @@ export function DiagramView({
             <span className="text-success-strong"> · {done} filled ✓</span>
           )}
         </div>
+        {open === 0 && done > 0 && (
+          <div className="mx-auto -mt-1 mb-5 flex max-w-xl flex-wrap items-center justify-center gap-3 rounded-xl bg-success-soft px-4 py-3 text-center ring-1 ring-success-line">
+            <span className="text-[14px] font-medium text-success-strong">
+              ✓ You filled every part of the diagram.
+            </span>
+            {ctx.next && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  ctx.next?.go();
+                }}
+                className="rounded-full bg-primary px-3.5 py-1 text-[13px] font-medium text-on-primary hover:bg-primary-strong"
+              >
+                Next: {ctx.next.title} ▸
+              </button>
+            )}
+          </div>
+        )}
         {diagram.form === "sequence" && <Sequence d={diagram} ctx={ctx} />}
         {diagram.form === "concept" && <Concept d={diagram} ctx={ctx} />}
         {diagram.form === "structure" && <Structure d={diagram} ctx={ctx} />}

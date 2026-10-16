@@ -1,9 +1,20 @@
 // The map of nodes: applying the model's ops, reading the map back, and the
 // moves only you can make (choosing an option).
 
-import { cleanSpec, keepFilled, revealBlank } from "./diagram.ts";
+import {
+  cleanSpecWithAnswers,
+  elementsOf,
+  keepFilled,
+  revealBlank,
+} from "./diagram.ts";
 import { addMove, cleanScene, newPlay } from "./scene.ts";
-import { own, safeId, type Canvas, type Raw } from "./types.ts";
+import {
+  own,
+  safeId,
+  type BlankAnswer,
+  type Canvas,
+  type Raw,
+} from "./types.ts";
 import type { Kind, MapNode, Status } from "../../shared/model.ts";
 
 export const KINDS = new Set<Kind>(["question", "option", "fact"]);
@@ -63,9 +74,19 @@ export function applyOps(
   for (const op of ops ?? []) {
     if (op?.op === "diagram") {
       if (scope) continue;
-      const spec = cleanSpec(op.spec);
-      if (spec) {
+      const cleaned = cleanSpecWithAnswers(op.spec);
+      if (cleaned) {
+        const spec = cleaned.diagram;
         keepFilled(spec, map.fills ?? {});
+        // each blank still open keeps its accepted answers: new ones if the
+        // redraw sent them, the ones it had otherwise
+        const answers: Record<string, BlankAnswer> = {};
+        for (const el of elementsOf(spec)) {
+          if (!el.blank) continue;
+          const a = own(cleaned.answers, el.id) ?? own(map.answers, el.id);
+          if (a) answers[el.id] = a;
+        }
+        map.answers = answers;
         map.diagram = spec;
         map.diagramAt = now;
         changed++;

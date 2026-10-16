@@ -3,7 +3,13 @@ import fs from "node:fs";
 import { test } from "vitest";
 
 import { applyOps, choose, outline, pathTo } from "./canvas.ts";
-import { cleanSpec, diagramOutline } from "./diagram.ts";
+import {
+  accepts,
+  cleanSpec,
+  cleanSpecWithAnswers,
+  diagramOutline,
+  normAnswer,
+} from "./diagram.ts";
 import { systemPrompt } from "./prompts.ts";
 import { completeOps, unreadableOps, visiblePart } from "./reply.ts";
 import {
@@ -481,4 +487,65 @@ test("every part of a diagram gets an id of its own", () => {
   const ids = g.rows.flatMap((r) => r.cells.map((c) => c.id));
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.every(Boolean));
+});
+
+test("a blank's accepted answers are kept apart and never reach the diagram", () => {
+  const spec = {
+    form: "grid",
+    title: "Queens",
+    columns: ["r + c"],
+    rows: [
+      {
+        label: "Row 1",
+        cells: [
+          {
+            id: "a1",
+            blank: true,
+            prompt: "r + c?",
+            accept: ["4", "four"],
+            why: "1 + 3 = 4",
+          },
+        ],
+      },
+    ],
+  };
+  const out = cleanSpecWithAnswers(spec);
+  assert.ok(out);
+  assert.deepEqual(out.answers.a1, { accept: ["4", "four"], why: "1 + 3 = 4" });
+  const sent = JSON.stringify(out.diagram);
+  assert.doesNotMatch(sent, /accept|why|four|1 \+ 3/);
+  assert.match(
+    diagramOutline(out.diagram, {}, out.answers),
+    /accepts "4" \| "four"/,
+    "the model sees them",
+  );
+});
+
+test("accepted answers survive a redraw that does not repeat them", () => {
+  const m: Canvas = { nodes: {}, diagram: null, fills: {} };
+  const grid = (cell: object) => ({
+    op: "diagram",
+    spec: {
+      form: "grid",
+      title: "Q",
+      columns: ["x"],
+      rows: [{ label: "r", cells: [cell] }],
+    },
+  });
+  applyOps(m, [
+    grid({ id: "a1", blank: true, prompt: "?", accept: ["4"], why: "w" }),
+  ]);
+  applyOps(m, [grid({ id: "a1", blank: true, prompt: "?" })]);
+  assert.deepEqual(m.answers?.a1.accept, ["4"]);
+});
+
+test("the same answer typed differently still matches", () => {
+  assert.equal(normAnswer("(2, 0)"), normAnswer("2,0"));
+  assert.equal(normAnswer("\u22121"), normAnswer("-1"));
+  assert.ok(accepts({ accept: ["aet"], why: "" }, " AET. "));
+  assert.ok(!accepts({ accept: ["aet"], why: "" }, "eat"));
+  assert.ok(
+    !accepts({ accept: [""], why: "" }, ""),
+    "an empty answer never matches",
+  );
 });

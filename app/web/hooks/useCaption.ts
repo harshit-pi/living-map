@@ -22,8 +22,8 @@ export function useCaption(map: MapDoc | null, busy: boolean, stream: Stream) {
     len > base.len &&
     hiddenAt !== len &&
     (last?.role === "claude" || last?.role === "system") &&
-    // a blank's verdict is shown on the blank itself
-    !last.blankId;
+    // a wrong answer's note is shown on its blank; a right one's explanation here
+    !(last.blankId && map?.fills[last.blankId]?.state === "wrong");
 
   useEffect(() => {
     if (!fresh) return;

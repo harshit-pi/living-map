@@ -425,3 +425,71 @@ test("each move sends only the instructions it needs", async () => {
       !has("explain", /TOPIC DIAGRAM \(learning|PLAYABLE SCENE/),
   );
 });
+
+test("a right answer to a blank is checked instantly, with no model call", async () => {
+  const m = newMap("Queens", "learn");
+  m.nodes.root = {
+    id: "root",
+    parent: null,
+    kind: "question",
+    title: "Q",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
+  const { engine, calls } = setup(m);
+  // the model draws a diagram whose blank carries its accepted answers
+  const drawn = act(engine, {
+    type: "message",
+    text: "draw it",
+    selection: [],
+  });
+  await settled(calls, 1);
+  calls[0].release(
+    'Here.\n```map\n{"ops":[{"op":"diagram","spec":{"form":"grid","title":"Q","columns":["r + c"],"rows":[{"label":"Row 1","cells":[{"id":"a1","blank":true,"prompt":"r + c?","accept":["4"],"why":"1 + 3 = 4"}]}]}}]}\n```',
+  );
+  await drawn;
+  assert.doesNotMatch(
+    JSON.stringify(engine.snapshot()),
+    /"accept"|1 \+ 3 = 4/,
+    "the browser never sees them",
+  );
+
+  assert.deepEqual(
+    await act(engine, { type: "fill", blankId: "a1", text: " 4 " }),
+    { ok: true },
+  );
+  assert.equal(calls.length, 1, "no model call for a right answer");
+  assert.equal(m.fills.a1.state, "right");
+  const cell =
+    m.diagram?.form === "grid" ? m.diagram.rows[0].cells[0] : undefined;
+  assert.equal(cell?.filled, true);
+  assert.equal(m.chat.at(-1)?.text, "Right: 1 + 3 = 4");
+  assert.equal(m.chat.at(-1)?.blankId, "a1");
+});
+
+test("an answer the blank does not accept still goes to the model", async () => {
+  const m = newMap("Queens", "learn");
+  m.diagram = {
+    form: "grid",
+    title: "Q",
+    columns: ["x"],
+    rows: [
+      { label: "r", cells: [{ id: "a1", blank: true, prompt: "?", text: "" }] },
+    ],
+  };
+  m.answers = { a1: { accept: ["4"], why: "" } };
+  const { engine, calls } = setup(m);
+  const done = act(engine, { type: "fill", blankId: "a1", text: "four-ish" });
+  await settled(calls, 1);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].req.message, /FILL: the learner wrote "four-ish"/);
+  calls[0].release(
+    'Not quite.\n```map\n{"ops":[{"op":"judge","id":"a1","state":"wrong"}]}\n```',
+  );
+  await done;
+  assert.equal(m.fills.a1.state, "wrong");
+});

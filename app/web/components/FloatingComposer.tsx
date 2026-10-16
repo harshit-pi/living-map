@@ -17,8 +17,8 @@ export function FloatingComposer({
   const { map, live, selection, setSelection, roomy } = ws;
   const caption = useCaption(map, live.busy, live.stream);
   const one = selection.length === 1 ? selection[0] : null;
-  // the panel already shows what is being written for its own node, and a
-  // blank's verdict is written on the blank itself
+  // the panel already shows what is being written for its own node; a blank's
+  // verdict streams on the blank (a right one comes up here once it is checked)
   const inPanel =
     caption.live &&
     ((!!live.working?.nodeId && live.working.nodeId === one) ||

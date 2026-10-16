@@ -3,8 +3,9 @@
 
 import { hintCount, withDetail, type Ctx } from "./context.ts";
 import type { ActionResult, MapNode } from "../../shared/model.ts";
+import { accepts, revealBlank } from "../core/diagram.ts";
 import { newPlay, playMove, showMove } from "../core/scene.ts";
-import type { Play } from "../core/types.ts";
+import { own, type Play } from "../core/types.ts";
 
 export function fill(
   ctx: Ctx,
@@ -12,15 +13,32 @@ export function fill(
   text: string,
 ): Promise<ActionResult> | ActionResult {
   if (!blankId) return { error: "No blank." };
-  ctx.map.fills[blankId] = {
-    text: String(text ?? "").slice(0, 200),
-    state: "pending",
-  };
+  const typed = String(text ?? "").slice(0, 200);
   ctx.map.chat.push({
     role: "you",
-    text: `Filled a blank: ${text}`,
+    text: `Filled a blank: ${typed}`,
     ts: Date.now(),
   });
+  // a right answer the model already wrote down is checked here, instantly,
+  // with no model call; anything else goes to the model for a verdict
+  const answer = own(ctx.map.answers, blankId);
+  if (accepts(answer, typed) && answer) {
+    const shown = answer.accept[0];
+    ctx.map.fills[blankId] = { text: shown, state: "right" };
+    revealBlank(ctx.map.diagram, blankId, shown);
+    ctx.map.chat.push({
+      role: "claude",
+      text: answer.why ? `Right: ${answer.why}` : "Right.",
+      ts: Date.now(),
+      blankId,
+    });
+    ctx.note(
+      `Filled blank ${blankId} with "${typed}": right (checked against its accepted answers).`,
+    );
+    ctx.engine.push();
+    return { ok: true };
+  }
+  ctx.map.fills[blankId] = { text: typed, state: "pending" };
   ctx.engine.push();
   return ctx.engine.turn(
     `FILL: the learner wrote "${text}" in blank ${blankId} on the topic diagram. Judge it with a judge op.`,

@@ -146,7 +146,7 @@ export function createEngine({
     return [
       `CANVAS (${m.purpose === "learn" ? "learning path" : "exploration map"}):\n${outline(m.nodes)}`,
       m.purpose === "learn"
-        ? `TOPIC DIAGRAM:\n${diagramOutline(m.diagram, m.fills)}`
+        ? `TOPIC DIAGRAM:\n${diagramOutline(m.diagram, m.fills, m.answers)}`
         : "",
       scope
         ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(

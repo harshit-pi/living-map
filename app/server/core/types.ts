@@ -56,6 +56,9 @@ export type StoredMap = {
   diagram: Diagram | null;
   diagramAt?: number;
   fills: Record<string, Fill>;
+  // what each blank accepts as right, and the line shown when it is: kept here,
+  // never sent to the browser, so a right answer is checked with no model call
+  answers?: Record<string, BlankAnswer>;
   scenes: Record<string, SceneData>;
   play: Record<string, Play>;
   // what you did on the canvas since Claude's last reply, sent with the next move
@@ -65,7 +68,9 @@ export type StoredMap = {
 
 // The part of a map that Claude's ops change.
 export type Canvas = Pick<StoredMap, "nodes" | "diagram" | "fills"> &
-  Partial<Pick<StoredMap, "diagramAt" | "scenes" | "play">>;
+  Partial<Pick<StoredMap, "diagramAt" | "scenes" | "play" | "answers">>;
+
+export type BlankAnswer = { accept: string[]; why: string };
 
 export const str = (v: unknown, n: number): string =>
   typeof v === "string" ? v.slice(0, n) : "";

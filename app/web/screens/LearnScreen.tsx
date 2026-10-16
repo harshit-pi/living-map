@@ -52,6 +52,11 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
   for (const c of map.chat) if (c.blankId) verdicts[c.blankId] = c.text;
   const verdict = (id: string) =>
     live.working?.blankId === id ? live.stream.text : (verdicts[id] ?? "");
+  // once the diagram is done, the first open step is where to go
+  const nextId = nextOpenStep(map);
+  const nextAfterDiagram = nextId
+    ? { title: map.nodes[nextId].title, go: () => setSelection([nextId]) }
+    : null;
   const select = (id: string) =>
     setSelection((s) => (s.length === 1 && s[0] === id ? [] : [id]));
 
@@ -147,6 +152,7 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
                   fills={map.fills}
                   busy={live.busy}
                   verdict={verdict}
+                  next={nextAfterDiagram}
                   openId={one?.anchor ?? null}
                   onOpen={(anchor, label) => {
                     void openPart(anchor, label);
