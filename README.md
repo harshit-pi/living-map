@@ -1,63 +1,16 @@
 # living-map
 
-Long AI chats lose track of what is settled: you forget, and Claude forgets at every compaction. living-map keeps a **decision ledger** of the conversation, puts it back into Claude's context after a compaction or `/clear`, and shows it to you as a **board** beside the chat.
+Understanding a long AI conversation by seeing it, not rereading it. **Living Map** is a local web app: a visual canvas that drives your own Claude Code, where you steer and answer on the picture itself.
+
+- **Decide:** the question as a tree of options and facts; choose, challenge, go deeper, and reply on any node in a side thread.
+- **Learn:** any subject drawn in the shape that fits it (sequence, concept map, timeline, structure, grid) with the key parts left blank; you fill them on the diagram and Claude checks each one.
 
 This repo has two parts:
 
-- `plugin/`: the Claude Code plugin you use day to day.
-- the evaluation pipeline (`lm/`, `run_*.py`): scores the ledger against real transcripts before anything changes.
+- `app/`: the Living Map app. Run it with `cd app && npm install && npm start`, then open http://localhost:4317. Details in [app/README.md](app/README.md).
+- the evaluation pipeline (`lm/`, `run_*.py`): scores a conversation's decision ledger against real transcripts.
 
-## The plugin
-
-### Install
-
-At the prompt of a Claude Code terminal session:
-
-```
-/plugin install living-map --marketplace harshit-pi/living-map
-```
-
-Answer `y` to add the marketplace, then pick the user scope so it runs in every session.
-
-From a shell:
-
-```bash
-claude plugin install living-map --marketplace harshit-pi/living-map
-```
-
-In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `harshit-pi/living-map`, then Add plugin. A plugin installed from a terminal at the user scope also runs in the desktop app's Code tab.
-
-This repository is private: installing needs GitHub read access to it, and a git credential for github.com on that machine (an SSH key, or `gh auth login` then `gh auth setup-git`).
-
-### Update
-
-After a new version is pushed:
-
-```bash
-claude plugin update living-map@living-map
-```
-
-then `/reload-plugins` in any open session.
-
-| Command | What it does |
-|---|---|
-| `/map` | Opens the board; the first time in a session it maps the conversation so far, including what compaction removed |
-| `/map-doctor` | Health check (capture, last extraction, lookup tool, what Claude gets, store size) plus a spot-check of 5 recent items against the turns they came from |
-| `/map-ledger` | Prints the short summary Claude gets, and the full ledger |
-| `/map-history` | Maps only the part of the conversation compaction removed |
-| `/map-reset` | Forgets this folder's ledger |
-
-On the board, pick an item under **Details** to see where it came from (your words, then Claude's) and how it changed; **Pin** keeps it in every summary Claude gets, **Drop** takes it off.
-
-What runs on its own:
-
-- **Capture.** Every 3 turns (or after 90 s idle) Haiku turns the new turns into ledger ops: decisions, standing rules, open questions, tasks, things waiting on you. Values that change keep their history, and each item keeps the turn it came from.
-- **What Claude gets** is a short summary: pinned items, what waits on you, open questions, standing rules and the latest decisions. Everything else is one `map_lookup` call away: the plugin registers that tool, and Claude calls it before re-asking something you may have decided.
-- **Before a compaction** pending turns are flushed (at most 30 s); **after it** the summary is appended to the compacted conversation.
-- **A fresh session or `/clear`** in the same folder gets the summary with the first prompt.
-- **The board** draws as SVG cards on the desktop app and as text in the terminal; a band above the prompt shows what is waiting on you, and the status line shows `map: N waiting · N open · N settled`.
-
-The ledger is stored per folder in the plugin's store (`$.store`). Known limit: a batch Haiku cannot answer in JSON stays queued and is retried on the next trigger; the board shows the error.
+The earlier Claude Code plugin (a decision ledger shown as a board) was retired on 2026-10-16 in favour of the app; its last version is in git history at `c1921ce`.
 
 ## The evaluation pipeline
 
