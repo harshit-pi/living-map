@@ -86,7 +86,7 @@ export async function act(
     case "hint":
       return learn.hint(ctx, req.nodeId);
     case "answer":
-      return learn.answer(ctx, req.nodeId);
+      return learn.answer(ctx, req.nodeId, req.threadId);
     case "scene":
       return learn.buildScene(ctx, req.nodeId);
     case "play":

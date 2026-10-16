@@ -65,7 +65,12 @@ export function removeTree(nodes: Record<string, MapNode>, id: string) {
 export function applyOps(
   map: Canvas,
   ops: Raw[],
-  { scope = null as string | null, now = Date.now() } = {},
+  {
+    scope = null as string | null,
+    // a scoped move may still judge the topic diagram's blanks (Show answer)
+    judge = false,
+    now = Date.now(),
+  } = {},
 ): number {
   const nodes = map.nodes;
   if (scope && !own(nodes, scope)) return 0;
@@ -113,7 +118,7 @@ export function applyOps(
     }
     if (op?.op === "judge") {
       const id = String(op.id ?? "");
-      if (scope || !safeId(id)) continue;
+      if ((scope && !judge) || !safeId(id)) continue;
       map.fills ??= {};
       const fill = own(map.fills, id) ?? { text: "", state: "pending" };
       fill.state = op.state === "right" ? "right" : "wrong";
