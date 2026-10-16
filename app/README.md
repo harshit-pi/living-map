@@ -36,4 +36,4 @@ The canvas talks to the model through one interface, `server/providers/types.ts`
 | `eval/forms.ts`                       | does Learn pick a fitting, concrete diagram, and how fast |
 | `REQUIREMENTS.md`, `research/`        | what v1 must do, and the evidence behind the design       |
 
-Conventions for people and agents: [AGENTS.md](AGENTS.md).
+Conventions for people and agents: [AGENTS.md](../AGENTS.md).

@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git switch *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git stash *)",
+      "Bash(git mv *)",
+      "Bash(git rm *)",
+      "Bash(git restore *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git worktree *)",
+      "Bash(git remote -v)",
+      "Bash(git rev-parse *)",
+      "Bash(git blame *)",
+      "Bash(git push *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(diff *)",
+      "Bash(tree *)",
+      "Bash(jq *)",
+      "Bash(which *)",
+      "Bash(pwd)",
+      "Bash(echo *)",
+      "Bash(mkdir *)",
+      "Bash(touch *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(node server/*)",
+      "Bash(node eval/*)",
+      "Bash(node --version)",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(npm ci *)",
+      "Bash(npm install *)",
+      "Bash(npm ls *)",
+      "Bash(npm outdated *)",
+      "Bash(npm view *)",
+      "Bash(npx tsc *)",
+      "Bash(npx eslint *)",
+      "Bash(npx prettier *)",
+      "Bash(npx vitest *)",
+      "Bash(npx vite build *)",
+      "Bash(python3 .github/agent-docs/check.py *)",
+      "Bash(python3 .github/agent-tools/pr_feedback.py *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr create *)",
+      "Bash(gh run view *)",
+      "Bash(gh run list *)",
+      "Bash(gh release list *)",
+      "Bash(gh release view *)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue list *)",
+      "Bash(gh repo view *)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:react.dev)",
+      "WebFetch(domain:vite.dev)",
+      "WebFetch(domain:tailwindcss.com)",
+      "WebFetch(domain:reactflow.dev)",
+      "WebFetch(domain:nodejs.org)",
+      "WebFetch(domain:code.claude.com)"
+    ],
+    "ask": ["Bash(npm run eval *)"],
+    "deny": [
+      "Bash(npm publish *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push * --force *)",
+      "Bash(git push * -f *)",
+      "Bash(git push * --force-with-lease*)",
+      "Bash(git push * --delete *)",
+      "Bash(git push * +*)",
+      "Bash(git push * main)",
+      "Bash(git push *:main)",
+      "Bash(gh release delete *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh secret *)",
+      "Bash(sudo *)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf .git *)",
+      "Edit(**/.env*)",
+      "Edit(**/*.pem)",
+      "Edit(**/*.p12)",
+      "Edit(**/*.key)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/protect-main.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking main is not the target"
+          },
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/block_secrets.py\"; test -f \"$f\" || exit 0; python3 \"$f\"",
+            "timeout": 30,
+            "statusMessage": "Checking the commit for secrets"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/after_pr_create.py\"; test -f \"$f\" || exit 0; python3 \"$f\" --format claude",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

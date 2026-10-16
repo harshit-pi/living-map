@@ -49,10 +49,10 @@ browser ──actions──► server ──► engine (one move at a time) ─�
 
 ## Project layout
 
-| Path                | What it holds                                                                                                             |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `app/`              | the Living Map app: server, browser, tests. Its [README](app/README.md) and [AGENTS.md](app/AGENTS.md) cover development. |
-| `app/web/brand.css` | every colour and font, by role: restyle the app in one place                                                              |
+| Path                | What it holds                                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `app/`              | the Living Map app: server, browser, tests. Its [README](app/README.md) covers development; [AGENTS.md](AGENTS.md) the conventions. |
+| `app/web/brand.css` | every colour and font, by role: restyle the app in one place                                                                        |
 
 ## Contributing
 

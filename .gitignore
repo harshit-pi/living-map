@@ -8,3 +8,17 @@ __pycache__/
 .chrome-profile/
 
 .DS_Store
+
+# secrets and keys
+.env
+.env.local
+.env.*.local
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+# personal and OS files
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
