@@ -89,12 +89,13 @@ async function blocker(git: Run): Promise<string> {
   const branch = await git("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (branch !== "main")
     return `This copy is on the branch "${branch}"; updates run on main.`;
-  const changed = await git("git", [
-    "status",
-    "--porcelain",
-    "--untracked-files=no",
-  ]);
-  if (changed)
+  const changed = (
+    await git("git", ["status", "--porcelain", "--untracked-files=no"])
+  )
+    .split("\n")
+    // npm install rewrites the lockfile; the update resets it, so it is not a change
+    .filter((l) => l.trim() && !l.endsWith("package-lock.json"));
+  if (changed.length)
     return "This copy has local changes. Commit or stash them, then update.";
   return "";
 }
@@ -189,6 +190,7 @@ export async function runUpdate(
     if (reason) throw new Error(reason);
     await step("Stopping Claude's current move", beforeRestart);
     await step("Getting the new version", async () => {
+      await git("git", ["checkout", "--", "package-lock.json"]);
       try {
         await git(
           "git",

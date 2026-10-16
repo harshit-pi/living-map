@@ -80,6 +80,17 @@ test("an up-to-date copy, or one with local changes, is not updated", async () =
   assert.match(info.reason, /local changes/);
 });
 
+test("a lockfile rewritten by npm install does not block the update", async () => {
+  const { git, ran } = fakeGit({
+    ...CLEAN,
+    "git status --porcelain": " M app/package-lock.json",
+  });
+  const r = await runUpdate(() => {}, { beforeRestart: async () => {}, git });
+  assert.deepEqual(r, { ok: true });
+  const reset = ran.indexOf("git checkout -- package-lock.json");
+  assert.ok(reset >= 0 && reset < ran.indexOf("git pull --rebase origin main"));
+});
+
 test("being offline means no update, not an error", async () => {
   const { git } = fakeGit({ ...CLEAN, "git rev-parse HEAD": "abc" });
   const info = await checkForUpdate({
