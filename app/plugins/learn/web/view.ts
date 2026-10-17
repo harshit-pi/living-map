@@ -1,6 +1,8 @@
 // What Learn's build screen works with: the plugin's view of the map, its
 // actions behind one busy guard, and the words its parts share.
 
+import { useRef, useState } from "react";
+
 import type { Action, ActionResult, MapDoc } from "../../../shared/model.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
@@ -48,13 +50,42 @@ export type LearnAct = (
 
 // Learn's actions, with the busy guard: a paid one asked while a move runs or
 // waits is dropped, whatever sent it (a button drawn before the move started,
-// a key).
-export const guardedAct =
-  (run: (a: Action) => Promise<ActionResult>, busy: boolean): LearnAct =>
-  (name, args = {}) =>
-    busy && PAID.has(name)
-      ? Promise.resolve<ActionResult>({})
-      : run({ type: "plugin", plugin: PLUGIN_ID, name, args });
+// a key). `busy` comes from the server and lags a click by a round trip, so
+// the actions sent and not yet answered are held here too: while a paid one
+// is out every paid button is off at once (three quick presses of Argue
+// were three paid moves), and the same action with the same arguments is
+// not sent twice (three checks, or a tray part placed and then refused).
+export function useLearnAct(
+  run: (a: Action) => Promise<ActionResult>,
+  moving: boolean,
+): { act: LearnAct; busy: boolean; pending: (name: string) => boolean } {
+  const out = useRef(new Set<string>());
+  const [sent, setSent] = useState<string[]>([]);
+  const paidOut = (keys: Iterable<string>) =>
+    [...keys].some((k) => PAID.has(k.slice(0, k.indexOf(":"))));
+  const busy = moving || paidOut(sent);
+  const act: LearnAct = (name, args = {}) => {
+    const key = `${name}:${JSON.stringify(args)}`;
+    if (
+      out.current.has(key) ||
+      (PAID.has(name) && (busy || paidOut(out.current)))
+    )
+      return Promise.resolve<ActionResult>({});
+    out.current.add(key);
+    setSent([...out.current]);
+    return run({ type: "plugin", plugin: PLUGIN_ID, name, args }).finally(
+      () => {
+        out.current.delete(key);
+        setSent([...out.current]);
+      },
+    );
+  };
+  return {
+    act,
+    busy,
+    pending: (name) => sent.some((k) => k.startsWith(`${name}:`)),
+  };
+}
 
 // said on a button that starts a paid move while Claude works
 export const WAIT_TITLE = "Claude is working: this opens once the map settles";
@@ -63,9 +94,12 @@ export const WAIT_TITLE = "Claude is working: this opens once the map settles";
 export type Here = {
   ws: Workspace;
   view: LearnView;
-  // a move runs or waits: the buttons that start one are off
+  // a move runs or waits, or a paid one you asked for is on its way: the
+  // buttons that start one are off
   busy: boolean;
   act: LearnAct;
+  // an action you sent that the server has not answered yet
+  pending: (name: string) => boolean;
 };
 
 // ---------------------------------------------------------------- words
@@ -106,6 +140,10 @@ export const creditCls = (c: Credit | null): string =>
         : "text-line-strong";
 
 const DAY = 86_400_000;
+
+// About a minute per key link: the rebuilds took one to two and a half
+// minutes a step, and a step has two or three key links.
+export const minutesFor = (keyLinks: number) => Math.max(1, keyLinks);
 
 // "in 4 days", "tomorrow", "later today"
 export function inDays(at: number, now: number): string {

@@ -193,7 +193,13 @@ export function PredictCard({ here, st }: { here: Here; st: StepView }) {
           ) : (
             <>
               <span className="font-medium text-danger-strong">Not that.</span>{" "}
-              {p.refute ?? "Look at the case again before you hide it."}
+              {p.correct && (
+                <>
+                  It is “<span className="font-medium">{p.correct}</span>”.{" "}
+                </>
+              )}
+              {p.refute ??
+                "Look at where it sits in the case before you hide it."}
             </>
           )}
         </div>

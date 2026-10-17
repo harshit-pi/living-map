@@ -9,30 +9,45 @@ import { afterEach, test, vi } from "vitest";
 
 import { BUILD_ACTIONS } from "./build.ts";
 import {
+  acceptArgued,
   addLinks,
   addMiscon,
+  caseEdges,
   caseShape,
   cleanModel,
+  creditOf,
   DAY,
   dueOf,
+  endReview,
   givesAway,
   grade,
   helpFor,
   kept,
+  lastVisit,
+  linkParts,
   localDay,
   markRecall,
   matchPart,
   mixedOrder,
   newItems,
   newState,
+  outcomes,
+  outlineOf,
+  paraphrases,
   record,
+  sameGraph,
   scrub,
   setPredict,
   setWhatIf,
+  showOneLink,
+  staleReview,
   startBuild,
+  todayOf,
   validate,
+  verbsOf,
   viewOf,
   whatIf,
+  whatifItem,
   whyPrecheck,
   type Build,
   type LearnState,
@@ -40,7 +55,7 @@ import {
 } from "./core.ts";
 import fixture from "./prompts.fixture.json" with { type: "json" };
 import { learn } from "./server.ts";
-import type { Verb } from "./shared.ts";
+import { verbsFor, type Verb } from "./shared.ts";
 import { act } from "../../server/actions/index.ts";
 import { systemPrompt } from "../../server/core/prompts.ts";
 import type { Raw, StoredMap } from "../../server/core/types.ts";
@@ -539,6 +554,286 @@ test("pass: at L0 only the key links count; at L2 the 70% rule; argued links cou
   assert.equal(after.total, 6, "an argued link is not one more to find");
 });
 
+test("grade: the inverse verb on the reversed pair is the same link; reversing it is not", () => {
+  // the reference says "Road cost part of Road map"
+  const m = model({
+    links: [
+      ...LINKS.slice(0, 5),
+      { ...LINKS[5], from: "antibody", to: "plasma", rel: "part of" },
+    ],
+  });
+  const b = linksOf(startBuild(m, 2), [["plasma", "antibody", "contains"]]);
+  assert.equal(grade(m, b).marks[0].mark, "right");
+  const back = linksOf(startBuild(m, 2), [["antibody", "plasma", "contains"]]);
+  assert.equal(grade(m, back).marks[0].mark, "reversed");
+});
+
+test("pass: the check says what a pass needs of the other links", () => {
+  const m = model();
+  const b = linksOf(startBuild(m, 2), [
+    ...KEYS_RIGHT,
+    ["virus", "dendritic", "picked up by"],
+    ["dendritic", "helpert", "shows to"],
+  ]);
+  const r = grade(m, b);
+  assert.equal(r.pass, false);
+  assert.deepEqual([r.rest, r.restGot, r.restNeed], [3, 2, 3]);
+  assert.equal(grade(m, b, { keyOnly: true }).restNeed, 0);
+});
+
+test("argue: an accepted link is right at once on the last check, and counted", () => {
+  const m = model();
+  const b = linksOf(startBuild(m, 2), [["helpert", "plasma", "activates"]]);
+  b.last = grade(m, b);
+  assert.equal(b.last.extra, 1);
+  acceptArgued(b, { from: "helpert", to: "plasma", rel: "activates" });
+  assert.equal(b.last.marks[0].mark, "right");
+  assert.deepEqual([b.last.extra, b.last.argued], [0, 1]);
+  m.links.push({
+    id: "a7",
+    from: "helpert",
+    to: "plasma",
+    rel: "activates",
+    key: false,
+    argued: true,
+  });
+  assert.equal(grade(m, b).argued, 1, "the next check counts it too");
+  // a link marked as a mix-up can be argued too, and an accepted one is right
+  const mx = linksOf(startBuild(m, 2), [["antibody", "memb", "becomes"]]);
+  mx.last = grade(m, mx);
+  assert.equal(mx.last.marks[0].mark, "miscon");
+  acceptArgued(mx, { from: "antibody", to: "memb", rel: "becomes" });
+  assert.equal(mx.last.marks[0].mark, "right");
+  assert.equal(mx.last.marks[0].refute, undefined);
+  assert.equal(mx.last.miscon, 0);
+  m.links.push({
+    id: "a8",
+    from: "antibody",
+    to: "memb",
+    rel: "becomes",
+    key: false,
+    argued: true,
+  });
+  assert.equal(grade(m, mx).marks[0].mark, "right");
+});
+
+test("show one link takes the place of your tries on the same two parts", () => {
+  const m = model();
+  const b = linksOf(startBuild(m, 2), [
+    ["helpert", "bcell", "causes"], // a near verb on key l3
+    ["virus", "dendritic", "picked up by"], // right, on another pair
+  ]);
+  b.checks = 1;
+  const shown = showOneLink(m, b);
+  assert.ok(typeof shown !== "string" && shown.id === "l3");
+  assert.deepEqual(
+    b.links.map((l) => [l.from, l.to, l.rel, !!l.given]),
+    [
+      ["virus", "dendritic", "picked up by", false],
+      ["helpert", "bcell", "activates", true],
+    ],
+  );
+});
+
+test("credit: fixed after a check with no hint is yours; a hint or a link shown is not", () => {
+  const m = model();
+  const b = linksOf(startBuild(m, 2), ALL_RIGHT);
+  b.checks = 2;
+  b.first = { l3: false, l4: true, l6: true };
+  assert.equal(creditOf(b), "you");
+  b.hints.push({ link: "l3", rung: 1 });
+  assert.equal(creditOf(b), "hints");
+  b.shown.push("l3");
+  assert.equal(creditOf(b), "shown");
+  assert.equal(outcomes(m, { ...b, hints: [], shown: [] }).l3.how, "hinted");
+});
+
+test("verbs: the ones Claude names for the subject, the ones its links use, filled to six from their families", () => {
+  const free = model();
+  assert.deepEqual(verbsOf(free), verbsFor("free"), "none named: the frame's");
+  const named = model({ verbs: ["causes", "reads", "nonsense"] });
+  const v = verbsOf(named);
+  for (const rel of ["picked up by", "shows to", "activates", "becomes"])
+    assert.ok(v.includes(rel as Verb), rel);
+  assert.ok(v.length >= 6);
+  assert.ok(!v.includes("writes") || v.length > 6);
+  assert.ok(!("nonsense" in Object.fromEntries(v.map((x) => [x, 1]))));
+  const b = startBuild(named, 2);
+  b.placed = PARTS.map((p) => ({ part: p.id, x: 0, y: 0 }));
+  assert.equal(
+    linkParts(named, b, "virus", "bcell", "calls"),
+    "That verb is not one this frame uses.",
+  );
+});
+
+test("giveaway: a summary that says a key link in other words is cut to its first clause", () => {
+  const m = model({
+    parts: [
+      { id: "take", label: "Take cheapest town", role: "the next town" },
+      { id: "try", label: "Try each road", role: "one road at a time" },
+      { id: "lower", label: "Lower the cost", role: "keep the smaller" },
+      { id: "done", label: "Mark it settled", role: "never again" },
+    ],
+    frame: { kind: "free" },
+    links: [
+      KEY("k1", "take", "try", "then"),
+      KEY("k2", "try", "lower", "then"),
+      { id: "n1", from: "lower", to: "done", rel: "then" },
+    ],
+  });
+  const step = {
+    title: "What happens in one round?",
+    summary: "Take the cheapest town, then try its roads to lower costs",
+  };
+  assert.deepEqual(givesAway(m, step.summary), [], "the labels are not said");
+  assert.ok(paraphrases(m, step.summary).length > 0);
+  assert.equal(scrub(m, step).summary, "Take the cheapest town");
+  assert.deepEqual(paraphrases(m, "What does one round of it do?"), []);
+});
+
+test("new-case shape: the original's graph under new names and numbers is refused", () => {
+  const orig = model({
+    case: "start A; roads A–B 4, A–C 1, C–B 2, B–D 1, C–D 5",
+  });
+  const renamed = model({
+    case: "OSPF-style network from R1: links R1–R2 10 ms, R1–R3 3 ms, R3–R2 4 ms, R2–R4 2 ms, R3–R4 9 ms",
+    parts: PARTS.map((p) => ({ ...p, label: `New ${p.label.split(" ")[0]}x` })),
+  });
+  assert.equal(caseEdges(renamed.case).length, 5, "OSPF-style is not an edge");
+  assert.match(caseShape(orig, renamed).join(), /original's graph/);
+  const other = model({
+    case: "start P; roads P–Q 2, Q–R 2, R–S 2, P–S 9, Q–S 1, P–T 3",
+    parts: renamed.parts,
+  });
+  assert.deepEqual(caseShape(orig, other), []);
+  assert.equal(
+    sameGraph(
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "a"],
+      ],
+      [
+        ["x", "y"],
+        ["y", "z"],
+        ["z", "x"],
+      ],
+    ),
+    true,
+  );
+  assert.equal(
+    sameGraph(
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "d"],
+      ],
+      [
+        ["x", "y"],
+        ["x", "z"],
+        ["x", "w"],
+      ],
+    ),
+    false,
+  );
+});
+
+test("review: an empty visit keeps the last score; a review from an earlier day is over", () => {
+  const { m: map, s } = buildMap();
+  for (const i of newItems(s.models["m-s1"], noon(0))) s.items[i.id] = i;
+  s.visits.push({ at: noon(1), unaided: 5, of: 6 });
+  s.review = { at: noon(2), since: 1, order: ["s1"], items: 3, cards: [] };
+  s.steps.s1 = {
+    stage: "build",
+    help: 1,
+    reviewing: true,
+    rungs: { built: "you", why: "you", whatif: null, case: null, kept: null },
+  };
+  assert.equal(staleReview(s, noon(2) + 1000), false);
+  assert.equal(staleReview(s, noon(3)), true);
+  // a day on, the view shows no review and the step as built
+  const v = viewOf(s, map.nodes, noon(3));
+  assert.equal(v.review, null);
+  assert.equal(v.steps[0].stage, "built");
+  assert.equal(v.steps[0].reviewing, false);
+  // ended with nothing rebuilt: no visit, the headline stays 5 of 6
+  assert.deepEqual(endReview(s, noon(3)), { unaided: 0, of: 0 });
+  assert.equal(s.visits.length, 1);
+  assert.equal(s.review, null);
+  assert.equal(s.steps.s1.stage, "built");
+  s.visits.push({ at: noon(3), unaided: 0, of: 0 });
+  assert.deepEqual(lastVisit(s), { at: noon(1), unaided: 5, of: 6 });
+});
+
+test("review: today, unaided moves with the first check of a rebuild", () => {
+  const { s } = buildMap();
+  for (const i of newItems(s.models["m-s1"], noon(0))) s.items[i.id] = i;
+  s.review = { at: noon(1), since: 1, order: ["s1"], items: 3, cards: [] };
+  s.steps.s1 = {
+    stage: "build",
+    help: 1,
+    reviewing: true,
+    rungs: { built: "you", why: "you", whatif: null, case: null, kept: null },
+  };
+  const b = linksOf(startBuild(s.models["m-s1"], 1), KEYS_RIGHT);
+  b.checks = 1;
+  b.first = { l3: true, l4: true, l6: false };
+  s.builds["m-s1"] = b;
+  assert.deepEqual(todayOf(s), { unaided: 2, of: 3 });
+});
+
+test("outline: a move that does not work on the model sees a step you are building without its links or slots", () => {
+  const { m: map, s } = buildMap();
+  s.at = "s1";
+  s.steps.s1 = {
+    stage: "build",
+    help: 1,
+    rungs: { built: null, why: null, whatif: null, case: null, kept: null },
+  };
+  const hidden = outlineOf(s, map.nodes, { full: false });
+  assert.ok(hidden.includes('"Memory B cell"'));
+  assert.ok(!hidden.includes("becomes"), hidden);
+  assert.ok(!hidden.includes("rubric"));
+  assert.ok(outlineOf(s, map.nodes).includes("rubric: the rubric of l4"));
+  s.steps.s1.stage = "built";
+  assert.ok(outlineOf(s, map.nodes, { full: false }).includes("rubric"));
+  // the engine passes the move's sections: Explain and the message box
+  // see it hidden, a Why sees it whole
+  const lo = (sections: string[]) => learn.outline!(map, { sections });
+  s.steps.s1.stage = "build";
+  assert.ok(!lo(["explain"]).includes("rubric"));
+  assert.ok(!lo(["diagram"]).includes("rubric"));
+  assert.ok(lo(["why"]).includes("rubric"));
+});
+
+test("view: a wrong predict pick shows why it is not, and the right one; the tray keeps its order", () => {
+  const { m: map, s } = buildMap("new");
+  const mo = s.models["m-s1"];
+  mo.predict!.choices[2] = {
+    text: "Plasma cell",
+    why: "Plasma cells die within weeks.",
+  };
+  s.steps.s1 = {
+    stage: "see",
+    help: 0,
+    predicted: { pick: "Plasma cell", sure: "sure" },
+    rungs: { built: null, why: null, whatif: null, case: null, kept: null },
+  };
+  const p = viewOf(s, map.nodes, 0).steps[0].predict!;
+  assert.equal(p.refute, "Plasma cells die within weeks.");
+  assert.equal(p.correct, "Memory B cell");
+  s.steps.s1.predicted = undefined;
+  assert.equal(viewOf(s, map.nodes, 0).steps[0].predict!.correct, undefined);
+  // L2: placing a part leaves the rest of the tray in the order it had
+  s.steps.s1 = { ...s.steps.s1, stage: "build", help: 2 };
+  const b = startBuild(mo, 2);
+  s.builds[mo.id] = b;
+  const before = viewOf(s, map.nodes, 0).steps[0].tray.map((x) => x.id);
+  b.placed.push({ part: before[0], x: 0, y: 0 });
+  const after = viewOf(s, map.nodes, 0).steps[0].tray.map((x) => x.id);
+  assert.deepEqual(after, before.slice(1));
+});
+
 // ---------------------------------------------------------------- fade, typed names, what-if, why, new case
 
 test("fade: what each help level gives", () => {
@@ -586,6 +881,17 @@ test("fade: what each help level gives", () => {
     m.parts.map((p) => p.id),
     "in a shuffled order, not the worked layout",
   );
+  // on a frame, L1 puts each part in its slot: Link it tests the links
+  const lanes = model({
+    frame: { kind: "lanes", lanes: ["Blood", "Lymph node"] },
+    parts: PARTS.map((p, i) => ({
+      ...p,
+      slot: i < 2 ? "Blood" : "Lymph node",
+    })),
+  });
+  const l1lanes = startBuild(lanes, 1);
+  assert.ok(l1lanes.placed.every((p) => p.slot));
+  assert.ok(grade(lanes, l1lanes).slots.every((x) => x.ok));
   for (const help of [2, 3] as const) {
     const b = startBuild(m, help);
     assert.equal(b.placed.length + b.links.length, 0);
@@ -627,10 +933,10 @@ test("typed match: accept list, a learned name, one slip, nothing fuzzy under 5 
   assert.equal(near.suggest[0], "Plasma cell", "the closest first");
 });
 
-test("what-if: found, missed and extra", () => {
+test("what-if: found, missed (named) and extra", () => {
   assert.deepEqual(whatIf(model(), ["bcell", "antibody", "virus", "nope"]), {
     found: ["bcell", "antibody"],
-    missed: 1,
+    missed: ["plasma"],
     extra: ["virus"],
   });
 });
@@ -721,15 +1027,20 @@ test("schedule: due counts and next, the help level from boxes, and kept", () =>
   for (const i of newItems(s.models["m-s1"], noon(0))) s.items[i.id] = i;
   const live = new Set(["s1", "s2", "s3"]);
   assert.deepEqual(dueOf(s, live, noon(0)), { now: 0, next: noon(1) });
-  assert.deepEqual(dueOf(s, live, noon(1)), { now: 4, next: null });
+  assert.deepEqual(dueOf(s, live, noon(1)), { now: 3, next: null });
+  // a what-if is never what makes a step due, nor what sets its help
+  const wi = whatifItem(s.models["m-s1"], noon(0))!;
+  s.items[wi.id] = wi;
+  assert.deepEqual(dueOf(s, live, noon(1)), { now: 3, next: null });
   assert.deepEqual(
     dueOf(s, new Set(["s2"]), noon(1)),
     { now: 0, next: null },
     "a dropped step's items wait",
   );
-  const items = Object.values(s.items);
+  const items = Object.values(s.items).filter((i) => i.kind === "link");
   assert.equal(helpFor(items), 1);
   for (const i of items) i.box = 2;
+  assert.equal(helpFor([...items, wi]), 2, "the what-if at box 1 is not it");
   assert.equal(helpFor(items), 2);
   for (const i of items) i.box = 3;
   assert.equal(helpFor(items), 3);
@@ -1081,9 +1392,11 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
   assert.equal(m.nodes.s1.revealed, undefined);
   assert.equal(
     Object.keys(s.items).length,
-    4,
-    "three key links and the what-if",
+    3,
+    "the three key links: the what-if waits until you try it",
   );
+  // the build's own outcome is each item's first entry
+  assert.ok(Object.values(s.items).every((i) => i.log.length === 1));
   assert.equal(learn.summary!(m), "1 of 3 built");
 
   // the what-if is checked here too
@@ -1097,13 +1410,14 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
     ),
     { ok: true },
   );
-  assert.equal(view().whatif?.result?.missed, 0);
+  assert.deepEqual(view().whatif?.result?.missed, []);
   assert.equal(calls.length, 3);
+  assert.equal(Object.keys(s.items).length, 4, "the what-if, once tried");
 
   // a day later the items are due, and the review opens at the help they earned
   vi.setSystemTime(noon(1));
-  assert.equal(learn.due!(m, Date.now()).now, 4);
-  assert.match(learn.summary!(m), /1 of 3 built · 4 due/);
+  assert.equal(learn.due!(m, Date.now()).now, 3);
+  assert.match(learn.summary!(m), /1 of 3 built · 3 due/);
   // a step part way through a new case still comes back on its own model
   s.steps.s1.onCase = true;
   s.steps.s1.stage = "build";
@@ -1119,9 +1433,22 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
   assert.equal(s.steps.s1.stage, "built", "a right why does not come back");
   const items = Object.values(s.items).filter((i) => i.kind === "link");
   assert.ok(items.every((i) => i.box === 2));
+  // the due what-if is asked again on the built step, not by the rebuild
+  assert.equal(view().whatif?.due, true);
+  assert.equal(view().whatif?.result, null);
+  const lastTime = viewOf(S(m), m.nodes, Date.now()).review!.items;
+  assert.ok(
+    lastTime.every((i) => i.last !== null),
+    "last time is the first build",
+  );
   assert.deepEqual(await act(engine, learnAct("done")), { ok: true });
   assert.deepEqual(s.visits.at(-1), { at: noon(1), unaided: 3, of: 3 });
   assert.match(learn.summary!(m), /last review 3 of 3 unaided/);
+  // nothing is left due: a what-if not asked again never reopens a review
+  assert.equal(learn.due!(m, Date.now()).now, 0);
+  assert.deepEqual(await act(engine, learnAct("review")), {
+    error: "Nothing is due for review.",
+  });
   assert.equal(
     calls.length,
     3,
@@ -1215,15 +1542,22 @@ test("an argued link that Claude accepts is right on the next check", async () =
   await act(engine, learnAct("check", { step: "s1" }));
   const b = s.builds["m-s1"];
   assert.equal(b.last?.marks[0].mark, "extra");
-  const argued = act(
-    engine,
-    learnAct("argue", {
-      step: "s1",
-      link: b.links[0].id,
-      text: "Helper T cells signal plasma cells too.",
-    }),
-  );
+  const argue = () =>
+    act(
+      engine,
+      learnAct("argue", {
+        step: "s1",
+        link: b.links[0].id,
+        text: "Helper T cells signal plasma cells too.",
+      }),
+    );
+  const argued = argue();
+  // pressed again while it runs: no second paid move
+  const again = argue();
   await settled(calls, 1);
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(await again, {});
   calls[0].release(
     reply([
       {
@@ -1236,8 +1570,91 @@ test("an argued link that Claude accepts is right on the next check", async () =
     ]),
   );
   assert.deepEqual(await argued, { ok: true });
+  // right at once, before the next check: no Argue for it on it again
+  assert.equal(b.last?.marks[0].mark, "right");
+  assert.match(
+    (await argue()).error ?? "",
+    /not in Claude's model/,
+    "an accepted link cannot be argued again",
+  );
   await act(engine, learnAct("check", { step: "s1" }));
   assert.equal(b.last?.marks[0].mark, "right");
+});
+
+test("a later step's model is written quietly: its caption is neither streamed nor kept", async () => {
+  const { m, s } = buildMap("new");
+  delete s.models["m-s2"];
+  delete s.stepModel.s2;
+  const { engine, calls, events } = setup(m);
+  const opened = act(engine, learnAct("open", { step: "s2" }));
+  await settled(calls, 1);
+  calls[0].release(
+    reply(MODEL_OPS("s2", "m9"), "The B cell becomes a Memory B cell here."),
+  );
+  await opened;
+  assert.equal(s.models[s.stepModel.s2].status, "ready");
+  assert.ok(!events.some((e) => e.type === "delta"));
+  assert.ok(!m.chat.some((c) => c.text.includes("Memory B cell")));
+});
+
+test("a review left open from yesterday ends at your next action; a new one opens for today", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const { m, s } = buildMap("new");
+  for (const i of newItems(s.models["m-s1"], noon(0))) s.items[i.id] = i;
+  const rungs = {
+    built: "you" as const,
+    why: "you" as const,
+    whatif: null,
+    case: null,
+    kept: null,
+  };
+  s.steps.s1 = { stage: "built", help: 0, rungs };
+  const { engine } = setup(m);
+  vi.setSystemTime(noon(1));
+  assert.deepEqual(await act(engine, learnAct("review")), { ok: true });
+  assert.equal(s.review?.at, noon(1));
+  vi.setSystemTime(noon(9));
+  assert.deepEqual(await act(engine, learnAct("review")), { ok: true });
+  assert.equal(s.review?.at, noon(9), "today's review, not yesterday's");
+  assert.equal(s.review?.since, 9);
+  assert.equal(s.visits.length, 0, "the empty visit is not recorded");
+});
+
+test("a new case can be left and gone back to, with no model call", async () => {
+  const { m, s } = buildMap("new");
+  const rungs = {
+    built: "you" as const,
+    why: "you" as const,
+    whatif: null,
+    case: null,
+    kept: null,
+  };
+  const c = model({ step: "s1", id: "m-s1-case", of: "m-s1" });
+  c.id = "m-s1-case";
+  c.of = "m-s1";
+  s.models[c.id] = c;
+  s.steps.s1 = {
+    stage: "build",
+    help: 0,
+    rungs,
+    caseModel: c.id,
+    onCase: true,
+  };
+  const { engine, calls } = setup(m);
+  assert.deepEqual(
+    await act(engine, learnAct("onCase", { step: "s1", on: false })),
+    { ok: true },
+  );
+  assert.equal(s.steps.s1.stage, "built");
+  assert.equal(s.steps.s1.onCase, false);
+  assert.equal(viewOf(s, m.nodes, 0).steps[0].newCase, "ready");
+  assert.deepEqual(
+    await act(engine, learnAct("onCase", { step: "s1", on: true })),
+    { ok: true },
+  );
+  assert.equal(s.steps.s1.onCase, true);
+  assert.equal(s.steps.s1.stage, "build");
+  assert.equal(calls.length, 0);
 });
 
 test("typing a part at L3: a slip matches, a miss offers did you mean, and a pick is remembered", async () => {

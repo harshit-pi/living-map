@@ -1,5 +1,5 @@
 import { SmallBtn } from "./BuildCanvas.tsx";
-import { stepNumber, type Here } from "./view.ts";
+import { minutesFor, stepNumber, type Here } from "./view.ts";
 import type { How, LearnView, ReviewView } from "../shared.ts";
 
 const HOW: Record<How, string> = {
@@ -40,9 +40,11 @@ export function ReviewStart({
           {steps.length} {steps.length === 1 ? "step is" : "steps are"} due
         </div>
         <div className="mt-1 text-[13px] text-muted">
-          {view.due.now} {view.due.now === 1 ? "thing" : "things"} to rebuild
-          from memory, about {Math.max(2, view.due.now * 2)} minutes. Each step
-          comes back with a little less help than last time, in a mixed order.
+          {view.due.now} key {view.due.now === 1 ? "link" : "links"} to rebuild
+          from memory, about {minutesFor(view.due.now)}{" "}
+          {minutesFor(view.due.now) === 1 ? "minute" : "minutes"}. Each step
+          comes back with a little less help than last time
+          {steps.length > 1 ? ", in a mixed order" : ""}.
         </div>
         {view.last && (
           <div className="mt-2 text-[12.5px] text-body">
@@ -103,7 +105,9 @@ export function ReviewStrip({
             </span>
           );
         })}
-        <span className="text-[11.5px] text-faint">(mixed order)</span>
+        {review.order.length > 1 && (
+          <span className="text-[11.5px] text-faint">(mixed order)</span>
+        )}
       </div>
     </div>
   );

@@ -144,8 +144,9 @@ export function StartScreen({
                         {m.title}
                       </span>
                       <span className="block text-[11px] text-muted">
+                        {/* Learn's items are key links: about a minute each */}
                         {m.due!.now} {m.due!.now === 1 ? "item" : "items"} due ·
-                        about {m.due!.now * 2} min · last seen{" "}
+                        about {m.due!.now} min · last seen{" "}
                         {m.current ? "now" : ago(m.updatedAt)}
                       </span>
                     </span>

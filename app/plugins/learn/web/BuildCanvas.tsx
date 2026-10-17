@@ -34,6 +34,7 @@ import {
 } from "./frame.ts";
 import { MARK, WAIT_TITLE, type Here } from "./view.ts";
 import {
+  ARGUABLE,
   FAMILIES,
   familyOf,
   type Family,
@@ -45,13 +46,18 @@ import {
 
 // a part dragged from the tray onto the canvas
 export const PART_DRAG = "application/x-living-map-part";
-// the message box covers the bottom of the canvas
+// the message box covers the bottom of the canvas. Your build: below 0.6 a
+// card's words are too small to read, so a big frame is panned rather than
+// shrunk. The worked case is seen once, whole, so it may shrink further.
 const FIT = {
   padding: { top: "40px", bottom: "120px", x: "6%" },
   maxZoom: 1,
+  minZoom: 0.6,
 } as const;
+const FIT_WHOLE = { ...FIT, minZoom: 0.3 } as const;
 
-type Tone = "plain" | "hidden" | "pick" | "chosen" | "found" | "extra";
+type Tone =
+  "plain" | "hidden" | "pick" | "chosen" | "found" | "extra" | "missed";
 type PartData = {
   label: string;
   role: string;
@@ -77,11 +83,13 @@ function PartNode({ data }: NodeProps<Node<PartData>>) {
           ? "ring-2 ring-success bg-success-soft"
           : data.tone === "extra"
             ? "ring-2 ring-danger bg-danger-soft"
-            : data.tone === "hidden"
-              ? "border-2 border-dashed border-hint bg-hint-soft"
-              : data.fails
-                ? "ring-2 ring-danger"
-                : "ring-1 ring-line-strong";
+            : data.tone === "missed"
+              ? "border-2 border-dashed border-warning bg-warning-soft"
+              : data.tone === "hidden"
+                ? "border-2 border-dashed border-hint bg-hint-soft"
+                : data.fails
+                  ? "ring-2 ring-danger"
+                  : "ring-1 ring-line-strong";
   return (
     <div
       className={`relative rounded-xl bg-surface px-2.5 py-1.5 shadow-xs ${ring}`}
@@ -189,6 +197,32 @@ function through(from: string, to: string, at: Record<string, At>): boolean {
   return false;
 }
 
+// A link that leaves and enters on the same side, as an arc that far out:
+// above or below a row, beside a column. Its label sits on the arc, clear
+// of the straight links and of the parts between.
+const arc = (
+  a: At | undefined,
+  b: At | undefined,
+  out: number,
+  up: boolean,
+) => {
+  const across = !a || !b || Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
+  const side = across ? (up ? "top" : "bottom") : up ? "left" : "right";
+  return {
+    type: "smoothstep",
+    pathOptions: { offset: out },
+    sourceHandle: side,
+    targetHandle: side,
+  } as const;
+};
+
+// a given link is dashed; a ghost from the hint ladder is dotted, in the
+// hint colour; a link not in Claude's model is plain grey with its "?"
+const DASH: Partial<Record<keyof typeof TONE, string>> = {
+  given: "5 4",
+  ghost: "1.5 3.5",
+};
+
 function edgeOf(
   id: string,
   from: string,
@@ -196,30 +230,24 @@ function edgeOf(
   label: string,
   tone: keyof typeof TONE,
   at: Record<string, At>,
-  dashed = false,
 ): Edge {
   const [sourceHandle, targetHandle] = sides(at[from], at[to]);
   const color = TONE[tone];
-  // a straight run through another part would read as linked to it: the link
-  // steps out round the side instead
+  // a straight run through another part would read as linked to it (a line
+  // along a row read as A to B to C): the link arcs round the row instead
   const round = through(from, to, at);
   return {
     sourceHandle,
     targetHandle,
-    ...(round && {
-      type: "smoothstep",
-      pathOptions: { offset: 28 },
-      sourceHandle: "right",
-      targetHandle: "right",
-    }),
+    ...(round && arc(at[from], at[to], 34, false)),
     id,
     source: from,
     target: to,
     label,
     style: {
       stroke: color,
-      strokeWidth: tone === "given" ? 1.4 : 1.8,
-      ...(dashed ? { strokeDasharray: "5 4" } : {}),
+      strokeWidth: tone === "given" ? 1.4 : tone === "ghost" ? 2.2 : 1.8,
+      ...(DASH[tone] ? { strokeDasharray: DASH[tone] } : {}),
     },
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     labelStyle: { fontSize: 11, fill: "var(--color-body)" },
@@ -228,18 +256,21 @@ function edgeOf(
   };
 }
 
+// a popover's spot; `up`: its bottom edge, from the canvas's bottom
+type Spot = At & { up?: number };
 type Pop =
-  | { kind: "verb"; from: string; to: string; at: At }
-  | { kind: "link"; id: string; at: At }
-  | { kind: "part"; id: string; at: At }
+  | { kind: "verb"; from: string; to: string; at: Spot }
+  | { kind: "link"; id: string; at: Spot }
+  | { kind: "part"; id: string; at: Spot }
   | null;
 
 export type WhatIfMode = {
   picked: string[];
   toggle: (part: string) => void;
-  // the result once checked: found and extra part ids
+  // the result once checked: found, extra and missed part ids
   found: string[];
   extra: string[];
+  missed: string[];
   fails: string;
 };
 
@@ -290,6 +321,7 @@ export function BuildCanvas({
 
   const frame = st.frame;
   const worked = mode === "worked" ? st.worked : null;
+  const fit = worked ? FIT_WHOLE : FIT;
   const step = st.step;
 
   // the parts on the canvas and where they are drawn
@@ -316,11 +348,18 @@ export function BuildCanvas({
   // the zone for parts outside the frame, while any wait there
   const waiting =
     mode === "build" && (st.trayCount > 0 || st.placed.some((p) => !p.slot));
+  // the worked case's hidden part has no slot (its slot would point at the
+  // answer) and is drawn under the frame: the zone says why it is out there
+  const hiddenOut = !!worked?.hidden;
   const zones: Region[] = useMemo(() => {
     const rs = regions(frame, span);
-    const z = waiting ? looseZone(frame, span) : null;
+    const z = waiting
+      ? looseZone(frame, span)
+      : hiddenOut
+        ? looseZone(frame, span, "The hidden part")
+        : null;
     return z ? [...rs, z] : rs;
-  }, [frame, span, waiting]);
+  }, [frame, span, waiting, hiddenOut]);
 
   // a part placed out of sight brings the view round to show it. It waits
   // until the cards are measured: fitView skips a card with no size, so a
@@ -330,20 +369,34 @@ export function BuildCanvas({
   useEffect(() => {
     const el = box.current;
     if (!el || !count || !ready) return;
-    const { x, y, zoom } = rf.getViewport();
-    const out = rf.getNodes().some((n) => {
-      if (n.type !== "part") return false;
-      const sx = n.position.x * zoom + x;
-      const sy = n.position.y * zoom + y;
-      return (
-        sx < 0 ||
-        sy < 0 ||
-        sx + NODE_W * zoom > el.clientWidth ||
-        sy + NODE_H * zoom > el.clientHeight - 100
-      );
+    const refit = () => {
+      const { x, y, zoom } = rf.getViewport();
+      const out = rf.getNodes().some((n) => {
+        if (n.type !== "part") return false;
+        const sx = n.position.x * zoom + x;
+        const sy = n.position.y * zoom + y;
+        return (
+          sx < 0 ||
+          sy < 0 ||
+          sx + NODE_W * zoom > el.clientWidth ||
+          sy + NODE_H * zoom > el.clientHeight - 100
+        );
+      });
+      if (out) void rf.fitView({ ...fit, duration: 200 });
+    };
+    refit();
+    // a window made smaller or larger leaves the parts where they were
+    // drawn, off the edge or in a corner: the same check runs again
+    let last = `${el.clientWidth}x${el.clientHeight}`;
+    const seen = new ResizeObserver(() => {
+      const now = `${el.clientWidth}x${el.clientHeight}`;
+      if (now === last) return;
+      last = now;
+      void rf.fitView({ ...fit, duration: 200 });
     });
-    if (out) void rf.fitView({ ...FIT, duration: 200 });
-  }, [key, count, ready, rf]);
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, [key, count, ready, rf, fit]);
 
   const rawKey = (p: { x: number; y: number; slot?: string }) =>
     `${p.x},${p.y},${p.slot ?? ""}`;
@@ -394,9 +447,11 @@ export function BuildCanvas({
             ? "found"
             : whatif.extra.includes(p.id)
               ? "extra"
-              : whatif.picked.includes(p.id)
-                ? "chosen"
-                : "plain"
+              : whatif.missed.includes(p.id)
+                ? "missed"
+                : whatif.picked.includes(p.id)
+                  ? "chosen"
+                  : "plain"
           : pick === p.id
             ? "pick"
             : "plain";
@@ -412,7 +467,11 @@ export function BuildCanvas({
           tone,
           fails: !!whatif && whatif.fails === p.label,
           badge:
-            mode === "build" && wrongSlot.has(p.id) ? `⚠ ${word}` : undefined,
+            mode === "build" && wrongSlot.has(p.id)
+              ? `⚠ ${word}`
+              : tone === "missed"
+                ? "◌ missed: it stops too"
+                : undefined,
           onOut:
             mode === "build" && pick === p.id && st.help >= 2
               ? () => {
@@ -427,7 +486,8 @@ export function BuildCanvas({
 
   const edges: Edge[] = [];
   // a second link between the same two parts (yours the wrong way, a ghost
-  // hint beside it) steps out round them instead of lying on the first
+  // hint beside it) arcs out, above then below, so each label is its own:
+  // a smoothstep on the same sides lay on the first, label on label
   const pairs = new Map<string, number>();
   const spread = (e: Edge): Edge => {
     const k = [e.source, e.target].sort().join("|");
@@ -436,8 +496,7 @@ export function BuildCanvas({
     return n
       ? ({
           ...e,
-          type: "smoothstep",
-          pathOptions: { offset: 24 + 18 * n },
+          ...arc(at[e.source], at[e.target], 30 + 22 * (n >> 1), n % 2 === 1),
         } as Edge)
       : e;
   };
@@ -450,7 +509,7 @@ export function BuildCanvas({
       edges.push(
         spread(
           l.given
-            ? edgeOf(l.id, l.from, l.to, l.rel, "given", at, true)
+            ? edgeOf(l.id, l.from, l.to, l.rel, "given", at)
             : edgeOf(
                 l.id,
                 l.from,
@@ -458,7 +517,6 @@ export function BuildCanvas({
                 m ? `${l.rel} ${MARK[m.mark].sym}` : l.rel,
                 m ? m.mark : "plain",
                 at,
-                m?.mark === "extra",
               ),
         ),
       );
@@ -480,23 +538,25 @@ export function BuildCanvas({
                 `ghost:${h.from}:${h.to}`,
                 h.from,
                 h.to,
-                "?",
+                "hint: which verb?",
                 "ghost",
                 at,
-                true,
               ),
             ),
           );
   }
 
-  const where = (e: { clientX: number; clientY: number }): At => {
+  // where a popover opens: at the click, kept inside the canvas; one low on
+  // the canvas opens upward, so its last row is not cut off by the window
+  // and it stays clear of the message box
+  const where = (e: { clientX: number; clientY: number }): Spot => {
     const r = box.current?.getBoundingClientRect();
-    return r
-      ? {
-          x: Math.min(e.clientX - r.left, r.width - 240),
-          y: Math.min(e.clientY - r.top, r.height - 260),
-        }
-      : { x: 40, y: 40 };
+    if (!r) return { x: 40, y: 40 };
+    const x = Math.max(8, Math.min(e.clientX - r.left, r.width - 240));
+    const y = e.clientY - r.top;
+    return y > r.height / 2
+      ? { x, y, up: Math.max(8, r.height - y) }
+      : { x, y: Math.max(8, y) };
   };
 
   const onDrop = (e: DragEvent) => {
@@ -531,7 +591,7 @@ export function BuildCanvas({
           y: Math.round(t.y),
         });
     }
-    window.setTimeout(() => void rf.fitView({ ...FIT, duration: 250 }), 400);
+    window.setTimeout(() => void rf.fitView({ ...fit, duration: 250 }), 400);
   };
 
   const popLink =
@@ -557,7 +617,7 @@ export function BuildCanvas({
         nodeTypes={nodeTypes}
         connectionMode={"loose" as never}
         fitView
-        fitViewOptions={FIT}
+        fitViewOptions={fit}
         minZoom={0.3}
         nodesConnectable={false}
         deleteKeyCode={null}
@@ -620,7 +680,7 @@ export function BuildCanvas({
         <Background gap={20} size={1} color="var(--color-line)" />
         <Controls
           showInteractive={false}
-          fitViewOptions={FIT}
+          fitViewOptions={fit}
           position="bottom-left"
           style={{ marginBottom: 96 }}
         />
@@ -703,12 +763,13 @@ export function BuildCanvas({
               void act("relink", { step, link: popLink.id, rel });
             }}
           />
-          {popMark?.mark === "extra" && (
+          {popMark && ARGUABLE.includes(popMark.mark) && (
             <ArgueBox
+              here={here}
+              mixup={popMark.mark === "miscon"}
               link={popLink}
               text={argue}
               setText={setArgue}
-              busy={busy}
               onSend={() => {
                 setPop(null);
                 void act("argue", { step, link: popLink.id, text: argue }).then(
@@ -756,14 +817,18 @@ function Popover({
   onClose,
   children,
 }: {
-  at: At;
+  at: Spot;
   onClose: () => void;
   children: ReactNode;
 }) {
   return (
     <div
-      className="absolute z-30 w-[230px] rounded-xl bg-surface p-2.5 shadow-lg ring-1 ring-line"
-      style={{ left: Math.max(8, at.x), top: Math.max(8, at.y) }}
+      className="absolute z-30 max-h-[calc(100%-16px)] w-[230px] overflow-y-auto rounded-xl bg-surface p-2.5 shadow-lg ring-1 ring-line"
+      style={
+        at.up !== undefined
+          ? { left: at.x, bottom: at.up }
+          : { left: at.x, top: at.y }
+      }
       onKeyDown={(e) => {
         if (e.key === "Escape") onClose();
       }}
@@ -840,24 +905,44 @@ export function SmallBtn({
   );
 }
 
+// Under a button that starts a paid move and is off while Claude works:
+// why a press does nothing yet (a Why sent while the next step was being
+// drawn looked lost), and that what you typed stays.
+export function WaitNote({ here }: { here: Here }) {
+  if (!here.busy) return null;
+  const w = here.ws.live.working;
+  return (
+    <div className="text-[11.5px] leading-snug text-muted">
+      Claude is busy{w ? ` (${w.label.toLowerCase()})` : ""}. This opens when it
+      is done; what you typed stays.
+    </div>
+  );
+}
+
 // a link Claude's model does not have: say in a line why it holds
 export function ArgueBox({
+  here,
   link,
   text,
   setText,
-  busy,
   onSend,
+  mixup = false,
 }: {
+  here: Here;
   link: LinkView;
+  // the check marked it as a common mix-up, rather than not in the model
+  mixup?: boolean;
   text: string;
   setText: (t: string) => void;
-  busy: boolean;
   onSend: () => void;
 }) {
+  const { busy } = here;
   return (
     <div className="mt-2 border-t border-line pt-2">
       <div className="text-[11.5px] text-muted">
-        Not in Claude's model, and not wrong. Think it holds here? Say why.
+        {mixup
+          ? "Marked as a common mix-up. Think it holds here all the same? Say why."
+          : "Not in Claude's model, and not wrong. Think it holds here? Say why."}
       </div>
       <textarea
         value={text}
@@ -877,6 +962,7 @@ export function ArgueBox({
           Argue for it
         </SmallBtn>
       </div>
+      <WaitNote here={here} />
     </div>
   );
 }

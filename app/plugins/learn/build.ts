@@ -6,11 +6,13 @@
 // link. The reference never reaches the browser (view in core.ts).
 
 import {
+  acceptArgued,
   addLinks,
   addMiscon,
   caseShape,
   cleanModel,
   creditOf,
+  endReview,
   freshStep,
   grade,
   helpFor,
@@ -19,6 +21,7 @@ import {
   linkParts,
   linkWords,
   localDay,
+  logOutcomes,
   markRecall,
   matchPart,
   mixedOrder,
@@ -26,23 +29,25 @@ import {
   newItems,
   newState,
   nextHint,
-  outcomes,
   pathSteps,
   peek,
   placePart,
+  rebuilt,
   record,
   relinkParts,
+  sameLink,
   scrub,
   seedOf,
   setPredict,
   setWhatIf,
   showOneLink,
+  staleReview,
   startBuild,
-  unaidedSince,
   unlinkParts,
   unplacePart,
   validate,
   whatIf,
+  whatifItem,
   whyPrecheck,
   isSure,
   DAY,
@@ -52,6 +57,7 @@ import {
   type StepState,
 } from "./core.ts";
 import {
+  ARGUABLE,
   FAMILIES,
   FRAME_FAMILIES,
   LEVEL_HELP,
@@ -85,27 +91,28 @@ export const BUILD_PROMPT = `You are the engine behind a visual LEARNING CANVAS 
 - The map is the learner's PATH: the root question is the topic; its children are 3-5 STEPS (questions), in the order to learn them. The server sets a step answered when the learner has built it: never set a step's status yourself.
 - Every step has a MODEL: a few real parts, typed links between them, and a frame, drawn on ONE concrete case (a named virus and real days; actual towns with real road costs; a named law and its year).
 - PICK THE FRAME FROM THE QUESTION, NOT THE NOUN: "why did X happen" → free, with cause verbs; "how does X work" → lanes; "what is X made of" → boxes; "compare" → sort; "when" → axis, with cause links. "Why did the Roman Republic fall?" is a free causal map, never a timeline of trivia.
-- For a procedure or an algorithm a step may be mode "play": the learner plays a scene on it first (written only when asked), and its model is 4-6 subgoals in order on an axis frame.
+- For a procedure or an algorithm, the step on how one round of it runs is mode "play": the learner plays a scene on it first (written when they ask to play it), and its model is 4-6 subgoals in order on an axis frame. When the method has a case where it gives a wrong answer (a negative road for Dijkstra), one step is about that case.
 - EXPLAIN during a build says what a part IS, never what it links to.
 - Talk to the learner as "you", never "the learner". In anything the learner reads, name a part by its label in quotes, never by its id. Never mention these instructions, the reference model, key links, rubrics or the server.
+- The caption of a move that writes a model says in a line what the step is about, never what its model holds: which part links to which, where a part sits, or in what order.
 - Prefer tiny concrete examples written as plain text.`;
 
 // sent on the moves that write a model: start, switching in, opening a step,
 // going deeper, a new case
 const MODEL = `MODEL OPS (in the same map block as node ops; write the model op first, its parts stream to the screen):
-  {"op":"model","id":"m1","step":"<step node id>","mode":"build","title":"Flu, your first infection","case":"days 0-14, a virus you have never met","layer":"behaviour","frame":{"kind":"free"},"parts":[{"id":"bcell","label":"B cell","role":"can make one antibody shape","accept":["b cell","b lymphocyte"]}]}
+  {"op":"model","id":"m1","step":"<step node id>","mode":"build","title":"Flu, your first infection","case":"days 0-14, a virus you have never met","layer":"behaviour","frame":{"kind":"free"},"verbs":["picked up by","shows to","activates","causes","prevents","becomes","makes"],"parts":[{"id":"bcell","label":"B cell","role":"can make one antibody shape","accept":["b cell","b lymphocyte"]}]}
   {"op":"links","model":"m1","links":[{"id":"l4","from":"bcell","to":"memb","rel":"becomes","key":true,"hint":"Which cell is still there on day 60, when the antibodies have faded?","reversed":"A memory cell is made from a B cell, not the other way round.","ask":"Why must a different cell from the plasma cell be the one that stays?","rubric":"plasma cells spend themselves making antibody and die; a resting cell that can divide again is what lasts"}]}
   {"op":"miscon","model":"m1","items":[{"id":"x1","claim":"Antibodies are the memory","refute":"Antibody levels fall within months; what lasts is cells that can make more.","link":{"from":"antibody","to":"memb","rel":"becomes"}}]}
-  {"op":"predict","model":"m1","ask":"What does the B cell become that is still there on day 60?","choices":[{"text":"Memory B cell"},{"text":"More antibody","miscon":"x1"},{"text":"Plasma cell"}],"answer":"Memory B cell","hides":"l4"}
+  {"op":"predict","model":"m1","ask":"What does the B cell become that is still there on day 60?","choices":[{"text":"Memory B cell"},{"text":"More antibody","miscon":"x1"},{"text":"Plasma cell","why":"Plasma cells pour out antibody for a few weeks, then die."}],"answer":"Memory B cell","hides":"l4"}
   {"op":"whatif","model":"m1","fails":"helpert","ask":"Your helper T cells are wiped out, as in HIV. Which parts stop working on a second infection?","affected":["bcell","plasma","antibody"],"why":"B cells need a helper T signal before they multiply."}
 FRAMES: {"kind":"free"} | {"kind":"lanes","lanes":["…"]} (each part has a "slot": its lane) | {"kind":"axis","ticks":["…"]} (order matters; each part's "slot" is its tick) | {"kind":"boxes","boxes":[{"id":"…","label":"…"}]} (each part's "slot" is the box it sits in) | {"kind":"sort","columns":["strong evidence","weak","against"]} (a part's "slot" may be a list when more than one column is fair).
 VERBS ("rel"), by family: ${verbList}. Each frame takes only some families: ${frameVerbs}.
 LAYERS ("layer"): parts · behaviour · function · failure. For a system, the first step is its parts and what each is for, the next how they interact; the why questions are its function and the what-if is its failure.
-RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when it is a wrong link people draw. A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence.`;
+RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. At most 3 misconceptions, real ones learners hold, never made up; give one a "link" only when that link, drawn on its own, is false in this case (not when the misconception is that it is the only cause: a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it).`;
 
 const WHY = `WHY on a key link: judge the learner's answer against that link's rubric (in the outline). The words do not have to match; the idea does. Write one op: {"op":"why","model":"<model id>","link":"<link id>","state":"right|partial|wrong","say":"at most 30 words"}. If partial or wrong, "say" asks ONE question that leads them on, never the fix. The caption is one short sentence.`;
 
-const CASE = `NEW CASE for a step: write a new model of the same idea on a case that looks different: a model op with "of":"<the original model id>" and the same "step", then its own links, miscon and whatif ops (no predict). The same key links on a case that looks different: change the shape of the problem, not just the numbers. Different part labels, the same kinds of verb on the key links.`;
+const CASE = `NEW CASE for a step: write a new model of the same idea on a case that looks different: a model op with "of":"<the original model id>" and the same "step", then its own links, miscon and whatif ops (no predict). The same key links on a case that looks different: change the shape of the problem, not just the numbers. Different part labels, the same kinds of verb on the key links. For a graph, a grid or a list, a different number of nodes and different connections: never the original's graph with new names.`;
 
 const ARGUE = `ARGUE for a link: the learner drew a link that is not in your model and says why it holds. Say whether it holds IN THIS CASE, with one op: {"op":"accept","model":"<model id>","link":{"from":"…","to":"…","rel":"…"},"holds":true|false,"say":"one line"}. Be generous when it is true but simply not in your model; say no only when it is false here.`;
 
@@ -225,6 +232,7 @@ function applyAccept(s: LearnState, op: Raw): number {
     holds,
     say: str(op.say, 200).trim(),
   });
+  if (holds) acceptArgued(b, { from, to, rel });
   delete b.argue;
   return 1;
 }
@@ -257,8 +265,14 @@ export function applyBuildOp(
 // ---------------------------------------------------------------- helpers
 
 const WRITING = "Drawing this step";
+// the next step, written while you work on this one: the bar names it so
+const AHEAD = "Drawing the next step";
+const writingStep = (ctx: Ctx, step: string) =>
+  ctx.engine.isQueuedOrRunning(step, WRITING) ||
+  ctx.engine.isQueuedOrRunning(step, AHEAD);
 const JUDGING = "Reading your why";
 const NEW_CASE = "Writing a new case";
+const ARGUING = "Weighing your link";
 
 const id = (v: unknown): string =>
   typeof v === "string" && safeId(v) ? v : "";
@@ -266,6 +280,15 @@ const id = (v: unknown): string =>
 const state = (map: StoredMap): LearnState | null => {
   const s = peek(map.data);
   return s?.mode === "build" ? s : null;
+};
+
+// The map's state for an action you took: a review left open from an
+// earlier day ends first, so the next one opens fresh for today (its gap,
+// its levels, its count) rather than carrying on yesterday's.
+const today = (map: StoredMap): LearnState | null => {
+  const s = state(map);
+  if (s && staleReview(s, clock())) endReview(s, clock());
+  return s;
 };
 
 const ok = (ctx: Ctx, result = true): ActionResult => {
@@ -289,7 +312,7 @@ type At = {
 
 // The step an action is about, its state and its model, or why not.
 function at(ctx: Ctx, a: Raw, stages?: Stage[]): At | string {
-  const s = state(ctx.map);
+  const s = today(ctx.map);
   if (!s) return "This map is not practised as builds.";
   const step = id(a?.step ?? a?.nodeId);
   if (!pathSteps(ctx.map.nodes).some((p) => p.id === step))
@@ -350,6 +373,9 @@ async function writeModel(
     nodeId?: string;
     sections: string[];
     keep?: boolean;
+    // a move that writes a later step's model while you work: its reply is
+    // not streamed or kept, as its caption may say what the model holds
+    quiet?: boolean;
     // the model this move should have written, once it has landed
     target: () => RefModel | undefined;
     // the step, once it is known (the first move lays the path out)
@@ -365,6 +391,7 @@ async function writeModel(
     nodeId: opts.nodeId,
     sections: opts.sections,
     keep: opts.keep,
+    quiet: opts.quiet,
   });
   if (r.error || r.stopped) return r;
   const step = opts.step();
@@ -384,6 +411,7 @@ async function writeModel(
         nodeId: opts.nodeId ?? step,
         sections: opts.sections,
         keep: opts.keep,
+        quiet: opts.quiet,
       },
     )
     .then((r2) => {
@@ -427,13 +455,15 @@ function writeStep(
   ctx: Ctx,
   s: LearnState,
   step: string,
+  label = WRITING,
 ): Promise<ActionResult> {
   const { action, sections } = openAction(ctx, step);
   return writeModel(ctx, {
     action,
-    label: WRITING,
+    label,
     nodeId: step,
     sections,
+    quiet: true,
     target: () => modelOf(s, step),
     step: () => step,
   });
@@ -444,9 +474,8 @@ function writeStep(
 function prefetch(ctx: Ctx, s: LearnState, step: string) {
   const path = topPath(ctx.map);
   const next = path[path.indexOf(step) + 1];
-  if (!next || modelOf(s, next) || ctx.engine.isQueuedOrRunning(next, WRITING))
-    return;
-  void writeStep(ctx, s, next);
+  if (!next || modelOf(s, next) || writingStep(ctx, next)) return;
+  void writeStep(ctx, s, next, AHEAD);
 }
 
 // ---------------------------------------------------------------- built, passed
@@ -461,8 +490,15 @@ function built(ctx: Ctx, x: At) {
     node.status = "answered";
     if (st.viaModel || st.why?.state === "shown") node.revealed = true;
   }
-  if (!itemsOf(s, main.id).length)
-    for (const i of newItems(main, clock())) s.items[i.id] = i;
+  if (!itemsOf(s, main.id).length) {
+    const t = clock();
+    for (const i of newItems(main, t)) s.items[i.id] = i;
+    // how each key link came out of this build is its first entry, so the
+    // first review reads "shown → by you", not "first review"; on the day
+    // it was built nothing moves a box
+    const b = own(s.builds, main.id);
+    if (b) logOutcomes(s, main, b, t);
+  }
   markRecall(s, topPath(ctx.map), step);
   ctx.note(
     `Built step "${node.title}"${st.why?.state === "shown" ? " (the why was shown)" : ""}.`,
@@ -470,13 +506,7 @@ function built(ctx: Ctx, x: At) {
 }
 
 // a review or a quick rebuild writes its answers onto the step's items
-function logBuild(x: At, b: Build) {
-  const t = clock();
-  for (const [link, o] of Object.entries(outcomes(x.main, b))) {
-    const item = own(x.s.items, `${x.main.id}:${link}`);
-    if (item) record(item, o.how, t, o.sure);
-  }
-}
+const logBuild = (x: At, b: Build) => logOutcomes(x.s, x.main, b, clock());
 
 const whyLinkOf = (m: RefModel, turn: number) => {
   const keys = m.links.filter((l) => l.key && !l.argued && l.ask);
@@ -486,7 +516,7 @@ const whyLinkOf = (m: RefModel, turn: number) => {
 function passed(x: At, b: Build) {
   const { st, s } = x;
   if (st.onCase) {
-    st.rungs.case ??= creditOf(x.m, b);
+    st.rungs.case ??= creditOf(b);
     st.onCase = false;
     st.stage = "built";
     return;
@@ -511,7 +541,7 @@ function passed(x: At, b: Build) {
     } else st.stage = "built";
     return;
   }
-  st.rungs.built = creditOf(x.main, b, st.viaModel);
+  st.rungs.built = creditOf(b, st.viaModel);
   st.stage = "why";
   st.whyLink = whyLinkOf(x.main, s.visits.length);
   delete st.why;
@@ -609,7 +639,7 @@ const level: Act = (ctx, a) => {
 };
 
 const open: Act = (ctx, a) => {
-  const s = state(ctx.map);
+  const s = today(ctx.map);
   if (!s) return err("This map is not practised as builds.");
   const step = id(a?.step ?? a?.nodeId);
   if (!pathSteps(ctx.map.nodes).some((p) => p.id === step))
@@ -621,7 +651,7 @@ const open: Act = (ctx, a) => {
     if (s.steps[step].stage === "build") prefetch(ctx, s, step);
     return ok(ctx);
   }
-  if (ctx.engine.isQueuedOrRunning(step, WRITING)) return {};
+  if (writingStep(ctx, step)) return {};
   return writeStep(ctx, s, step);
 };
 
@@ -706,13 +736,7 @@ const check: Act = (ctx, a) => {
     b.first = Object.fromEntries(
       x.m.links
         .filter((l) => l.key && !l.argued)
-        .map((l) => [
-          l.id,
-          b.links.some(
-            (y) =>
-              !y.given && y.from === l.from && y.to === l.to && y.rel === l.rel,
-          ),
-        ]),
+        .map((l) => [l.id, b.links.some((y) => !y.given && sameLink(y, l))]),
     );
     if (b.sure) b.firstSure = b.sure;
   }
@@ -831,11 +855,15 @@ const whatif: Act = (ctx, a) => {
   if (!clicked.length) return err("Click the parts that stop working first.");
   const r = whatIf(x.main, clicked);
   x.st.whatif = r;
-  const perfect = !r.missed && !r.extra.length;
+  const perfect = !r.missed.length && !r.extra.length;
   x.st.rungs.whatif ??= perfect ? "you" : "shown";
-  const item = own(x.s.items, `${x.main.id}:whatif`);
+  // the what-if is scheduled from the first time you try it
+  const t = clock();
+  const key = `${x.main.id}:whatif`;
+  const item = own(x.s.items, key) ?? whatifItem(x.main, t);
+  if (item) x.s.items[key] = item;
   const sure = isSure(a?.sure) ? a.sure : undefined;
-  if (item) record(item, perfect ? "unaided" : "wrong", clock(), sure);
+  if (item) record(item, perfect ? "unaided" : "wrong", t, sure);
   return ok(ctx, perfect);
 };
 
@@ -844,18 +872,25 @@ const argue: Act = async (ctx, a) => {
   if (fail(x)) return err(x);
   const b = buildOf(x);
   const l = b.links.find((y) => y.id === id(a?.link));
-  if (!l || b.last?.marks.find((y) => y.link === l.id)?.mark !== "extra")
+  const mark = l && b.last?.marks.find((y) => y.link === l.id)?.mark;
+  if (!l || !mark || !ARGUABLE.includes(mark))
     return err(
-      "Argue for a link the last check marked as not in Claude's model.",
+      "Argue for a link the last check marked as not in Claude's model, or as a common mix-up.",
     );
+  const mix =
+    mark === "miscon"
+      ? x.m.miscon.find((y) => y.link && sameLink(y.link, l))
+      : undefined;
   const text = str(a?.text, 400).trim();
   if (!text) return err("Say in a line why it holds.");
+  // one paid move per link: a second press while it runs or waits is dropped
+  if (b.argue || ctx.engine.isQueuedOrRunning(x.step, ARGUING)) return {};
   b.argue = { from: l.from, to: l.to, rel: l.rel, said: text };
   ctx.say(text);
   const r = await ctx.engine.turn(
-    `ARGUE on step [${x.step}] "${ctx.map.nodes[x.step].title}": the learner drew ${linkWords(x.m, l)}, which is not in your model, and says why it holds. Say whether it holds in this case with one accept op (model "${x.m.id}", link {"from":"${l.from}","to":"${l.to}","rel":"${l.rel}"}).`,
+    `ARGUE on step [${x.step}] "${ctx.map.nodes[x.step].title}": the learner drew ${linkWords(x.m, l)}, which ${mix ? `the server marked as your misconception "${mix.claim}" (they did not say that claim; judge the link they drew)` : "is not in your model"}, and says why it holds. Say whether it holds in this case with one accept op (model "${x.m.id}", link {"from":"${l.from}","to":"${l.to}","rel":"${l.rel}"}).`,
     ctx.settings,
-    { text, label: "Weighing your link", nodeId: x.step, sections: ["argue"] },
+    { text, label: ARGUING, nodeId: x.step, sections: ["argue"] },
   );
   if (r.error || r.stopped) return r;
   if (b.argue) {
@@ -875,6 +910,7 @@ const newCase: Act = (ctx, a) => {
     label: NEW_CASE,
     nodeId: step,
     sections: ["model", "case"],
+    quiet: true,
     target: () => {
       const st = s.steps[step];
       return st.caseModel ? own(s.models, st.caseModel) : undefined;
@@ -889,6 +925,27 @@ const newCase: Act = (ctx, a) => {
       s.builds[c.id] = startBuild(c, 2);
     },
   });
+};
+
+// Leave a new case you are building, back to your built step, or go back to
+// one Claude has written: both are optional, and nothing waits on them.
+const onCase: Act = (ctx, a) => {
+  const x = at(ctx, a);
+  if (fail(x)) return err(x);
+  const { st, s } = x;
+  const c = st.caseModel ? own(s.models, st.caseModel) : undefined;
+  if (a?.on === true) {
+    if (st.stage !== "built" || c?.status !== "ready" || st.rungs.case)
+      return err("There is no new case to go back to.");
+    st.onCase = true;
+    st.stage = "build";
+    s.builds[c.id] ??= startBuild(c, 2);
+    return ok(ctx);
+  }
+  if (!st.onCase) return err("You are not on a new case.");
+  st.onCase = false;
+  st.stage = "built";
+  return ok(ctx);
 };
 
 // Go deeper on a part: a step "Inside: <part>" under the step; its model is
@@ -935,7 +992,7 @@ const recall: Act = (ctx, a) => {
 // Review: the due steps in mixed order, each at the help its weakest item
 // earns. A second press while one is open keeps it.
 const review: Act = (ctx) => {
-  const s = state(ctx.map);
+  const s = today(ctx.map);
   if (!s) return err("This map is not practised as builds.");
   if (s.review) return ok(ctx);
   const t = clock();
@@ -948,7 +1005,7 @@ const review: Act = (ctx) => {
     return (
       m &&
       (st?.stage === "built" || !!st?.onCase) &&
-      itemsOf(s, m.id).some((i) => !i.retired && i.due <= t)
+      itemsOf(s, m.id).some((i) => rebuilt(i) && i.due <= t)
     );
   });
   if (!due.length) return err("Nothing is due for review.");
@@ -959,14 +1016,7 @@ const review: Act = (ctx) => {
   for (const i of Object.values(s.items)) {
     seen = Math.max(seen, i.made, ...i.log.map((e) => e.at));
     const m = own(s.models, i.model);
-    if (
-      i.kind === "link" &&
-      !i.retired &&
-      i.due <= t &&
-      m &&
-      due.includes(m.step)
-    )
-      items++;
+    if (rebuilt(i) && i.due <= t && m && due.includes(m.step)) items++;
   }
   for (const step of order) {
     const st = s.steps[step];
@@ -977,6 +1027,10 @@ const review: Act = (ctx) => {
     st.help = helpFor(itemsOf(s, m.id), st.recallWrong);
     st.recallWrong = false;
     s.builds[m.id] = startBuild(m, st.help);
+    // a what-if that is due is asked again once the rebuild is done: the
+    // last try's result goes, so What if is offered on the built step
+    const wi = own(s.items, `${m.id}:whatif`);
+    if (wi && !wi.retired && wi.due <= t) delete st.whatif;
   }
   const builtSteps = path.filter(
     (step) => s.steps[step]?.stage === "built" || s.steps[step]?.reviewing,
@@ -1006,25 +1060,8 @@ const idea: Act = (ctx, a) => {
 const done: Act = (ctx) => {
   const s = state(ctx.map);
   if (!s?.review) return err("No review is open.");
-  for (const step of s.review.order) {
-    const st = own(s.steps, step);
-    const m = modelOf(s, step);
-    if (!st?.reviewing || !m) continue;
-    const b = own(s.builds, m.id);
-    if (b?.checks) logBuild({ s, step, st, main: m, m }, b);
-    st.reviewing = false;
-    st.stage = "built";
-  }
-  const today = unaidedSince(s, s.review.at);
-  s.visits.push({
-    at: s.review.at,
-    unaided: today.unaided,
-    of: Math.max(s.review.items, today.of),
-  });
-  s.review = null;
-  ctx.note(
-    `Ended today's review: ${today.unaided} of ${today.of} key links unaided.`,
-  );
+  const t = endReview(s, clock())!;
+  ctx.note(`Ended today's review: ${t.unaided} of ${t.of} key links unaided.`);
   return ok(ctx);
 };
 
@@ -1063,6 +1100,7 @@ export const BUILD_ACTIONS: Record<string, Act> = {
   whatif,
   argue,
   newCase,
+  onCase,
   deeper: deeperBuild,
   recall,
   review,

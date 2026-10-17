@@ -157,6 +157,12 @@ export type WhyState = "right" | "partial" | "wrong" | "shown";
 // extra (not in Claude's model: never wrong, and you may argue for it)
 export type Mark = "right" | "reversed" | "family" | "miscon" | "extra";
 
+// The marks you may argue against: a link not in Claude's model, and one
+// that matched a misconception's pattern (a fair causal link in history was
+// marked ✗ with no way to say why it holds, as the pattern was wider than
+// the claim). Claude's verdict decides; an accepted one is right from then.
+export const ARGUABLE: readonly Mark[] = ["extra", "miscon"];
+
 export type LinkMark = {
   // your link's id
   link: string;
@@ -176,6 +182,12 @@ export type CheckResult = {
   // reference links that count here, and how they came out
   total: number;
   right: number;
+  // links you argued for, Claude accepted and you drew: right, on top of total
+  argued: number;
+  // what a pass needs of the other (non-key) links, and how many you have
+  rest: number;
+  restGot: number;
+  restNeed: number;
   given: number;
   missing: number;
   keys: number;
@@ -267,6 +279,8 @@ export type StepView = {
     sure: Sure | null;
     right: boolean | null;
     refute: string | null;
+    // the right choice, sent only once you picked a wrong one
+    correct?: string;
   } | null;
   why: {
     ask: string;
@@ -280,9 +294,12 @@ export type StepView = {
   whatif: {
     ask: string;
     fails: string;
+    // its review item is due: asked again on the built step
+    due: boolean;
     result: {
       found: string[];
-      missed: number;
+      // named once you have tried
+      missed: string[];
       extra: string[];
       why: string;
     } | null;

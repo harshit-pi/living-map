@@ -62,6 +62,10 @@ export function switchPurpose(
   const from = map.purpose;
   map.purpose = purpose;
   ctx.note(`Switched the canvas to ${map.purpose} mode.`);
+  // the plugin sets its state up first (Learn's build state, before its
+  // first move), so the switched map goes out as the new mode's screen: sent
+  // before, Learn showed its old screen until that move's first push
+  const r = pluginFor(map.purpose)?.enter?.(ctx, from) ?? {};
   engine.push();
-  return pluginFor(map.purpose)?.enter?.(ctx, from) ?? {};
+  return r;
 }

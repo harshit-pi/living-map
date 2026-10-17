@@ -13,11 +13,11 @@ import {
   canvasMode,
   CREDIT,
   creditCls,
-  guardedAct,
   inDays,
   moving,
   stepNumber,
   topSteps,
+  useLearnAct,
   WAIT_TITLE,
   type Here,
 } from "./view.ts";
@@ -38,6 +38,7 @@ import {
 // (plugins/learn/build.ts)
 const DRAWING = [
   "Drawing this step",
+  "Drawing the next step",
   "Drawing your path and step 1",
   "Turning this into a learning path",
 ];
@@ -82,6 +83,15 @@ function railMark(st: StepView): RailMark {
       mark: "↻",
       cls: "border-primary bg-primary-soft text-primary-strong",
       word: st.recall ? "quick rebuild" : "rebuilding",
+      meter,
+    };
+  // a step part way through its optional new case is built: what is due
+  // comes first
+  if (st.onCase && st.itemsDue > 0)
+    return {
+      mark: "↻",
+      cls: "border-primary bg-surface text-primary-strong",
+      word: `${st.itemsDue} due for review · new case open`,
       meter,
     };
   if (st.stage === "built")
@@ -132,9 +142,13 @@ function railMark(st: StepView): RailMark {
 export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   const { map, live, selection, setSelection } = ws;
   // one guard for every paid move on this screen (view.ts)
-  const busy = moving(live);
-  const here: Here = { ws, view, busy, act: guardedAct(ws.run, busy) };
+  const { act, busy, pending } = useLearnAct(ws.run, moving(live));
+  const here: Here = { ws, view, busy, act, pending };
   const [onPath, setOnPath] = useState(false);
+  // the step last on screen when you had not picked one: a step stays in
+  // view when it is built, so its Why verdict, What if and New case are
+  // seen, until you go on (Next step, the rail)
+  const [pinned, setPinned] = useState<string | null>(null);
   const [centre, setCentre] = useState<"step" | "topic" | "play">("step");
   const [thread, setThread] = useState(false);
   const [whatifOn, setWhatifOn] = useState(false);
@@ -153,9 +167,11 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
     ? undefined
     : (selStep ??
       reviewNext ??
+      find(pinned) ??
       tops.find((s) => s.stage !== "built") ??
       tops.find((s) => s.recallDue) ??
       tops[0]);
+  if (current && !selStep && pinned !== current.step) setPinned(current.step);
 
   // a different step starts on its own canvas, with nothing half-done
   const key = current?.step ?? "";
@@ -183,7 +199,10 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   const judging =
     !!current && w?.label === JUDGING && w.nodeId === current.step;
   const writingCase =
-    !!current && !!w?.label.startsWith(NEW_CASE) && w.nodeId === current.step;
+    (!!current &&
+      !!w?.label.startsWith(NEW_CASE) &&
+      w.nodeId === current.step) ||
+    pending("newCase");
 
   // a step's model is written the first time you open it (one Claude move)
   const openStep = (id: string) => {
@@ -282,7 +301,9 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
         progress={{ got: built, word: "built" }}
         footer={footer}
       />
-      <div className="relative flex min-w-0 flex-1">
+      {/* a narrow window stacks the parts, the canvas and the side card,
+          so the canvas keeps its width */}
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-visible">
         {landing ? (
           <div className="relative min-w-0 flex-1">
             <ReviewStart here={here} onPath={() => setOnPath(true)} />
@@ -382,9 +403,11 @@ function StepArea({
   onPick: (id: string) => void;
   onNext: (() => void) | null;
 }) {
-  const { ws, view, busy, act } = here;
+  const { ws, view, busy, act, pending } = here;
   const { map, live } = ws;
   const mode = canvasMode(st);
+  // Draw this step at once looks under way: the move takes a moment to start
+  const drawing = writing || pending("open");
   // what the centre shows: the topic diagram only where there is one and you
   // are not building (it may draw the links), the scene only on a play step
   const centre =
@@ -411,6 +434,7 @@ function StepArea({
             ),
           found: wiResult?.found ?? [],
           extra: wiResult?.extra ?? [],
+          missed: wiResult?.missed ?? [],
           fails: st.whatif.fails,
         }
       : null;
@@ -436,7 +460,7 @@ function StepArea({
   for (const c of map.chat) if (c.blankId) verdicts[c.blankId] = c.text;
 
   const side = (
-    <aside className="flex w-[300px] shrink-0 flex-col overflow-y-auto border-l border-line bg-surface px-4 py-3">
+    <aside className="flex max-h-[40%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 lg:max-h-none lg:w-[260px] lg:border-t-0 lg:border-l xl:w-[300px]">
       <div className="space-y-4">
         {ready && st.stage === "see" && (
           <PredictCard key={st.step} here={here} st={st} />
@@ -547,7 +571,7 @@ function StepArea({
               </SmallBtn>
             </div>
           </div>
-        ) : writing ? (
+        ) : drawing ? (
           <div className="w-[460px] max-w-[80%] text-center">
             <div className="grid grid-cols-3 items-center gap-6">
               {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -598,7 +622,7 @@ function StepArea({
       {ready && mode === "build" && centre === "step" && (
         <Tray here={here} st={st} />
       )}
-      <div className="relative flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-h-[360px] min-w-0 flex-1 flex-col">
         <div className="space-y-2 border-b border-line px-4 pt-3 pb-2">
           {review && (
             <ReviewStrip
@@ -689,11 +713,21 @@ function StepArea({
                 Peek at the worked case
               </button>
             )}
+          {ready && st.onCase && st.stage === "build" && (
+            <button
+              onClick={() => void act("onCase", { step: st.step, on: false })}
+              className="text-[11.5px] text-muted hover:text-ink"
+              title="The new case is optional: it waits here for you"
+            >
+              ← Back to my build (the new case waits)
+            </button>
+          )}
         </div>
         <div className="relative min-h-0 flex-1">{body}</div>
         <FloatingComposer
           ws={ws}
           beside={false}
+          sticky
           placeholder="Ask anything about the topic, or tell Claude where you are stuck…"
         />
       </div>

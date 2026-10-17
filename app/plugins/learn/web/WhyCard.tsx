@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { SmallBtn } from "./BuildCanvas.tsx";
+import { SmallBtn, WaitNote } from "./BuildCanvas.tsx";
 import { HowSure } from "./CheckCard.tsx";
 import { WAIT_TITLE, type Here } from "./view.ts";
 import type { StepView, Sure, WhyState } from "../shared.ts";
@@ -28,13 +28,17 @@ export function WhyCard({
 }) {
   const { act, busy } = here;
   const [text, setText] = useState("");
+  // what was sent last: the server's refusal ("Say a little more.") is about
+  // that text, and goes once you change it
+  const [sent, setSent] = useState("");
   const w = st.why;
   if (!w) return null;
   const v = w.state ? VERDICT[w.state] : null;
   const open = st.stage === "why";
   const send = () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t || busy) return;
+    setSent(t);
     void act("why", { step: st.step, text: t }).then((r) => {
       if (r.ok) setText("");
     });
@@ -64,7 +68,7 @@ export function WhyCard({
             placeholder="One or two lines, in your own words…"
             className="block w-full resize-none rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] outline-hidden focus:border-primary"
           />
-          {w.pre && (
+          {w.pre && text.trim() === sent && (
             <div className="rounded-lg bg-warning-soft px-2.5 py-1.5 text-[12px] text-warning-strong">
               {w.pre}
             </div>
@@ -87,6 +91,7 @@ export function WhyCard({
               Send
             </SmallBtn>
           </div>
+          <WaitNote here={here} />
         </>
       )}
       {judging && (
@@ -139,6 +144,9 @@ export function BuiltCard({
   const { act, busy } = here;
   const step = st.step;
   const wi = st.whatif;
+  const labelOf = (id: string) =>
+    st.placed.find((p) => p.id === id)?.label ?? "";
+  const caseWriting = writingCase || st.newCase === "writing";
   return (
     <div className="space-y-3">
       <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] font-medium text-success-strong">
@@ -169,17 +177,23 @@ export function BuiltCard({
       {wi && (
         <div className="space-y-1.5 border-t border-line pt-2">
           <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-            What if · optional
+            What if · {wi.due && !wi.result ? "due for review" : "optional"}
           </div>
           <div className="text-[13px] leading-snug text-ink">{wi.ask}</div>
           {wi.result ? (
             <div className="rounded-lg bg-panel px-2.5 py-1.5 text-[12.5px] leading-snug text-body">
               <div className="font-medium">
                 {wi.result.found.length} of{" "}
-                {wi.result.found.length + wi.result.missed} found
+                {wi.result.found.length + wi.result.missed.length} found
                 {wi.result.extra.length > 0 &&
                   `, ${wi.result.extra.length} extra`}
               </div>
+              {wi.result.missed.length > 0 && (
+                <div className="mt-0.5">
+                  Missed:{" "}
+                  {wi.result.missed.map((id) => `“${labelOf(id)}”`).join(", ")}
+                </div>
+              )}
               <div className="mt-0.5 text-muted">{wi.result.why}</div>
             </div>
           ) : whatif.on ? (
@@ -222,25 +236,37 @@ export function BuiltCard({
           <div className="text-[12.5px] text-success-strong">
             ✓ New case built
           </div>
-        ) : writingCase || st.newCase === "writing" ? (
-          <div className="flex items-center gap-2 text-[12px] text-primary-strong">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-            Claude is writing a new case…
-          </div>
+        ) : st.newCase === "ready" && !caseWriting ? (
+          <>
+            <div className="text-[12px] text-muted">
+              Your new case is waiting, built at L2.
+            </div>
+            <SmallBtn onClick={() => void act("onCase", { step, on: true })}>
+              Back to the new case
+            </SmallBtn>
+          </>
         ) : (
           <>
             <div className="text-[12px] text-muted">
               The same idea on a case that looks different, built at L2.
               {st.newCase === "broken" &&
+                !caseWriting &&
                 " The last one did not hold together."}
             </div>
+            {/* the button keeps its place while Claude writes, so a second
+                press does not land on Next step below it */}
             <SmallBtn
-              disabled={busy}
+              disabled={busy || caseWriting}
               title={busy ? WAIT_TITLE : "One Claude move"}
               onClick={() => void act("newCase", { step })}
             >
-              {st.newCase === "broken" ? "Try again" : "New case (about 3 min)"}
+              {caseWriting
+                ? "Claude is writing a new case…"
+                : st.newCase === "broken"
+                  ? "Try again"
+                  : "New case (about 3 min)"}
             </SmallBtn>
+            {!caseWriting && <WaitNote here={here} />}
           </>
         )}
       </div>

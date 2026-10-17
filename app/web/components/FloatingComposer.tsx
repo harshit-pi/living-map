@@ -12,6 +12,7 @@ export function FloatingComposer({
   placeholder,
   left,
   beside = true,
+  sticky = false,
 }: {
   ws: Workspace;
   placeholder: string;
@@ -21,9 +22,11 @@ export function FloatingComposer({
   // selected, so the box keeps clear of it; a screen whose side cards sit
   // beside the canvas instead says false
   beside?: boolean;
+  // a reply to the box stays until clicked away (see useCaption)
+  sticky?: boolean;
 }) {
   const { map, live, selection, setSelection, roomy } = ws;
-  const caption = useCaption(map, live.busy, live.stream);
+  const caption = useCaption(map, live.busy, live.stream, sticky);
   const one = selection.length === 1 ? selection[0] : null;
   // the panel already shows what is being written for its own node; a blank's
   // verdict streams on the blank (a right one comes up here once it is checked)

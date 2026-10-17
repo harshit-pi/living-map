@@ -52,7 +52,13 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
     const l = st.links.find((x) => x.id === id);
     return l ? `“${labelOf(l.from)}” ${l.rel} “${labelOf(l.to)}”` : "";
   };
-  const of = (m: Mark) => c?.marks.filter((x) => x.mark === m) ?? [];
+  // the last check's marks on links still on the canvas: one you deleted
+  // since has nothing left to name
+  const of = (m: Mark) =>
+    c?.marks.filter(
+      (x) => x.mark === m && st.links.some((l) => l.id === x.link),
+    ) ?? [];
+  const argued = c?.argued ?? 0;
   const slotWord =
     st.frame.kind === "lanes"
       ? "lane"
@@ -81,7 +87,7 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
       ) : (
         <div className="space-y-1 text-[12.5px] leading-snug text-body">
           <div className="text-[14px] font-semibold text-ink">
-            {c.right + c.given} of {c.total} links ✓
+            {c.right + c.given + argued} of {c.total + argued} links ✓
             {c.given > 0 && (
               <span className="ml-1 text-[11.5px] font-normal text-muted">
                 ({c.given} given)
@@ -120,20 +126,63 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
               {plural(c.outOfOrder, "pair")} out of order along the axis
             </div>
           )}
+          {/* what a pass needs, so a card full of ✓ that has not passed
+              says why (with 3 other links, 70% is all 3) */}
+          {!c.pass && (
+            <div className="mt-1 rounded-lg bg-panel px-2 py-1 text-[12px] text-muted">
+              Not passed yet. A pass needs every key link
+              {c.restNeed > 0
+                ? `, and ${c.restNeed} of the ${c.rest} other links (you have ${c.restGot})`
+                : ""}
+              .
+              {(wrongSlots > 0 || c.outOfOrder > 0) &&
+                " Where the parts sit is marked, but does not stop a pass."}
+            </div>
+          )}
         </div>
       )}
 
       {/* what the server found, with the reason only once you drew it */}
       {c && (of("miscon").length > 0 || of("reversed").some((m) => m.note)) && (
         <div className="space-y-1.5 border-t border-line pt-2">
-          {of("miscon").map((m) => (
-            <div key={m.link} className="text-[12px] leading-snug">
-              <span className="font-medium text-danger-strong">
-                {MARK.miscon.sym} {words(m.link)}:
-              </span>{" "}
-              <span className="text-body">{m.refute}</span>
-            </div>
-          ))}
+          {of("miscon").map((m) => {
+            const l = st.links.find((x) => x.id === m.link)!;
+            return (
+              <div key={m.link} className="text-[12px] leading-snug">
+                <span className="font-medium text-danger-strong">
+                  {MARK.miscon.sym} {words(m.link)}:
+                </span>{" "}
+                <span className="text-body">{m.refute}</span>
+                {/* the pattern can be wider than the mix-up: say why it holds */}
+                {arguing !== m.link ? (
+                  <button
+                    onClick={() => {
+                      setArguing(m.link);
+                      setText("");
+                    }}
+                    className="ml-1 text-[11.5px] text-primary-strong hover:underline"
+                  >
+                    I think it holds
+                  </button>
+                ) : (
+                  <ArgueBox
+                    here={here}
+                    mixup
+                    link={l}
+                    text={text}
+                    setText={setText}
+                    onSend={() => {
+                      void act("argue", { step, link: l.id, text }).then(
+                        (r) => {
+                          if (!r.error) setArguing(null);
+                        },
+                      );
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
           {of("reversed")
             .filter((m) => m.note)
             .map((m) => (
@@ -179,10 +228,10 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
                 </div>
                 {arguing === m.link && (
                   <ArgueBox
+                    here={here}
                     link={l}
                     text={text}
                     setText={setText}
-                    busy={busy}
                     onSend={() => {
                       void act("argue", { step, link: l.id, text }).then(
                         (r) => {

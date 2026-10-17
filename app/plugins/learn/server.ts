@@ -20,7 +20,14 @@ import {
   isBuildMap,
   startBuildMap,
 } from "./build.ts";
-import { dueOf, outlineOf, pathSteps, peek, viewOf } from "./core.ts";
+import {
+  dueOf,
+  lastVisit,
+  outlineOf,
+  pathSteps,
+  peek,
+  viewOf,
+} from "./core.ts";
 import * as canvas from "../../server/actions/canvas.ts";
 import type { Ctx } from "../../server/actions/context.ts";
 import { hint as coreHint } from "../../server/actions/steps.ts";
@@ -210,6 +217,9 @@ function replay(ctx: Ctx, nodeId: string): ActionResult {
 const CLASSIC: Record<string, string> = { diagram: DIAGRAM, scene: SCENE };
 const BUILD: Record<string, string> = { ...BUILD_SECTIONS, scene: SCENE };
 
+// the moves that work on a step's hidden model, and so may read it whole
+const ON_MODEL = new Set(["model", "why", "case", "argue", "layer"]);
+
 const classicOutline = (map: StoredMap) =>
   `TOPIC DIAGRAM:\n${diagramOutline(map.diagram, map.fills, map.answers)}`;
 
@@ -240,13 +250,13 @@ export const learn: ServerPlugin = {
     isBuildMap(map)
       ? { prompt: BUILD_PROMPT, sections: BUILD }
       : { prompt: PROMPT, sections: CLASSIC },
-  outline: (map) => {
+  outline: (map, move) => {
     const s = peek(map.data);
     if (s?.mode !== "build") return classicOutline(map);
+    const full = !!move?.sections.some((x) => ON_MODEL.has(x));
+    const text = outlineOf(s, map.nodes, { full });
     // a map practised as builds after the topic diagram keeps it in view
-    return map.diagram
-      ? `${outlineOf(s, map.nodes)}\n\n${classicOutline(map)}`
-      : outlineOf(s, map.nodes);
+    return map.diagram ? `${text}\n\n${classicOutline(map)}` : text;
   },
   applyOp: (map, op, { scope }) => applyBuildOp(map, op, scope),
 
@@ -344,7 +354,8 @@ export const learn: ServerPlugin = {
       const built = steps.filter((n) => n.status === "answered").length;
       const due = learn.due!(map, clock()).now;
       // the headline of the last review: today, unaided
-      const last = peek(map.data)?.visits.at(-1);
+      const s = peek(map.data);
+      const last = s ? lastVisit(s) : null;
       return `${built} of ${steps.length} built${due ? ` · ${due} due` : ""}${last ? ` · last review ${last.unaided} of ${last.of} unaided` : ""}`;
     }
     const done = steps.filter(

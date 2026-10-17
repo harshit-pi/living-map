@@ -9,11 +9,17 @@ import type { Frame } from "../shared.ts";
 export const NODE_W = 172;
 export const NODE_H = 62;
 const GAP = 22;
+// parts one after another along a lane or down a column leave room for the
+// verb on the link between them (at 22px a label sat on the cards)
+const ALONG_X = NODE_W + 96;
+const ALONG_Y = NODE_H + 46;
 const LANE_H = 130;
 const LANE_LABEL = 120;
-const COL_W = 212;
+const COL_W = 200;
 const BOX_W = 420;
 const BOX_H = 300;
+// boxes two to a row: three made the frame so wide the canvas opened at half size
+const BOX_ROW = 2;
 const TOP = 44;
 
 export type At = { x: number; y: number };
@@ -36,7 +42,7 @@ const down = (f: Frame) => f.kind === "axis" || f.kind === "sort";
 export function regions(frame: Frame, span = 0): Region[] {
   switch (frame.kind) {
     case "lanes": {
-      const w = Math.max(900, span + NODE_W + 80);
+      const w = Math.max(640, span + NODE_W + 80);
       return frame.lanes.map((l, i) => ({
         slot: l,
         label: l,
@@ -63,8 +69,8 @@ export function regions(frame: Frame, span = 0): Region[] {
       return frame.boxes.map((b, i) => ({
         slot: b.id,
         label: b.label,
-        x: (i % 3) * (BOX_W + 40),
-        y: Math.floor(i / 3) * (BOX_H + 40),
+        x: (i % BOX_ROW) * (BOX_W + 40),
+        y: Math.floor(i / BOX_ROW) * (BOX_H + 40),
         w: BOX_W,
         h: BOX_H,
       }));
@@ -97,14 +103,20 @@ export function slotAt(frame: Frame, p: At, span = 0): string | null {
 // Where the parts outside the frame wait: under the lanes and the boxes,
 // right of the columns. A framed canvas draws a part with no slot there, never
 // inside a slot it is not in, so the picture reads as the check does.
-export function looseZone(frame: Frame, span = 0): Region | null {
+// `label`: the worked case keeps its hidden part here, where its slot would
+// point at the answer.
+export function looseZone(
+  frame: Frame,
+  span = 0,
+  label?: string,
+): Region | null {
   const rs = regions(frame, span);
   if (!rs.length) return null;
   if (down(frame)) {
     const right = Math.max(...rs.map((r) => r.x + r.w)) + 40;
     return {
       slot: "",
-      label: "Not in a column yet",
+      label: label ?? "Not in a column yet",
       x: right,
       y: -TOP,
       w: NODE_W + 28,
@@ -114,7 +126,7 @@ export function looseZone(frame: Frame, span = 0): Region | null {
   const bottom = Math.max(...rs.map((r) => r.y + r.h)) + 30;
   return {
     slot: "",
-    label: across(frame) ? "Not in a lane yet" : "Not in a box yet",
+    label: label ?? (across(frame) ? "Not in a lane yet" : "Not in a box yet"),
     x: rs[0].x,
     y: bottom,
     w: Math.max(...rs.map((r) => r.x + r.w)) - rs[0].x,
@@ -126,6 +138,12 @@ const looseSpot = (frame: Frame, z: Region, i: number): At =>
   down(frame)
     ? { x: z.x + 14, y: z.y + 32 + i * (NODE_H + GAP) }
     : { x: z.x + 14 + i * (NODE_W + GAP), y: z.y + 34 };
+
+// a spot inside a box: two parts to a row, under its label
+const boxSpot = (r: Region, k: number): At => ({
+  x: r.x + 14 + (k % 2) * (NODE_W + 40),
+  y: r.y + 36 + Math.floor(k / 2) * (NODE_H + GAP),
+});
 
 // Where each placed part is drawn. On a free map, where it is. On a frame,
 // where it is when that is inside its slot, pulled into its slot when not,
@@ -161,10 +179,22 @@ export function drawn(
       };
   }
   // two parts pulled to one spot would hide each other: a later one moves
-  // on along its lane or down its column until it is clear
+  // on along its lane or down its column until it is clear; in a box, to
+  // the box's next free spot (pushed down, it was drawn under the box while
+  // the check counted it in)
   const done: At[] = [];
   for (const p of placed) {
     const q = out[p.id];
+    const r = p.slot ? rs.find((x) => x.slot === p.slot) : undefined;
+    if (r && frame.kind === "boxes" && !clear(done, q)) {
+      for (let k = 0; k < 12; k++) {
+        const at = boxSpot(r, k);
+        if (clear(done, at)) {
+          Object.assign(q, at);
+          break;
+        }
+      }
+    }
     for (let k = 0; k < 40 && !clear(done, q); k++)
       if (across(frame)) q.x += NODE_W + GAP;
       else q.y += NODE_H + GAP;
@@ -184,13 +214,10 @@ const clear = (taken: At[], p: At) =>
 export function spotIn(frame: Frame, r: Region, taken: At[]): At {
   for (let k = 0; k < 40; k++) {
     const p = across(frame)
-      ? { x: 16 + k * (NODE_W + GAP), y: r.y + (r.h - NODE_H) / 2 }
+      ? { x: 16 + k * ALONG_X, y: r.y + (r.h - NODE_H) / 2 }
       : down(frame)
-        ? { x: r.x + (r.w - NODE_W) / 2, y: 8 + k * (NODE_H + GAP) }
-        : {
-            x: r.x + 14 + (k % 2) * (NODE_W + GAP),
-            y: r.y + 36 + Math.floor(k / 2) * (NODE_H + GAP),
-          };
+        ? { x: r.x + (r.w - NODE_W) / 2, y: 8 + k * ALONG_Y }
+        : boxSpot(r, k);
     if (clear(taken, p)) return p;
   }
   return { x: r.x + 14, y: r.y + 36 };

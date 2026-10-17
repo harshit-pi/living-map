@@ -49,6 +49,10 @@ export type TurnOptions = {
   // the instructions this move needs beyond the canvas's job (see prompts.ts)
   sections?: readonly Section[];
   keep?: boolean; // may add and change nodes, never remove one
+  // the reply's words are neither streamed nor kept, only its ops applied
+  // (Learn writing a later step's model while you build: its caption could
+  // say what the hidden model holds)
+  quiet?: boolean;
   // what the working bar says once the move's ops show what it is doing
   // (null: keep the label): the first move's label is a guess from the
   // question's words until the model frames it
@@ -165,7 +169,7 @@ export function createEngine({
     const plugin = modeOf(m.purpose);
     return [
       `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${outline(m.nodes)}`,
-      plugin.outline?.(m) ?? "",
+      plugin.outline?.(m, { sections: opts.sections ?? [] }) ?? "",
       scope
         ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(
             m.nodes,
@@ -290,7 +294,7 @@ export function createEngine({
         },
         (soFar) => {
           const visible = visiblePart(soFar);
-          if (visible.length > shown.length) {
+          if (!opts.quiet && visible.length > shown.length) {
             hub.emit({
               type: "delta",
               text: visible.slice(shown.length),
@@ -371,14 +375,15 @@ export function createEngine({
           text: "Claude replied without changing the canvas.",
           ts: Date.now(),
         });
-      messages.push({
-        role: "claude",
-        text: visiblePart(reply.final).trim() || "(updated the canvas)",
-        ts: Date.now(),
-        view,
-        ...(opts.blankId ? { blankId: opts.blankId } : {}),
-        ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
-      });
+      if (!opts.quiet)
+        messages.push({
+          role: "claude",
+          text: visiblePart(reply.final).trim() || "(updated the canvas)",
+          ts: Date.now(),
+          view,
+          ...(opts.blankId ? { blankId: opts.blankId } : {}),
+          ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
+        });
       // it says how to have them made: told only that they were not, you
       // were left with a reply naming changes the map did not show
       if (refused)

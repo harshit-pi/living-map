@@ -7,7 +7,14 @@ const SHOW_MS = 9000;
 
 // The model's caption for a main-conversation move: live while it writes, then
 // a few seconds on screen. Messages already there when a map opens are not shown.
-export function useCaption(map: MapDoc | null, busy: boolean, stream: Stream) {
+// `sticky`: a reply to what you typed in the box stays until you click it
+// away, on a screen with nowhere else to read it (Learn's build screen).
+export function useCaption(
+  map: MapDoc | null,
+  busy: boolean,
+  stream: Stream,
+  sticky = false,
+) {
   const len = map?.chat.length ?? 0;
   const last = map?.chat[len - 1];
   // how long the conversation was when this map came into view
@@ -25,11 +32,13 @@ export function useCaption(map: MapDoc | null, busy: boolean, stream: Stream) {
     // a wrong answer's note is shown on its blank; a right one's explanation here
     !(last.blankId && map?.fills[last.blankId]?.state === "wrong");
 
+  const answer =
+    sticky && last?.role === "claude" && !last.nodeId && !last.blankId;
   useEffect(() => {
-    if (!fresh) return;
+    if (!fresh || answer) return;
     const t = setTimeout(() => setHiddenAt(len), SHOW_MS);
     return () => clearTimeout(t);
-  }, [fresh, len]);
+  }, [fresh, answer, len]);
 
   const live = busy && stream.threadId === null;
   return {

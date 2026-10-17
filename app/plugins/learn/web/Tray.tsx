@@ -24,7 +24,7 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
   };
 
   return (
-    <aside className="flex w-[176px] shrink-0 flex-col overflow-y-auto border-r border-line bg-canvas px-3 py-3">
+    <aside className="flex max-h-[132px] w-full shrink-0 flex-col overflow-y-auto border-b border-line bg-canvas px-3 py-2 lg:max-h-none lg:w-[150px] lg:border-r lg:border-b-0 lg:py-3 xl:w-[176px]">
       <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
         Parts
       </div>
@@ -83,7 +83,7 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
           )}
         </div>
       ) : (
-        <ul className="mt-1 space-y-1">
+        <ul className="mt-1 flex flex-wrap gap-1 lg:block lg:space-y-1">
           {st.tray.map((p) => (
             <li key={p.id}>
               <button
@@ -112,10 +112,12 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
         </ul>
       )}
 
-      <div className="mt-4 text-[10px] font-semibold tracking-wide text-faint uppercase">
+      {/* a narrow window keeps the room for the parts: the verbs are in the
+          picker too */}
+      <div className="mt-4 hidden text-[10px] font-semibold tracking-wide text-faint uppercase lg:block">
         Link verbs
       </div>
-      <div className="mt-1 space-y-1.5">
+      <div className="mt-1 hidden space-y-1.5 lg:block">
         {(Object.keys(FAMILIES) as Family[])
           .filter((f) => st.verbs.some((v) => familyOf(v) === f))
           .map((f) => (

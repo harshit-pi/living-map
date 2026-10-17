@@ -5,6 +5,7 @@
 // without a clock.
 
 import {
+  ARGUABLE,
   familyOf,
   HELP,
   isVerb,
@@ -77,7 +78,8 @@ export type Miscon = {
 };
 export type Predict = {
   ask: string;
-  choices: { text: string; miscon?: string }[];
+  // a wrong choice carries a misconception, or a line on why it is not it
+  choices: { text: string; miscon?: string; why?: string }[];
   answer: string;
   hides: string;
 };
@@ -97,6 +99,8 @@ export type RefModel = {
   title: string;
   case: string;
   frame: Frame;
+  // the verbs offered for this subject (verbsOf), out of the frame's own
+  verbs?: Verb[];
   parts: Part[];
   links: RefLink[];
   miscon: Miscon[];
@@ -133,7 +137,7 @@ export type StepState = {
   // a new case on this step, and whether you are building it now
   caseModel?: string;
   onCase?: boolean;
-  whatif?: { found: string[]; missed: number; extra: string[] };
+  whatif?: { found: string[]; missed: string[]; extra: string[] };
 };
 
 export type BuildLink = {
@@ -369,6 +373,10 @@ export function cleanModel(op: Raw): RefModel | null {
     if (c && !parts.some((x) => x.id === c.id)) parts.push(c);
   }
   const of = safe(op?.of);
+  const allowed = verbsFor(frame.kind);
+  const verbs = [
+    ...new Set(list(op?.verbs, 17).filter((v) => allowed.includes(v))),
+  ] as Verb[];
   return {
     id: safe(op?.id) || `m-${step}`,
     step,
@@ -378,6 +386,7 @@ export function cleanModel(op: Raw): RefModel | null {
     title: clean(op?.title, 80),
     case: clean(op?.case, 160),
     frame,
+    ...(verbs.length ? { verbs } : {}),
     parts,
     links: [],
     miscon: [],
@@ -386,6 +395,46 @@ export function cleanModel(op: Raw): RefModel | null {
 }
 
 const isPart = (m: RefModel, id: string) => m.parts.some((p) => p.id === id);
+
+// The verbs a step offers. The frame's whole list mixes subjects (a history
+// map was offered "reads" and "calls"), so Claude names the ones that fit;
+// the ones its links and misconceptions use are always in, and a short list
+// is filled from the same families to six, so it never lists only the
+// answers. A model that named none offers the frame's list.
+export function verbsOf(m: RefModel): Verb[] {
+  const frame = verbsFor(m.frame.kind);
+  if (!m.verbs?.length) return frame;
+  const keep = new Set<Verb>([
+    ...m.verbs,
+    ...m.links.map((l) => l.rel),
+    ...m.miscon.flatMap((x) => (x.link ? [x.link.rel] : [])),
+  ]);
+  const fams = new Set([...keep].map(familyOf));
+  for (const v of frame) {
+    if (keep.size >= 6) break;
+    if (fams.has(familyOf(v))) keep.add(v);
+  }
+  return frame.filter((v) => keep.has(v));
+}
+
+// "A contains B" says what "B part of A" says: links are compared in one
+// direction, so the inverse verb on the reversed pair is the same link and
+// not one that points the wrong way.
+const INVERSE: Partial<Record<Verb, Verb>> = {
+  contains: "part of",
+  "part of": "contains",
+};
+type Triple = { from: string; to: string; rel: Verb };
+export const canon = (l: Triple): Triple =>
+  l.rel === "contains"
+    ? { from: l.to, to: l.from, rel: "part of" }
+    : { from: l.from, to: l.to, rel: l.rel };
+
+export function sameLink(a: Triple, b: Triple): boolean {
+  const x = canon(a);
+  const y = canon(b);
+  return x.from === y.from && x.to === y.to && x.rel === y.rel;
+}
 
 // A link's ends must be parts of its model and its verb one the frame
 // allows; anything else is dropped. A link sent again by id replaces it.
@@ -441,9 +490,12 @@ export function setPredict(m: RefModel, op: Raw): boolean {
     .map((c) => {
       const text = clean(typeof c === "string" ? c : c?.text, 60);
       const miscon = safe(c?.miscon);
-      return text ? { text, ...(miscon ? { miscon } : {}) } : null;
+      const why = clean(c?.why, 160);
+      return text
+        ? { text, ...(miscon ? { miscon } : {}), ...(why ? { why } : {}) }
+        : null;
     })
-    .filter((c): c is { text: string; miscon?: string } => !!c);
+    .filter((c): c is Predict["choices"][number] => !!c);
   if (!ask || choices.length < 2) return false;
   m.predict = {
     ask,
@@ -497,9 +549,40 @@ export function givesAway(m: RefModel, text: string): string[] {
     const [long, short] = a.length >= b.length ? [a, b] : [b, a];
     if (!t.includes(long)) continue;
     if (!t.split(long).join(" ").includes(short)) continue;
-    if (t.includes(` ${STEMS[l.rel]}`)) out.push(l.id);
+    if (saysVerb(t, l.rel)) out.push(l.id);
   }
   return out;
+}
+
+// the verb or its inverse ("contains" says "part of" the other way round)
+const saysVerb = (t: string, rel: Verb) =>
+  [rel, INVERSE[rel]].some((v) => v && t.includes(` ${STEMS[v]}`));
+
+// The key links a text says in other words: most of each end's own words
+// and the verb ("Take the cheapest town, then try its roads" says "Take
+// cheapest town" then "Try each road"). Looser than givesAway, so it only
+// trims what is read before a build (a step's summary), never refuses a model.
+export function paraphrases(m: RefModel, text: string): string[] {
+  const t = phrase(text);
+  const said = new Set(wordsOf(text).map(stem));
+  const most = (label: string) => {
+    const w = wordsOf(label)
+      .filter((x) => x.length >= 3 && !STOP.has(x))
+      .map(stem);
+    return (
+      w.length > 0 &&
+      w.filter((x) => said.has(x)).length >= Math.ceil(w.length / 2)
+    );
+  };
+  return m.links
+    .filter(
+      (l) =>
+        l.key &&
+        most(labelOf(m, l.from)) &&
+        most(labelOf(m, l.to)) &&
+        saysVerb(t, l.rel),
+    )
+    .map((l) => l.id);
 }
 
 // Everything a model must be before it is shown. Each problem is said in
@@ -589,19 +672,16 @@ export function scrub(
     }
   }
   let summary: string | null = null;
-  if (step.summary && givesAway(m, step.summary).length) {
+  const leaks = (t: string) =>
+    givesAway(m, t).length > 0 || paraphrases(m, t).length > 0;
+  if (step.summary && leaks(step.summary)) {
     const cut = firstClause(step.summary);
-    summary = givesAway(m, cut).length ? "" : cut;
+    summary = leaks(cut) ? "" : cut;
   }
   return { summary, hints, predict };
 }
 
 // ---------------------------------------------------------------- grading
-
-const sameLink = (
-  a: { from: string; to: string; rel: Verb },
-  b: { from: string; to: string; rel: Verb },
-) => a.from === b.from && a.to === b.to && a.rel === b.rel;
 
 // Your build against the reference (and the links you argued for). Only the
 // key links decide a pass, and 70% of the rest; at L0 and in a quick rebuild
@@ -645,12 +725,16 @@ export function grade(
       marks.push({ link: l.id, mark: "miscon", refute: x.refute });
       continue;
     }
-    const rev = refs.find(
-      (r) =>
-        r.from === l.to &&
-        r.to === l.from &&
-        familyOf(r.rel) === familyOf(l.rel),
-    );
+    // compared one way round, so "contains" is "part of" reversed
+    const c = canon(l);
+    const rev = refs.find((r) => {
+      const cr = canon(r);
+      return (
+        cr.from === c.to &&
+        cr.to === c.from &&
+        familyOf(cr.rel) === familyOf(c.rel)
+      );
+    });
     if (rev) {
       reversed++;
       touched.add(rev.id);
@@ -661,12 +745,14 @@ export function grade(
       });
       continue;
     }
-    const fam = refs.find(
-      (r) =>
-        r.from === l.from &&
-        r.to === l.to &&
-        familyOf(r.rel) === familyOf(l.rel),
-    );
+    const fam = refs.find((r) => {
+      const cr = canon(r);
+      return (
+        cr.from === c.from &&
+        cr.to === c.to &&
+        familyOf(cr.rel) === familyOf(c.rel)
+      );
+    });
     if (fam) {
       family++;
       touched.add(fam.id);
@@ -681,10 +767,9 @@ export function grade(
   const keys = counted.filter((r) => r.key);
   const rest = counted.filter((r) => !r.key);
   const restGot = rest.filter(got).length;
-  const pass =
-    keys.length > 0 &&
-    keys.every(got) &&
-    (keyOnly || !rest.length || restGot / rest.length >= PASS_SHARE);
+  // the other links a pass needs: 70% of them, rounded up
+  const restNeed = keyOnly ? 0 : Math.ceil(rest.length * PASS_SHARE - 1e-9);
+  const pass = keys.length > 0 && keys.every(got) && restGot >= restNeed;
   const half = counted.filter((r) => halves.has(r.id) && !got(r)).length;
   const rightN = counted.filter((r) => right.has(r.id)).length;
   return {
@@ -693,6 +778,11 @@ export function grade(
     keyOnly,
     total: counted.length,
     right: rightN,
+    // links you argued for that Claude accepted, drawn: right, on top of total
+    argued: refs.filter((r) => r.argued && right.has(r.id)).length,
+    rest: keyOnly ? 0 : rest.length,
+    restGot: keyOnly ? 0 : restGot,
+    restNeed,
     given: counted.filter((r) => given.has(r.id)).length,
     missing: counted.filter((r) => !got(r) && !touched.has(r.id)).length,
     keys: keys.length,
@@ -798,12 +888,13 @@ export function matchPart(
 export function whatIf(
   m: RefModel,
   clicked: string[],
-): { found: string[]; missed: number; extra: string[] } {
+): { found: string[]; missed: string[]; extra: string[] } {
   const affected = new Set(m.whatif?.affected ?? []);
   const picked = [...new Set(clicked)].filter((id) => isPart(m, id));
   return {
     found: picked.filter((id) => affected.has(id)),
-    missed: [...affected].filter((id) => !picked.includes(id)).length,
+    // named once you have tried: the try is logged, so this is feedback now
+    missed: [...affected].filter((id) => !picked.includes(id)),
     extra: picked.filter((id) => !affected.has(id)),
   };
 }
@@ -845,8 +936,71 @@ const keyFamilies = (m: RefModel) =>
     .sort()
     .join(",");
 
+// The graph a case's text draws, when it names one: "A–B 4, A–C 1" gives the
+// edges A–B and A–C. An end is a short name with a capital or a digit after
+// a letter ("A", "R1", "NYC"), so "OSPF-style" and "days 0-14" are not edges.
+export function caseEdges(text: string): [string, string][] {
+  const out = new Map<string, [string, string]>();
+  for (const x of text.matchAll(
+    /(?<![A-Za-z0-9])([A-Z][A-Za-z0-9]{0,3})\s*(?:–|—|-|→|->)\s*([A-Z][A-Za-z0-9]{0,3})(?![A-Za-z0-9])/g,
+  )) {
+    const [a, b] = [x[1], x[2]].sort();
+    if (a !== b) out.set(`${a}|${b}`, [a, b]);
+  }
+  return [...out.values()];
+}
+
+// Whether two small undirected graphs are the same graph under new names.
+export function sameGraph(
+  a: [string, string][],
+  b: [string, string][],
+): boolean {
+  const adj = (es: [string, string][]) => {
+    const g = new Map<string, Set<string>>();
+    for (const [x, y] of es) {
+      if (!g.has(x)) g.set(x, new Set());
+      if (!g.has(y)) g.set(y, new Set());
+      g.get(x)!.add(y);
+      g.get(y)!.add(x);
+    }
+    return g;
+  };
+  const ga = adj(a);
+  const gb = adj(b);
+  if (a.length !== b.length || ga.size !== gb.size) return false;
+  const deg = (g: Map<string, Set<string>>) =>
+    [...g.values()]
+      .map((s) => s.size)
+      .sort()
+      .join();
+  if (deg(ga) !== deg(gb)) return false;
+  const na = [...ga.keys()];
+  const map = new Map<string, string>();
+  const used = new Set<string>();
+  const fits = (i: number): boolean => {
+    if (i === na.length) return true;
+    const x = na[i];
+    for (const y of gb.keys()) {
+      if (used.has(y) || ga.get(x)!.size !== gb.get(y)!.size) continue;
+      // every neighbour already mapped must be a neighbour here too
+      if (
+        [...ga.get(x)!].some((n) => map.has(n) && !gb.get(y)!.has(map.get(n)!))
+      )
+        continue;
+      map.set(x, y);
+      used.add(y);
+      if (fits(i + 1)) return true;
+      map.delete(x);
+      used.delete(y);
+    }
+    return false;
+  };
+  return fits(0);
+}
+
 // A new case must look different: not the same parts with new numbers, not
-// the same case, and the same kinds of verb on its key links.
+// the same case, not the same graph with its names and numbers changed, and
+// the same kinds of verb on its key links.
 export function caseShape(orig: RefModel, next: RefModel): string[] {
   const p: string[] = [];
   const labels = new Set(orig.parts.map((x) => bare(x.label)));
@@ -857,6 +1011,12 @@ export function caseShape(orig: RefModel, next: RefModel): string[] {
     );
   if (bare(next.case) && bare(next.case) === bare(orig.case))
     p.push("its case is the original's case with new numbers");
+  const was = caseEdges(orig.case);
+  const now = caseEdges(next.case);
+  if (was.length >= 3 && sameGraph(was, now))
+    p.push(
+      "its case is the original's graph with new names and numbers: use a different number of nodes and different connections",
+    );
   if (keyFamilies(orig) !== keyFamilies(next))
     p.push(
       `its key links must use the same kinds of verb as the original's (${keyFamilies(orig) || "none"})`,
@@ -931,7 +1091,9 @@ function acyclic(m: RefModel): RefLink[] {
 
 // What each help level gives before you start: L0 every part where the
 // worked case had it and every link but the key ones; L1 every part on a
-// plain grid in a shuffled order, no links; L2 and L3 nothing placed.
+// plain grid in a shuffled order, each in its slot of the frame (Link it
+// tests the links: a part left outside its lane was marked wrong under a
+// line saying all parts were placed), no links; L2 and L3 nothing placed.
 export function startBuild(m: RefModel, help: Help): Build {
   const b: Build = {
     help,
@@ -994,6 +1156,7 @@ export function startBuild(m: RefModel, help: Help): Build {
         part: p.id,
         x: (i % 3) * COL,
         y: Math.floor(i / 3) * ROW,
+        ...(p.slot ? { slot: p.slot[0] } : {}),
       }),
     );
   }
@@ -1069,9 +1232,9 @@ export function linkParts(
   if (!placedHas(b, from) || !placedHas(b, to))
     return "Place both parts first.";
   if (from === to) return "A part cannot link to itself.";
-  if (!isVerb(rel) || !verbsFor(m.frame.kind).includes(rel))
+  if (!isVerb(rel) || !verbsOf(m).includes(rel))
     return "That verb is not one this frame uses.";
-  if (b.links.some((l) => l.from === from && l.to === to && l.rel === rel))
+  if (b.links.some((l) => sameLink(l, { from, to, rel })))
     return "Those two are already linked that way.";
   const link: BuildLink = { id: `y${b.next++}`, from, to, rel };
   b.links.push(link);
@@ -1087,7 +1250,7 @@ export function relinkParts(
   const l = b.links.find((x) => x.id === id);
   if (!l || l.given) return "That link is not yours to change.";
   if (change.rel !== undefined) {
-    if (!isVerb(change.rel) || !verbsFor(m.frame.kind).includes(change.rel))
+    if (!isVerb(change.rel) || !verbsOf(m).includes(change.rel))
       return "That verb is not one this frame uses.";
     l.rel = change.rel;
   }
@@ -1127,9 +1290,18 @@ export function nextHint(
 }
 
 // Show one link: a key link you do not have, drawn for you and marked shown.
+// It takes the place of your tries on the same two parts that are not right
+// (a near verb, the wrong way round): drawn beside them, the two read as one.
 export function showOneLink(m: RefModel, b: Build): RefLink | string {
   const target = openKey(m, b);
   if (!target) return "Every key link is already there.";
+  const pair = (l: Triple) => [l.from, l.to].sort().join("|");
+  b.links = b.links.filter(
+    (l) =>
+      l.given ||
+      pair(l) !== pair(target) ||
+      m.links.some((r) => sameLink(r, l)),
+  );
   b.links.push({
     id: `y${b.next++}`,
     from: target.from,
@@ -1178,12 +1350,14 @@ export function outcomes(
   return out;
 }
 
-// a whole build's credit: shown if anything was shown, hints if anything
-// was helped, otherwise yours
-export function creditOf(m: RefModel, b: Build, viaModel = false): Credit {
-  const o = Object.values(outcomes(m, b));
-  if (viaModel || o.some((x) => x.how === "shown")) return "shown";
-  if (o.some((x) => x.how !== "unaided")) return "hints";
+// A whole build's credit: shown if anything was shown, with hints if a hint
+// or a "did you mean" was taken, otherwise yours. A link fixed after a check
+// with no hint is still yours (the check gives counts and places, never the
+// fix); the review schedule (outcomes) is stricter and wants it right at
+// the first check.
+export function creditOf(b: Build, viaModel = false): Credit {
+  if (viaModel || b.shown.length) return "shown";
+  if (b.hints.length || b.hinted?.length) return "hints";
   return "you";
 }
 
@@ -1193,25 +1367,40 @@ export function creditOf(m: RefModel, b: Build, viaModel = false): Credit {
 export const localDay = (t: number): number =>
   Math.floor((t - new Date(t).getTimezoneOffset() * 60_000) / DAY);
 
-// One item per key link and one per what-if, made when a step is Built: box
-// 1, due in a day.
-export function newItems(m: RefModel, now: number): Item[] {
-  const make = (ref: string, kind: Item["kind"]): Item => ({
-    id: `${m.id}:${ref}`,
-    model: m.id,
-    kind,
-    ref,
-    box: 1,
-    due: now + DAY,
-    retired: false,
-    made: now,
-    log: [],
-  });
-  return [
-    ...m.links.filter((l) => l.key && !l.argued).map((l) => make(l.id, "link")),
-    ...(m.whatif ? [make("whatif", "whatif")] : []),
-  ];
-}
+const item = (
+  m: RefModel,
+  ref: string,
+  kind: Item["kind"],
+  now: number,
+): Item => ({
+  id: `${m.id}:${ref}`,
+  model: m.id,
+  kind,
+  ref,
+  box: 1,
+  due: now + DAY,
+  retired: false,
+  made: now,
+  log: [],
+});
+
+// One item per key link, made when a step is Built: box 1, due in a day.
+export const newItems = (m: RefModel, now: number): Item[] =>
+  m.links
+    .filter((l) => l.key && !l.argued)
+    .map((l) => item(m, l.id, "link", now));
+
+// The what-if is optional: its item is made the first time you try it, so
+// one you never did is never due.
+export const whatifItem = (m: RefModel, now: number): Item | null =>
+  m.whatif ? item(m, "whatif", "whatif", now) : null;
+
+// The items a review rebuild answers, and so the ones that make a step due
+// and set its help: its key links. A what-if is asked again on the built
+// step when it falls due (review in build.ts), never by a rebuild: counted
+// here it kept a finished review due, with nothing to grade, and held the
+// step's help at L1 for ever.
+export const rebuilt = (i: Item): boolean => i.kind === "link" && !i.retired;
 
 // An answer on an item. Unaided right moves it up a box, once a local day
 // (and never on the day it was built); hinted keeps the box, due tomorrow;
@@ -1253,7 +1442,7 @@ export const itemsOf = (s: LearnState, modelId: string): Item[] =>
 // A step's help on review: its weakest live item's box (0-1 → L1, 2 → L2,
 // 3+ → L3), one lower after a quick rebuild that came out wrong.
 export function helpFor(items: Item[], recallWrong = false): Help {
-  const live = items.filter((i) => !i.retired);
+  const live = items.filter(rebuilt);
   const low = live.length ? Math.min(...live.map((i) => i.box)) : 3;
   const h = low <= 1 ? 1 : low === 2 ? 2 : 3;
   return Math.max(0, recallWrong ? h - 1 : h) as Help;
@@ -1270,7 +1459,7 @@ export function dueOf(
   let next: number | null = null;
   for (const i of Object.values(s.items)) {
     const m = own(s.models, i.model);
-    if (i.retired || !m || !live.has(m.step)) continue;
+    if (!rebuilt(i) || !m || !live.has(m.step)) continue;
     if (i.due <= now) count++;
     else if (next === null || i.due < next) next = i.due;
   }
@@ -1324,6 +1513,91 @@ export function unaidedSince(
   return { unaided, of };
 }
 
+// A build's answers onto its model's items: how each key link came out.
+export function logOutcomes(
+  s: LearnState,
+  m: RefModel,
+  b: Build,
+  now: number,
+): void {
+  for (const [link, o] of Object.entries(outcomes(m, b))) {
+    const i = own(s.items, `${m.id}:${link}`);
+    if (i) record(i, o.how, now, o.sure);
+  }
+}
+
+// Today, unaided, while a review is open: what is logged since it opened,
+// and the rebuilds checked but not passed yet, as they stand (they are
+// logged when they pass, or when you are done), so the count moves with
+// your first check rather than at the end.
+export function todayOf(s: LearnState): { unaided: number; of: number } {
+  const r = s.review;
+  if (!r) return { unaided: 0, of: 0 };
+  const t = unaidedSince(s, r.at);
+  for (const step of r.order) {
+    const m = own(s.models, own(s.stepModel, step) ?? "");
+    const b = m && own(s.builds, m.id);
+    if (!m || !b?.checks || !s.steps[step]?.reviewing) continue;
+    for (const o of Object.values(outcomes(m, b))) {
+      t.of++;
+      if (o.how === "unaided") t.unaided++;
+    }
+  }
+  return t;
+}
+
+// A review opened on an earlier day is over: the next one is a visit of
+// its own, with its own gap, levels and count.
+export const staleReview = (s: LearnState, now: number): boolean =>
+  !!s.review && localDay(s.review.at) !== localDay(now);
+
+// End the open review (I'm done today, or a new day): what you checked is
+// logged, what you did not stays due, and the visit's score is kept, but
+// only when something was rebuilt: an empty visit would put "0 of 0" over
+// the last real score.
+export function endReview(
+  s: LearnState,
+  now: number,
+): { unaided: number; of: number } | null {
+  const r = s.review;
+  if (!r) return null;
+  for (const step of r.order) {
+    const st = own(s.steps, step);
+    const m = own(s.models, own(s.stepModel, step) ?? "");
+    if (!st?.reviewing || !m) continue;
+    const b = own(s.builds, m.id);
+    if (b?.checks) logOutcomes(s, m, b, now);
+    st.reviewing = false;
+    st.stage = "built";
+  }
+  const today = unaidedSince(s, r.at);
+  if (today.of > 0)
+    s.visits.push({
+      at: r.at,
+      unaided: today.unaided,
+      of: Math.max(r.items, today.of),
+    });
+  s.review = null;
+  return today;
+}
+
+// An argued link Claude accepted is right from now on: the last check says
+// so at once, so its row leaves "Not in Claude's model" and Argue for it
+// goes (a second argue was a second paid move on a link already accepted).
+export function acceptArgued(b: Build, link: Triple): void {
+  const c = b.last;
+  if (!c) return;
+  for (const mk of c.marks) {
+    const l = b.links.find((x) => x.id === mk.link);
+    if (!ARGUABLE.includes(mk.mark) || !l || !sameLink(l, link)) continue;
+    if (mk.mark === "extra") c.extra--;
+    else c.miscon--;
+    mk.mark = "right";
+    delete mk.refute;
+    c.argued = (c.argued ?? 0) + 1;
+  }
+}
+
 // "Which idea is this?": one card per due step, its what-if question (or its
 // new case's title), with the built steps' titles as choices. The server
 // knows the answer, so it costs no call.
@@ -1360,10 +1634,15 @@ export function ideaCards(
 
 // What Claude reads each move: the step being worked on in full (its
 // reference, your build, the last check, the hints used), the other steps in
-// one line each, so the prompt stays small.
+// one line each, so the prompt stays small. `full` is for the moves that
+// work on the reference (writing a model, judging a why, an argue, a new
+// case). Any other move (Explain, a thread, the message box) on a step you
+// have not built gets its parts only: with the links and slots in front of
+// it, an explanation named which box every part goes in.
 export function outlineOf(
   s: LearnState,
   nodes: Record<string, MapNode>,
+  { full = true }: { full?: boolean } = {},
 ): string {
   const path = pathSteps(nodes);
   const title = (id: string) => own(nodes, id)?.title ?? id;
@@ -1386,6 +1665,16 @@ export function outlineOf(
   const st = at ? s.steps[at] : undefined;
   const main = at ? own(s.models, own(s.stepModel, at) ?? "") : undefined;
   const m = st?.onCase && st.caseModel ? own(s.models, st.caseModel) : main;
+  if (at && st && m && !full && st.stage !== "built") {
+    lines.push(
+      "",
+      `CURRENT STEP [${at}] "${title(at)}": the learner is building it back from memory, so its model is not shown to you on this move. Say what a part IS, in general; never which part links to which, which box, lane or column a part sits in, or the order the parts come in. Name parts by their label in quotes.`,
+      `  case: "${m.title}": ${m.case}`,
+      "  parts:",
+      ...m.parts.map((p) => `    "${p.label}": ${p.role}`),
+    );
+    return lines.join("\n");
+  }
   if (at && st && m) {
     lines.push(
       "",
@@ -1466,7 +1755,13 @@ function stepView(
   now: number,
 ): StepView {
   const node = nodes[p.id];
-  const st = own(s.steps, p.id) ?? freshStep(s.level);
+  const saved = own(s.steps, p.id) ?? freshStep(s.level);
+  // a review left open from an earlier day is over (the next action ends it):
+  // its steps read as built until a new review opens
+  const st =
+    saved.reviewing && staleReview(s, now)
+      ? { ...saved, reviewing: false, stage: "built" as const }
+      : saved;
   const main = own(s.models, own(s.stepModel, p.id) ?? "");
   const caseM = st.caseModel ? own(s.models, st.caseModel) : undefined;
   const m = st.onCase && caseM?.status === "ready" ? caseM : main;
@@ -1486,7 +1781,7 @@ function stepView(
     caseTitle: m?.title ?? "",
     case: m?.case ?? "",
     frame: m?.frame ?? { kind: "free" },
-    verbs: verbsFor(m?.frame.kind ?? "free"),
+    verbs: m ? verbsOf(m) : verbsFor("free"),
     tray: [],
     trayCount: 0,
     worked: null,
@@ -1511,7 +1806,7 @@ function stepView(
     recallDue: !!st.recallDue,
     recall: !!st.recall,
     reviewing: !!st.reviewing,
-    itemsDue: items.filter((i) => !i.retired && i.due <= now).length,
+    itemsDue: items.filter((i) => rebuilt(i) && i.due <= now).length,
   };
   if (!m || !ready) return base;
 
@@ -1556,10 +1851,17 @@ function stepView(
       picked: pick,
       sure: st.predicted?.sure ?? null,
       right,
+      // a wrong pick: its misconception, or Claude's line on why not
       refute:
-        right === false && choice?.miscon
-          ? (m.miscon.find((x) => x.id === choice.miscon)?.refute ?? null)
+        right === false
+          ? (choice?.miscon &&
+              m.miscon.find((x) => x.id === choice.miscon)?.refute) ||
+            choice?.why ||
+            null
           : null,
+      // and the right one: the pick is final, and the whole case is on
+      // screen from now on (a case may not show it: a resized array)
+      ...(right === false ? { correct: m.predict.answer } : {}),
     };
   }
 
@@ -1580,9 +1882,10 @@ function stepView(
     base.check = b.last;
     base.checks = b.checks;
     base.sure = b.sure ?? null;
-    const unplaced = shuffled(
-      m.parts.filter((x) => !b.placed.some((y) => y.part === x.id)),
-      seedOf(m.id),
+    // one shuffle of every part, then the ones not placed: shuffling only
+    // what is left reordered the tray on every click, under the pointer
+    const unplaced = shuffled(m.parts, seedOf(m.id)).filter(
+      (x) => !b.placed.some((y) => y.part === x.id),
     );
     base.trayCount = unplaced.length;
     // at L3 you type the names: the tray says only how many are left
@@ -1626,12 +1929,23 @@ function stepView(
       tries: st.why?.tries ?? 0,
       pre: st.pre ?? "",
     };
-  if (main?.whatif && st.stage === "built")
+  if (main?.whatif && st.stage === "built") {
+    const wi = own(s.items, `${main.id}:whatif`);
     base.whatif = {
       ask: main.whatif.ask,
       fails: labelOf(main, main.whatif.fails),
-      result: st.whatif ? { ...st.whatif, why: main.whatif.why } : null,
+      due: !!wi && !wi.retired && wi.due <= now,
+      result: st.whatif
+        ? {
+            found: st.whatif.found,
+            // a try saved before the missed parts were named holds a count
+            missed: Array.isArray(st.whatif.missed) ? st.whatif.missed : [],
+            extra: st.whatif.extra,
+            why: main.whatif.why,
+          }
+        : null,
     };
+  }
   return base;
 }
 
@@ -1639,11 +1953,12 @@ function reviewView(
   s: LearnState,
   nodes: Record<string, MapNode>,
   live: ReadonlySet<string>,
+  now: number,
 ): ReviewView | null {
   const r = s.review;
-  if (!r) return null;
+  if (!r || staleReview(s, now)) return null;
   const order = r.order.filter((id) => live.has(id));
-  const today = unaidedSince(s, r.at);
+  const today = todayOf(s);
   const items: ReviewView["items"] = [];
   for (const step of order) {
     if (s.steps[step]?.reviewing) continue;
@@ -1702,10 +2017,15 @@ export function viewOf(
     level: s.level,
     steps: path.map((p) => stepView(s, nodes, p, now)),
     due: dueOf(s, live, now),
-    review: reviewView(s, nodes, live),
-    last: s.visits.at(-1) ?? null,
+    review: reviewView(s, nodes, live, now),
+    last: lastVisit(s),
     topic,
   };
 }
 
 export const isSure = (v: unknown): v is Sure => SURES.includes(v as Sure);
+
+// the last visit that rebuilt something (an empty one saved before was
+// recorded as "0 of 0")
+export const lastVisit = (s: LearnState) =>
+  s.visits.findLast((v) => v.of > 0) ?? null;
