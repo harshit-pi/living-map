@@ -55,6 +55,7 @@ export const newState = (): ExploreState => ({
   stand: {},
   answers: {},
   takeaways: {},
+  added: {},
 });
 
 export const newBoard = (
@@ -95,9 +96,14 @@ export const inPlay = (n: MapNode) => !n.dropped && n.status !== "dropped";
 const depthOf = (nodes: Nodes, id: string) => pathTo(nodes, id).length - 1;
 
 // The model's text is cut to its limit in words and in characters.
+// A cut lands between words, so a long name keeps whole words.
 export function clip(v: unknown, words: number, chars: number): string {
   const s = str(v, 4000).replace(/\s+/g, " ").trim();
-  return s.split(" ").slice(0, words).join(" ").slice(0, chars).trim();
+  const w = s.split(" ").slice(0, words).join(" ");
+  if (w.length <= chars) return w;
+  const cut = w.slice(0, chars + 1);
+  const space = cut.lastIndexOf(" ");
+  return (space > chars / 2 ? cut.slice(0, space) : cut.slice(0, chars)).trim();
 }
 const idOf = (v: unknown): string | null => {
   const s = typeof v === "string" ? v.trim() : "";
@@ -115,6 +121,12 @@ export function inferShape(nodes: Nodes, q: string): Shape {
 }
 export const shapeOf = (s: ExploreState, nodes: Nodes, q: string): Shape =>
   own(s.boards, q)?.shape ?? inferShape(nodes, q);
+
+// A want's node summary, read on the Tree and in Learn: a suggestion you have
+// not kept says so, so it never reads as something you want.
+export const wantSummary = (weight: Weight, suggested: boolean) =>
+  `${suggested ? "Claude's suggested want" : "What you want"} · ${weight}`;
+export const WANT_SUMMARY = /^(What you want|Claude's suggested want) · /;
 
 // An older map named no keep-as-is option; its title usually says which.
 const KEEP_AS_IS =
@@ -137,6 +149,7 @@ export function reconcile(state: unknown, nodes: Nodes): ExploreState {
   s.stand ??= {};
   s.answers ??= {};
   s.takeaways ??= {};
+  s.added ??= {};
 
   for (const q of Object.keys(s.boards))
     if (!isQuestion(nodes, q)) delete s.boards[q];
@@ -184,7 +197,7 @@ export function reconcile(state: unknown, nodes: Nodes): ExploreState {
       (!optIds.has(b.commit.option) ||
         nodes[b.commit.option].status !== "chosen")
     )
-      delete b.commit;
+      dropCommit(b);
     // an option chosen before boards existed is a choice made, with no why
     const chosen = opts.find((o) => o.status === "chosen");
     if (b.shape === "choose" && !b.commit && chosen)
@@ -223,6 +236,8 @@ export function reconcile(state: unknown, nodes: Nodes): ExploreState {
     if (!isQuestion(nodes, q)) delete s.answers[q];
   for (const id of Object.keys(s.takeaways))
     if (!own(nodes, id)) delete s.takeaways[id];
+  for (const id of Object.keys(s.added))
+    if (!own(nodes, id)) delete s.added[id];
   return s;
 }
 
@@ -242,6 +257,20 @@ export const peek = (map: {
   nodes: Nodes;
   data?: Record<string, unknown>;
 }): ExploreState => reconcile(map.data?.[PLUGIN_ID], map.nodes);
+
+// A choice undone or changed: Claude's pre-mortem, assumptions and steps were
+// about that option, so they go with it; yours stay, since only you remove
+// what you wrote.
+export function dropCommit(b: Board) {
+  delete b.commit;
+  b.assumptions = b.assumptions.filter((a) => a.by === "you");
+  b.steps = b.steps.filter((x) => x.by === "you");
+}
+
+// Who added an option: core marks the options you choose or set aside as
+// yours, which keeps Claude off them, so "you" on a column reads from here.
+export const addedBy = (s: ExploreState, n: MapNode): "you" | "claude" =>
+  own(s.added, n.id) ? "you" : "claude";
 
 export function ensureBoard(s: ExploreState, nodes: Nodes, q: string): Board {
   s.boards[q] ??= newBoard(q, inferShape(nodes, q));
@@ -302,8 +331,10 @@ export function liveLead(s: ExploreState, nodes: Nodes, q: string) {
 }
 
 type Hole = { option: string; want: string; guess: boolean };
-// Empty or guess cells on the given rows, over the options still in play;
-// the lead's column first.
+// Empty or guess cells on the given rows, over the options still in play,
+// most worth filling first: the lead's column, then empty cells before
+// guesses. A column that already fails a must is out, so its other cells
+// are no gap: filling them cannot change the choice.
 function holes(
   s: ExploreState,
   nodes: Nodes,
@@ -312,8 +343,10 @@ function holes(
   { guesses = true } = {},
 ): Hole[] {
   const lead = liveLead(s, nodes, b.question)?.id;
-  const cols = columnsOf(nodes, b).filter(inPlay);
-  cols.sort((a, c) => Number(c.id === lead) - Number(a.id === lead));
+  const t = tally(b, nodes);
+  const cols = columnsOf(nodes, b).filter(
+    (o) => inPlay(o) && !t[o.id]?.failsMust,
+  );
   const out: Hole[] = [];
   for (const o of cols)
     for (const r of keptRows(b).filter((x) => x.weight === weight)) {
@@ -322,7 +355,9 @@ function holes(
       else if (guesses && sc.guess)
         out.push({ option: o.id, want: r.id, guess: true });
     }
-  return out;
+  // a stable sort: column order holds within each rank
+  const rank = (h: Hole) => (h.option === lead ? 0 : 2) + Number(h.guess);
+  return out.sort((a, c) => rank(a) - rank(c));
 }
 
 // ---------------------------------------------------------------- fold, tally
@@ -371,6 +406,7 @@ export function tally(b: Board, nodes: Nodes): Record<string, Tally> {
       fails: 0,
       unknown: 0,
       empty: 0,
+      mustsFailed: 0,
       failsMust: false,
     };
     for (const r of keptRows(b)) {
@@ -379,7 +415,10 @@ export function tally(b: Board, nodes: Nodes): Record<string, Tally> {
         t.musts++;
         if (!sc) t.empty++;
         else if (sc.mark === "better" || sc.mark === "same") t.mustsMet++;
-        if (sc?.mark === "fails") t.failsMust = true;
+        if (sc?.mark === "fails") {
+          t.mustsFailed++;
+          t.failsMust = true;
+        }
       }
       if (sc) t[sc.mark]++;
     }
@@ -663,8 +702,10 @@ export function nextGap(
     };
   // elsewhere, shallowest first, so Next never goes deeper on a settled
   // branch while a choice above is open; set-aside branches wait
-  const points = rollup(s, nodes).points.filter((p) => p.open && !p.underAside);
-  const choice = points.find((p) => p.shape === "choose" && p.id !== q);
+  const points = rollup(s, nodes).points.filter((p) => !p.underAside);
+  const choice = points.find(
+    (p) => p.open && p.shape === "choose" && p.id !== q,
+  );
   if (choice)
     return {
       kind: "question",
@@ -672,14 +713,33 @@ export function nextGap(
       label: `Open choice: ${choice.title}`,
       reason: "the highest choice still open",
     };
-  const question = points.find((p) => p.shape !== "choose");
-  if (question)
+  // a cause marked likely is not an answer: a causes question stays open
+  // until you settle it, so it stays Next's work until then
+  const question =
+    points.find((p) => p.shape !== "choose" && p.open) ??
+    points.find((p) => p.shape === "causes" && !p.settled);
+  if (question) {
+    const likely = optionsOf(nodes, question.id).filter(
+      (o) => o.status === "chosen",
+    );
+    if (question.shape === "causes")
+      return {
+        kind: "question",
+        q: question.id,
+        label: likely.length
+          ? `Confirm ${named(nodes, likely[0].id)}, then settle it`
+          : `Tell the causes apart: ${question.title}`,
+        reason: likely.length
+          ? "you marked it likely; a fact that confirms it lets you settle the question"
+          : "Claude looks for the fact that best splits the causes",
+      };
     return {
       kind: "question",
       q: question.id,
       label: `Open question: ${question.title}`,
       reason: "the highest question still open",
     };
+  }
   return {
     kind: "sum",
     q: root?.id ?? q,
@@ -779,6 +839,9 @@ export function applyExploreOp(
       const weight = oneOf(WEIGHTS, op.weight);
       const title = clip(op.title, 6, 60);
       if (!q || !id || !weight || !isQuestion(nodes, q)) return 0;
+      // only a choice weighs options against what you want: on a cause list
+      // or an open question a want would be a stray card on the tree
+      if (shapeOf(s, nodes, q) !== "choose") return 0;
       const b = ensureBoard(s, nodes, q);
       const row = b.rows.find((r) => r.id === id);
       if (row) {
@@ -788,8 +851,8 @@ export function applyExploreOp(
         const n = nodes[id];
         if (n.by === "claude") {
           if (title) n.title = title;
-          if (/^What you want/.test(n.summary))
-            n.summary = `What you want · ${weight}`;
+          if (WANT_SUMMARY.test(n.summary))
+            n.summary = wantSummary(weight, true);
           n.updatedAt = now;
         }
         return 1;
@@ -809,7 +872,7 @@ export function applyExploreOp(
             parent: q,
             kind: "fact",
             title,
-            summary: `What you want · ${weight}`,
+            summary: wantSummary(weight, true),
             status: "info",
             by: "claude",
           },
@@ -1063,7 +1126,7 @@ export function outlineOf(s: ExploreState, nodes: Nodes): string {
               o.id === lead && "your lead",
               o.status === "chosen" && "chosen by user",
               o.status === "dropped" && "set aside by the choice",
-              o.by === "you" && "added by user",
+              addedBy(s, o) === "you" && "added by user",
               t[o.id]?.failsMust && `fails must ${fails(o.id).join(", ")}`,
             ]
               .filter(Boolean)
@@ -1238,7 +1301,7 @@ export function viewOf(
         chosen: o.status === "chosen",
         faded: o.status === "dropped" && !o.dropped,
         failsMust: t[o.id].failsMust,
-        by: o.by,
+        by: addedBy(s, o),
         threads: threadCount(o.id),
         ...(own(s.takeaways, o.id) ? { takeaway: s.takeaways[o.id].text } : {}),
         ...(list.length ? { against: list[list.length - 1] } : {}),

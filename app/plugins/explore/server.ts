@@ -6,9 +6,12 @@
 // a message carries the board's rules), and keeps the model off your nodes.
 
 import {
+  addedBy,
   applyExploreOp,
   BOARD_OPS,
+  childrenOf,
   clip,
+  dropCommit,
   ensureBoard,
   keptRows,
   live,
@@ -20,10 +23,13 @@ import {
   shapeOf,
   summaryOf,
   viewOf,
+  WANT_SUMMARY,
+  wantSummary,
 } from "./core.ts";
 import {
   MARK_LOOK,
   MARKS,
+  NAME_MAX,
   PLUGIN_ID,
   SHAPE_WORD,
   SHAPES,
@@ -50,7 +56,9 @@ const PROMPT = `You are the engine behind a DECISION BOARD. The user works throu
 - Keep scoring light: marks only, never weights, scores or totals.
 - For causes: never set a cause dropped. If a fact rules it out, start its summary "Ruled out:" and name the fact; the user sets it aside.
 - Only the user chooses, sets aside or settles. Never set a question answered while options under it are still proposed: give your lead in a stand op. Never write "Recommended:".
-- End every move that changes a board with a stand op for that board. Never add fact nodes that sum up where things stand: that is what the stand op is for.
+- End every move that changes a board with a stand op for that board, and write a fresh one for any board whose last stand is marked "written before the last change". Never add fact nodes that sum up where things stand: that is what the stand op is for.
+- Cells land only on wants the user kept: your new wants are suggestions, and a cell on one is dropped. On a board with no kept wants, write no cells, and never describe marks in the caption that the board does not show.
+- Nodes marked (by user) are the user's: your update and remove ops on them are ignored. If asked to change or remove one, say so and point to the board (the user can rename or remove a want, set aside an option, or rate a cell); never claim you changed it.
 - File each point where it belongs: options under the question they answer, facts under the option or question they bear on. Fix a misplaced node with a move op.
 - Use tools (web search, reading files) only when the user asks or a fact decides a cell.
 BOARD OPS (in the same map block as node ops):
@@ -72,7 +80,7 @@ const FILL = `FILL the board named in the ACTION: cell ops for every live option
 const WRAP = `{"op":"premortem","option":"option id","reasons":["at most 12 words"]}          // at most 3, likeliest first
 {"op":"assume","q":"question id","id":"a-short-id","text":"at most 14 words","breaksIf":"at most 14 words"}
 {"op":"step","q":"question id","id":"s-short-id","when":"if/when …, at most 10 words","do":"at most 12 words"}
-WRAP: the ACTION names the option chosen and its question. It is a year from now and the choice failed. Write a premortem op with the 3 likeliest reasons. Turn the top 2 into assume ops: what must stay true, and breaksIf, the first sign you would see that it broke. Write 1-3 step ops, each "if/when X, do Y"; make the first doable this week. No other ops.`;
+WRAP: the ACTION names the option chosen and its question. It is a year from now and the choice failed. Write a premortem op with the 3 likeliest reasons. Turn the top 2 into assume ops: what must stay true, and breaksIf, the first sign you would see that it broke. Write 1-3 step ops, each "if/when X, do Y"; make the first doable this week. End with a stand op for the question. No other ops.`;
 
 const SUGGEST = `SUGGEST WANTS for the question named in the ACTION: from what is on the map, write 4-6 want ops for what the user seems to want. Where an existing fact states a want, reuse its id so it becomes the row. No cells.`;
 
@@ -107,6 +115,8 @@ const sureArg = (v: unknown): number | undefined => {
     : undefined;
 };
 const t = (n: MapNode) => `"${n.title}"`;
+// a name of yours is cut where the inputs stop it, between words
+const nameArg = (v: unknown) => clip(v, 20, NAME_MAX);
 
 // A plain id from a title, unique among those taken.
 function freshId(
@@ -246,9 +256,20 @@ function gapTurn(ctx: Ctx, gap: Gap) {
   if (gap.kind === "against" && option) return againstTurn(ctx, option, how);
   if (gap.kind === "wrap" && q && option) return wrapTurn(ctx, q, option, how);
   ctx.say("Next");
+  // causes are told apart by a fact, never by a choice
+  if (
+    gap.kind === "question" &&
+    q &&
+    shapeOf(state(ctx), nodes, q.id) === "causes"
+  )
+    return ctx.engine.turn(
+      `${how.prefix} CAUSES of [${q.id}] ${t(q)}: find the one fact that best tells the causes apart, starting with the cause the user marked likely, else your best guess. Add it under the cause it bears on, say in the caption what it shows and what is still unchecked, then a stand op for [${q.id}].`,
+      ctx.settings,
+      { label: how.label, nodeId: q.id },
+    );
   if (gap.kind === "question" && q)
     return ctx.engine.turn(
-      `${how.prefix} Make [${q.id}] ${t(q)} clearer or decidable.`,
+      `${how.prefix} Make [${q.id}] ${t(q)} clearer or decidable, and say in the caption what you changed.`,
       ctx.settings,
       { label: how.label, nodeId: q.id },
     );
@@ -297,6 +318,8 @@ function commit(ctx: Ctx, a: Raw): ActionResult | Promise<ActionResult> {
   const why = clip(a.why, 25, 200);
   const sure = sureArg(a.sure);
   const b = ensureBoard(s, ctx.map.nodes, q.id);
+  // a different choice: what Claude wrote after the old one was about it
+  if (b.commit && b.commit.option !== o.id) dropCommit(b);
   b.commit = {
     option: o.id,
     why,
@@ -320,20 +343,30 @@ function want(ctx: Ctx, a: Raw): ActionResult {
   const id = idArg(a.id);
   // a new want of yours
   if (!id) {
-    const title = clip(a.title, 8, 60);
+    const title = nameArg(a.title);
     const weight: Weight = WEIGHTS.includes(a.weight) ? a.weight : "matters";
     if (!title) return fail("Say what you want, in a few words.");
     if (b.rows.length >= ROWS_MAX)
       return fail(`A board holds at most ${ROWS_MAX} wants; remove one first.`);
-    const n = makeNode(nodes, {
-      id: freshId(nodes, "w", title),
-      parent: q.id,
-      kind: "fact",
-      title,
-      summary: `What you want · ${weight}`,
-      status: "info",
-      by: "you",
-    });
+    const same = (x: MapNode) =>
+      x.title.trim().toLowerCase() === title.toLowerCase();
+    if (b.rows.some((r) => same(nodes[r.id])))
+      return fail("That is already on the board.");
+    // the same fact under the question (a want you removed, say) comes back
+    // as the row, so the want is never on the map twice
+    const n =
+      childrenOf(nodes, q.id).find((x) => x.kind === "fact" && same(x)) ??
+      makeNode(nodes, {
+        id: freshId(nodes, "w", title),
+        parent: q.id,
+        kind: "fact",
+        title,
+        status: "info",
+        by: "you",
+      });
+    n.summary = wantSummary(weight, false);
+    n.by = "you";
+    n.updatedAt = Date.now();
     b.rows.push({ id: n.id, weight, suggested: false, by: "you" });
     touched(b);
     return ok(ctx, `Added what you want: ${t(n)} (${weight}).`);
@@ -346,50 +379,66 @@ function want(ctx: Ctx, a: Raw): ActionResult {
     if (a.keep) {
       row.suggested = false;
       row.by = "you";
-      return ok(ctx, `Kept Claude's suggestion ${t(n)} as something you want.`);
+      if (WANT_SUMMARY.test(n.summary))
+        n.summary = wantSummary(row.weight, false);
+      return ok(
+        ctx,
+        `Kept Claude's suggestion ${t(n)} as something you want (${row.weight}).`,
+      );
     }
-    // a skipped suggestion goes; its node too, if Claude made it for the row
-    b.rows = b.rows.filter((r) => r.id !== id);
-    for (const k of Object.keys(b.cells))
-      if (k.endsWith(`|${id}`)) delete b.cells[k];
-    const cited = Object.values(s.boards).some((x) =>
-      Object.values(x.cells).some(
-        (c) => c.you?.facts.includes(id) || c.claude?.facts.includes(id),
-      ),
-    );
-    const hasChildren = Object.values(nodes).some((x) => x.parent === id);
-    if (n.by === "claude" && !cited && !hasChildren) delete nodes[id];
+    dropRow(s, nodes, b, id);
     return ok(
       ctx,
       `Skipped Claude's suggestion ${t(n)}; do not suggest it again.`,
     );
   }
   if (a.remove === true) {
-    b.rows = b.rows.filter((r) => r.id !== id);
-    for (const k of Object.keys(b.cells))
-      if (k.endsWith(`|${id}`)) delete b.cells[k];
+    dropRow(s, nodes, b, id);
     touched(b);
     return ok(ctx, `Removed ${t(n)} from what you want.`);
   }
   const changes: string[] = [];
   if (WEIGHTS.includes(a.weight) && a.weight !== row.weight) {
     row.weight = a.weight;
-    if (/^What you want/.test(n.summary))
-      n.summary = `What you want · ${row.weight}`;
     changes.push(`made ${t(n)} a ${row.weight}`);
   }
-  const title = clip(a.title, 8, 60);
+  const title = nameArg(a.title);
   if (title && title !== n.title) {
     changes.push(`renamed ${t(n)} to "${title}"`);
     n.title = title;
   }
   if (!changes.length) return { ok: true };
+  // weighting or renaming a suggestion keeps it: it is now yours
+  if (row.suggested) changes.push("kept it");
   row.suggested = false;
   row.by = "you";
+  if (WANT_SUMMARY.test(n.summary)) n.summary = wantSummary(row.weight, false);
   n.by = "you";
   n.updatedAt = Date.now();
   touched(b);
   return ok(ctx, `You ${changes.join(" and ")}.`);
+}
+
+// A want off the board: its row and cells go, and its node too unless
+// something else needs it (a cell cites it, or it has children); left
+// behind, it would read as a loose fact, and adding it again would make a
+// second one.
+function dropRow(
+  s: ReturnType<typeof live>,
+  nodes: Record<string, MapNode>,
+  b: Board,
+  id: string,
+) {
+  b.rows = b.rows.filter((r) => r.id !== id);
+  for (const k of Object.keys(b.cells))
+    if (k.endsWith(`|${id}`)) delete b.cells[k];
+  const cited = Object.values(s.boards).some((x) =>
+    Object.values(x.cells).some(
+      (c) => c.you?.facts.includes(id) || c.claude?.facts.includes(id),
+    ),
+  );
+  const hasChildren = Object.values(nodes).some((x) => x.parent === id);
+  if (!cited && !hasChildren) delete nodes[id];
 }
 
 function rate(ctx: Ctx, a: Raw): ActionResult {
@@ -437,8 +486,8 @@ export const explore: ServerPlugin = {
   outline: (map) => outlineOf(peek(map), map.nodes),
   keepUserNodes: true,
   // the node actions its screen sends; Learn's own (blanks, hints, scenes) are
-  // not offered on an exploration map. choose, challenge, next and message are
-  // answered by the actions of the same name below.
+  // not offered on an exploration map. choose, restore, challenge, next and
+  // message are answered by the actions of the same name below.
   core: [
     "choose",
     "drop",
@@ -475,7 +524,7 @@ export const explore: ServerPlugin = {
     want,
     option(ctx, a): ActionResult {
       const q = nodeArg(ctx, a.q, "question");
-      const title = clip(a.title, 8, 60);
+      const title = nameArg(a.title);
       if (!q) return fail("That question is gone.");
       if (!title) return fail("Name the option in a few words.");
       const s = state(ctx);
@@ -488,6 +537,7 @@ export const explore: ServerPlugin = {
         status: "proposed",
         by: "you",
       });
+      s.added[n.id] = true;
       const b = ensureBoard(s, nodes, q.id);
       if (a.keepAsIs === true) b.keepAsIs = n.id;
       note(
@@ -691,6 +741,8 @@ export const explore: ServerPlugin = {
     },
     message(ctx, a) {
       const text = typeof a.text === "string" ? a.text.slice(0, 4000) : "";
+      // an empty message would still be a whole (paid) move
+      if (!text.trim()) return fail("Say something first.");
       ctx.say(text);
       const selection = Array.isArray(a.selection)
         ? a.selection.filter(
@@ -702,6 +754,15 @@ export const explore: ServerPlugin = {
         ctx.settings,
         { text, selection, label: "Answering" },
       );
+    },
+    // core's Restore, and the option is Claude's again unless you added it:
+    // core marked it yours when it was chosen over or set aside, to keep
+    // Claude off it while it was out of the running
+    restore(ctx, a) {
+      const n = nodeArg(ctx, a.nodeId);
+      if (!n) return fail("No such node.");
+      if (n.kind === "option") n.by = addedBy(state(ctx), n);
+      return canvas.restore(ctx, n.id);
     },
     challenge(ctx, a) {
       const n = nodeArg(ctx, a.nodeId);

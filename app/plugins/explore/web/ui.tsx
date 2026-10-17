@@ -3,6 +3,7 @@
 
 import {
   useEffect,
+  useEffectEvent,
   useRef,
   type MouseEvent as ClickEvent,
   type ReactNode,
@@ -80,12 +81,17 @@ export function Pop({
   children: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  // The listeners are added once, for as long as the popover is open. Esc
+  // also clears the selection (App), which re-renders this with a new
+  // onClose: listeners swapped then would be swapped mid-event, and a
+  // listener added during an event never hears it, so Esc did nothing.
+  const close = useEffectEvent(() => onClose());
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     };
     const onDown = (e: MouseEvent) => {
-      if (box.current && !box.current.contains(e.target as Node)) onClose();
+      if (box.current && !box.current.contains(e.target as Node)) close();
     };
     window.addEventListener("keydown", onKey);
     document.addEventListener("mousedown", onDown);
@@ -93,7 +99,7 @@ export function Pop({
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onDown);
     };
-  }, [onClose]);
+  }, []);
   const w = Math.min(width, anchor.vw - 32);
   const left = Math.max(16, Math.min(anchor.left, anchor.vw - w - 16));
   const below = anchor.bottom < anchor.vh * 0.6;

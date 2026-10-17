@@ -11,6 +11,7 @@ import { Tree } from "./Tree.tsx";
 import { Btn } from "./ui.tsx";
 import {
   pluginAct,
+  tagOf,
   usePlace,
   useShowDropped,
   type Anchor,
@@ -70,6 +71,7 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
               showDropped={showDropped}
               selected={selection}
               workingId={live.working?.nodeId ?? null}
+              busy={live.busy}
               panelOpen={!!one}
               onSelect={setSelection}
             />
@@ -148,18 +150,23 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
             onClose={() => setSelection([])}
             actions={here ? <PanelActions here={here} node={one} /> : undefined}
             extra={here ? <PanelExtra here={here} node={one} /> : undefined}
+            tag={tagOf(view, map.nodes, one)}
           />
         )}
-        <FloatingComposer
-          ws={{ ...ws, selection }}
-          placeholder={
-            selection.length
-              ? "Say something about the selected nodes…"
-              : onTree
-                ? "Message Claude about the whole map…"
-                : "Message Claude about the board…"
-          }
-        />
+        {/* on a narrow window the panel covers the work, and has its own box
+            for its thread: the main one would run under it */}
+        {(!one || roomy) && (
+          <FloatingComposer
+            ws={{ ...ws, selection }}
+            placeholder={
+              selection.length
+                ? "Say something about the selected nodes…"
+                : onTree
+                  ? "Message Claude about the whole map…"
+                  : "Message Claude about the board…"
+            }
+          />
+        )}
         {here && sheet && (
           <CommitSheet
             key={sheet.option}

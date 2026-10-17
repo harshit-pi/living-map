@@ -124,6 +124,24 @@ export function anchorOf(el: Element): Anchor {
   };
 }
 
+// A cause is not an option you pick: several can be true, and marking one
+// likely is not a choice. Its card and panel say so (set aside keeps the
+// usual word).
+export function tagOf(
+  view: ExploreView | null,
+  nodes: MapDoc["nodes"],
+  n: MapDoc["nodes"][string],
+): string | undefined {
+  if (!view || n.kind !== "option" || !n.parent) return undefined;
+  if (n.dropped || n.status === "dropped") return undefined;
+  const shape =
+    view.boards[n.parent]?.shape ??
+    view.questions.find((p) => p.id === n.parent)?.shape;
+  if (shape !== "causes" || nodes[n.parent]?.kind !== "question")
+    return undefined;
+  return n.status === "chosen" ? "✓ marked likely" : "possible cause";
+}
+
 // What the board's parts work with.
 export type Here = {
   ws: Workspace;

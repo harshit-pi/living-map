@@ -983,3 +983,15 @@ test("a plugin answers the core actions it names its own way; others go to core"
   d.calls[0].release("Mostly.");
   await said;
 });
+
+test("an empty message is refused before it costs a move", async () => {
+  const { engine, calls } = setup(newMap("Rust lifetimes", "learn"));
+  for (const text of ["", "   ", 123 as unknown as string])
+    assert.match(
+      (await act(engine, { type: "message", text, selection: [] })).error ?? "",
+      /Say something/,
+    );
+  await tick();
+  assert.equal(calls.length, 0);
+  assert.deepEqual(engine.state.map?.chat, []);
+});

@@ -74,6 +74,7 @@ export function NodePanel({
   asSteps,
   actions,
   extra,
+  tag,
 }: {
   map: MapDoc;
   node: MapNode;
@@ -92,6 +93,8 @@ export function NodePanel({
   actions?: ReactNode;
   // a plugin's own lines under the summary (e.g. a board's case against)
   extra?: ReactNode;
+  // a plugin's own word for the node's kind, over the title
+  tag?: string;
 }) {
   const learn = asSteps ?? map.purpose === "learn";
   const threads = useMemo(
@@ -161,7 +164,7 @@ export function NodePanel({
             <div
               className={`text-[10px] font-semibold uppercase tracking-wide ${look.tagCls}`}
             >
-              {look.tag}
+              {tag ?? look.tag}
             </div>
             <div className="mt-0.5 text-[17px] font-semibold leading-snug text-ink">
               {node.title}

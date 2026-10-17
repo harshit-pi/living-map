@@ -10,6 +10,7 @@ import { anchorOf, type Here } from "./view.ts";
 import type { MapNode, NodeAction } from "../../../shared/model.ts";
 import {
   cellKey,
+  NAME_MAX,
   WEIGHT_WORD,
   WEIGHTS,
   type BoardView,
@@ -65,15 +66,27 @@ export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
   if (node.kind === "option") {
     const shape = shapeOf(view, node.parent);
     const chosen = node.status === "chosen";
+    // set aside by a Choose (another option won): it can win instead, or
+    // come back into the running; setting it aside again would only move it
+    // to the drawer
+    const chosenOver = node.status === "dropped";
     return (
       <>
+        {chosen && shape === "causes" && (
+          <Btn
+            onClick={() => core("restore")}
+            title="It goes back to a possible cause"
+          >
+            Unmark likely
+          </Btn>
+        )}
         {!chosen &&
           (shape === "choose" ? (
             <Btn
               primary
               onClick={(e) => here.choose(node.id, anchorOf(e.currentTarget))}
             >
-              Choose…
+              {chosenOver ? "Choose this instead…" : "Choose…"}
             </Btn>
           ) : (
             <Btn
@@ -96,12 +109,21 @@ export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
         </Btn>
         {explain}
         <Btn onClick={() => core("deeper")}>Go deeper</Btn>
-        <Btn
-          onClick={() => core("drop")}
-          title="Rule it out: it moves to the set-aside drawer and Claude stops raising it"
-        >
-          Set aside
-        </Btn>
+        {chosenOver ? (
+          <Btn
+            onClick={() => core("restore")}
+            title="Back in the running beside your choice: the question is open again"
+          >
+            Restore
+          </Btn>
+        ) : (
+          <Btn
+            onClick={() => core("drop")}
+            title="Rule it out: it moves to the set-aside drawer and Claude stops raising it"
+          >
+            Set aside
+          </Btn>
+        )}
       </>
     );
   }
@@ -117,53 +139,104 @@ export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
     );
 
   const want = rowOf(view, node.id);
-  if (want) {
-    const { board, row } = want;
-    const q = board.question;
+  if (want)
     return (
-      <>
-        {row.suggested && (
-          <>
-            <Btn
-              primary
-              onClick={() => void act("want", { q, id: row.id, keep: true })}
-            >
-              Keep
-            </Btn>
-            <Btn
-              onClick={() => void act("want", { q, id: row.id, keep: false })}
-            >
-              Skip
-            </Btn>
-          </>
-        )}
-        {WEIGHTS.map((w) => (
-          <button
-            key={w}
-            onClick={() => void act("want", { q, id: row.id, weight: w })}
-            title="How much it matters"
-            className={`rounded-full border px-3 py-1 text-xs ${row.weight === w ? "border-ink bg-panel font-semibold text-ink" : "border-line-strong text-body hover:border-primary"}`}
-          >
-            {WEIGHT_WORD[w].toLowerCase()}
-          </button>
-        ))}
-        {!row.suggested && (
-          <Btn
-            onClick={() => void act("want", { q, id: row.id, remove: true })}
-          >
-            Remove
-          </Btn>
-        )}
-        {explain}
-      </>
+      <WantActions
+        key={node.id}
+        here={here}
+        node={node}
+        board={want.board}
+        row={want.row}
+        explain={explain}
+      />
     );
-  }
 
   return (
     <>
       <Btn onClick={() => core("challenge")}>Challenge</Btn>
       {explain}
       <Btn onClick={() => core("drop")}>Set aside</Btn>
+    </>
+  );
+}
+
+function WantActions({
+  here,
+  node,
+  board,
+  row,
+  explain,
+}: {
+  here: Here;
+  node: MapNode;
+  board: BoardView;
+  row: RowView;
+  explain: ReactNode;
+}) {
+  const { act } = here;
+  const q = board.question;
+  const [renaming, setRenaming] = useState(false);
+  const [title, setTitle] = useState(node.title);
+  return (
+    <>
+      {row.suggested && (
+        <>
+          <Btn
+            primary
+            onClick={() => void act("want", { q, id: row.id, keep: true })}
+          >
+            Keep
+          </Btn>
+          <Btn onClick={() => void act("want", { q, id: row.id, keep: false })}>
+            Skip
+          </Btn>
+        </>
+      )}
+      {WEIGHTS.map((w) => (
+        <button
+          key={w}
+          onClick={() => void act("want", { q, id: row.id, weight: w })}
+          title="How much it matters"
+          className={`rounded-full border px-3 py-1 text-xs ${row.weight === w ? "border-ink bg-panel font-semibold text-ink" : "border-line-strong text-body hover:border-primary"}`}
+        >
+          {WEIGHT_WORD[w].toLowerCase()}
+        </button>
+      ))}
+      <Btn onClick={() => setRenaming(!renaming)}>Rename</Btn>
+      {!row.suggested && (
+        <Btn onClick={() => void act("want", { q, id: row.id, remove: true })}>
+          Remove
+        </Btn>
+      )}
+      {explain}
+      {renaming && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!title.trim()) return;
+            void act("want", { q, id: row.id, title });
+            setRenaming(false);
+          }}
+          className="flex basis-full gap-1.5"
+        >
+          <input
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setRenaming(false);
+            }}
+            maxLength={NAME_MAX}
+            className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary-strong"
+          >
+            Rename
+          </button>
+        </form>
+      )}
     </>
   );
 }
@@ -180,8 +253,18 @@ function QuestionActions({
   const { view, ws, act } = here;
   const stand = view.stand[node.id];
   const [settling, setSettling] = useState(false);
-  // your answer starts from Claude's stand line, or the question's summary
-  const [answer, setAnswer] = useState(stand?.line || node.summary);
+  // your answer starts from what is already an answer: one given before, or
+  // the options you chose or causes you marked likely. Claude's stand line
+  // is often what would decide it, not an answer, so it is only the hint
+  const given = view.questions.find((p) => p.id === node.id)?.answer?.text;
+  const picked = Object.values(ws.map.nodes)
+    .filter(
+      (n) =>
+        n.parent === node.id && n.kind === "option" && n.status === "chosen",
+    )
+    .map((n) => n.title)
+    .join("; ");
+  const [answer, setAnswer] = useState(given || picked);
   const core = (type: NodeAction) => {
     void ws.run({ type, nodeId: node.id });
   };
@@ -208,13 +291,23 @@ function QuestionActions({
           }}
           className="flex basis-full gap-1.5"
         >
-          <input
+          <textarea
             autoFocus
+            rows={2}
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Your answer, in a line"
+            onKeyDown={(e) => {
+              // Enter settles, as a one-line field would; Shift-Enter wraps
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
+              }
+            }}
+            placeholder={
+              stand?.line ? `Claude: ${stand.line}` : "Your answer, in a line"
+            }
             maxLength={240}
-            className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
+            className="min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] leading-snug text-ink focus:border-primary focus:outline-none"
           />
           <button
             type="submit"

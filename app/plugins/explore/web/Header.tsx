@@ -69,10 +69,16 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
       <div className="hidden items-center gap-2 lg:flex">
         <TabAndShape ws={ws} />
       </div>
-      {tab === "tree" && (
-        <label className="hidden items-center gap-1 text-xs text-muted lg:flex">
+      {/* kept in place on the board, only hidden, so Board / Tree and the
+          rest of the header do not shift as you switch */}
+      {(tab === "tree" || board) && (
+        <label
+          aria-hidden={tab !== "tree"}
+          className={`hidden items-center gap-1 text-xs text-muted lg:flex ${tab === "tree" ? "" : "invisible"}`}
+        >
           <input
             type="checkbox"
+            disabled={tab !== "tree"}
             checked={showDropped}
             onChange={(e) => {
               setShowDropped(e.target.checked);
@@ -106,7 +112,8 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
         title={
           gap ? `${gap.label}: ${gap.reason}` : "Claude takes the next step"
         }
-        className="flex min-w-0 max-w-[340px] shrink-0 items-center whitespace-nowrap rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
+        // one width whatever the label says, so the header never shifts
+        className="flex min-w-0 shrink-0 items-center whitespace-nowrap rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40 xl:w-[300px]"
       >
         Next
         {/* the label on a wide window; its reason is in the title */}
@@ -115,7 +122,7 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
             : {gap.label}
           </span>
         )}
-        <span className="ml-1">▸</span>
+        <span className="ml-auto pl-1">▸</span>
       </button>
     </>
   );

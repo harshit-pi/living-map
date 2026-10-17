@@ -5,6 +5,10 @@
 
 export const PLUGIN_ID = "explore";
 
+// the longest name an option or a want of yours may have: the inputs stop
+// there too, so nothing you type is cut without your seeing it
+export const NAME_MAX = 80;
+
 export type Shape = "choose" | "causes" | "open";
 export type Weight = "must" | "matters" | "nice";
 export type Mark = "better" | "same" | "worse" | "fails" | "unknown";
@@ -116,6 +120,9 @@ export type ExploreState = {
   stand: Record<string, Stand>; // by question id
   answers: Record<string, { text: string; by: Who; at: number }>;
   takeaways: Record<string, { text: string; at: number }>;
+  // the options you added: core marks those you choose or set aside as
+  // yours too, so this is what "you" on a column means
+  added: Record<string, true>;
 };
 
 export const cellKey = (option: string, row: string) => `${option}|${row}`;
@@ -143,6 +150,8 @@ export type Tally = {
   unknown: number;
   // musts with no mark yet
   empty: number;
+  // musts marked fails: the option misses them, so it is out
+  mustsFailed: number;
   failsMust: boolean;
 };
 

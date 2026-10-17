@@ -23,9 +23,18 @@ export function CommitSheet({
   const node = here.ws.map.nodes[option];
   const q = node?.parent ?? "";
   const stand = here.view.stand[q];
-  // Claude's line is the why to start from when this option is its lead
-  const [why, setWhy] = useState(stand?.lead === option ? stand.line : "");
-  const [sure, setSure] = useState<number | null>(null);
+  const lean = here.view.boards[q]?.lean;
+  // the why is yours: Claude's line weighs the options (it may argue for
+  // another), so it is a hint to start from, never your reason by default
+  const [why, setWhy] = useState("");
+  const hint =
+    stand?.lead === option && stand.line
+      ? `Claude: ${stand.line}`
+      : "What tipped it, in your words";
+  // how sure you said you were when you leaned this way
+  const [sure, setSure] = useState<number | null>(
+    lean?.option === option ? (lean.sure ?? null) : null,
+  );
   if (!node) return null;
   const commit = (args: Record<string, unknown>) => {
     void here.act("commit", { option, ...args });
@@ -48,6 +57,8 @@ export function CommitSheet({
             if (e.key === "Enter")
               commit({ why, ...(sure !== null ? { sure } : {}) });
           }}
+          placeholder={hint}
+          title={hint}
           maxLength={200}
           className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-[13px] text-ink focus:border-primary focus:outline-none"
         />

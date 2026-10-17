@@ -10,7 +10,13 @@
 //   against    │
 //   tally      │
 
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 
 import { Cell, CellPopover } from "./Cell.tsx";
 import { Btn } from "./ui.tsx";
@@ -18,6 +24,7 @@ import { anchorOf, useOpened, type Anchor, type Here } from "./view.ts";
 import {
   cellKey,
   MARK_LOOK,
+  NAME_MAX,
   WEIGHT_WORD,
   WEIGHTS,
   type BoardView,
@@ -30,6 +37,16 @@ const RAIL = 200;
 const COL = 184;
 const STRIP = 48;
 const DRAWER = 132;
+// how much room is left, once a name nears the limit, so nothing is cut
+// without your seeing it
+function Left({ text }: { text: string }) {
+  if (text.length < NAME_MAX - 20) return null;
+  return (
+    <span className="text-[11px] text-muted tabular-nums">
+      {NAME_MAX - text.length} left
+    </span>
+  );
+}
 
 // the categories people most often leave out of what they want
 const MISSED = ["Cost", "Time", "Risk", "People", "Undo", "Regret"];
@@ -56,6 +73,22 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [opened, setOpened] = useOpened(ws.map.id, q);
+  // the lines that span the board (the banner, + what else do you want?)
+  // stick to its left edge as it scrolls sideways. A sticky line moves only
+  // within its own span, which stops short of the columns after the options
+  // (the drawer, "Something else?"): it is kept narrower than the box you
+  // see by their width, so it can follow you to the far right. The box's
+  // width is kept on it as --board-w
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const fit = () => el.style.setProperty("--board-w", `${el.clientWidth}px`);
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const cols = board.columns;
   const ghost = !board.keepAsIs;
   const aside = board.aside.length > 0;
@@ -164,6 +197,22 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
             ┄ {r.title}
           </button>
           <span className="ml-1 whitespace-nowrap text-xs">
+            <select
+              // Claude's weight shows before you keep it; picking one keeps
+              // it at that weight
+              value={r.weight}
+              onChange={(e) =>
+                void act("want", { q, id: r.id, weight: e.target.value })
+              }
+              title="Claude suggests this weight; pick one to keep it at that weight"
+              className="mr-1 cursor-pointer rounded border-0 bg-transparent py-0 pl-0.5 pr-4 text-xs text-muted hover:bg-panel"
+            >
+              {WEIGHTS.map((w) => (
+                <option key={w} value={w}>
+                  {WEIGHT_WORD[w].toLowerCase()}
+                </option>
+              ))}
+            </select>
             <button
               onClick={() => void act("want", { q, id: r.id, keep: true })}
               className="text-primary-strong underline-offset-2 hover:underline"
@@ -213,6 +262,8 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
     `${COL}px`,
   ].join(" ");
   const first = ghost ? 3 : 2;
+  // the columns after the options, which the lines that span do not cover
+  const trailing = COL + (aside ? (drawer ? COL : DRAWER) : 0);
   const last = first + cols.length + (aside ? 1 : 0);
   const n = lines.length;
   const at = (row: number, col: number, span = 1): CSSProperties => ({
@@ -229,7 +280,10 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
           : "border-b border-line";
 
   return (
-    <div className="w-fit max-w-full overflow-x-auto rounded-xl border border-line bg-surface">
+    <div
+      ref={box}
+      className="w-fit max-w-full overflow-x-auto rounded-xl border border-line bg-surface"
+    >
       <div className="grid w-max" style={{ gridTemplateColumns: template }}>
         {lines.map((l, i) =>
           l.span ? (
@@ -238,7 +292,12 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
               style={at(i + 1, 1, first - 1 + cols.length)}
               className={lineCls(l)}
             >
-              <div className="sticky left-0 max-w-[calc(100vw-48px)]">
+              <div
+                className="sticky left-0"
+                style={{
+                  maxWidth: `max(calc(var(--board-w, 100vw) - ${trailing}px), 240px)`,
+                }}
+              >
                 {l.span}
               </div>
             </div>
@@ -595,11 +654,18 @@ function TallyCell({
     <div className={`px-2 py-1.5 text-xs ${col.faded ? "opacity-50" : ""}`}>
       <div
         className={t.failsMust ? "font-medium text-danger-strong" : "text-ink"}
+        // a must marked worse is met less well, not missed: only fails
+        // rules an option out
+        title={
+          t.failsMust
+            ? "It misses a must, so it is out"
+            : "Musts marked better or same, of all musts. A must marked worse is weaker than the others, not failed: only ✕ fails rules an option out"
+        }
       >
         {t.failsMust
-          ? `fails ${t.fails === 1 ? "a must" : `${t.fails} musts`}`
+          ? `✕ fails ${t.mustsFailed === 1 ? "a must" : `${t.mustsFailed} musts`}`
           : t.musts
-            ? `musts ${t.mustsMet}/${t.musts}${t.empty ? ` · ${t.empty} ?` : ""}`
+            ? `${t.empty ? "" : "none fails · "}musts ▲＝ ${t.mustsMet}/${t.musts}${t.empty ? ` · ${t.empty} ?` : ""}`
             : "no musts yet"}
       </div>
       {counts && <div className="mt-0.5 text-muted">{counts}</div>}
@@ -644,7 +710,7 @@ function AddWant({ here, q }: { here: Here; q: string }) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="+ what else do you want?"
-          maxLength={60}
+          maxLength={NAME_MAX}
           className="w-56 min-w-0 rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
         />
         <select
@@ -659,6 +725,7 @@ function AddWant({ here, q }: { here: Here; q: string }) {
             </option>
           ))}
         </select>
+        <Left text={title} />
         {title.trim() && (
           <button
             type="submit"
@@ -715,9 +782,10 @@ function SomethingElse({ here, q }: { here: Here; q: string }) {
               if (e.key === "Escape") setAdding(false);
             }}
             placeholder="Your option, in a few words"
-            maxLength={60}
+            maxLength={NAME_MAX}
             className="w-full rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
           />
+          <Left text={title} />
         </form>
       ) : (
         <div className="mt-2">
