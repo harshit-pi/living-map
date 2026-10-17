@@ -12,6 +12,10 @@ export type ServerPlugin = {
   // also the map's purpose, e.g. "design"
   id: string;
   label: string;
+  // what the canvas is called to the model (default: "<label> canvas")
+  canvasName?: string;
+  // other modes a map of this one may switch to and back, keeping the map
+  switchesWith?: string[];
   // the model's job on this canvas, sent on every move (with core's map ops)
   prompt: string;
   // extra instructions by name, sent only on moves that list them in `sections`

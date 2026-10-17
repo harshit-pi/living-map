@@ -3,8 +3,9 @@
 
 import type { WebPlugin } from "./plugin.ts";
 import { designWeb } from "../plugins/design/web/index.ts";
+import { exploreWeb } from "../plugins/explore/web/index.ts";
 
-export const PLUGINS: readonly WebPlugin[] = [designWeb];
+export const PLUGINS: readonly WebPlugin[] = [exploreWeb, designWeb];
 
 export const pluginFor = (purpose: string): WebPlugin | undefined =>
   PLUGINS.find((p) => p.id === purpose);

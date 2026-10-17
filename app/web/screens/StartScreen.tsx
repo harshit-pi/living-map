@@ -10,6 +10,7 @@ import { PLUGINS } from "../plugins.ts";
 
 type Mode = {
   id: Purpose;
+  order?: number;
   label: string;
   heading: string;
   blurb: string;
@@ -17,22 +18,11 @@ type Mode = {
   examples: string[];
 };
 
-// the built-in modes, then each plugin's
+// Learn is built in; every other mode is a plugin. They show in `order`.
 const MODES: Mode[] = [
   {
-    id: "explore",
-    label: "Explore",
-    heading: "What do you want to think through?",
-    blurb:
-      "A question to explore or a choice to make. Claude lays it out as a map; you steer by clicking and replying on the nodes.",
-    placeholder: "e.g. Which database for the new service?",
-    examples: [
-      "Which learning vertical should Living Map start with?",
-      "Postgres or DynamoDB for a new service?",
-    ],
-  },
-  {
     id: "learn",
+    order: 20,
     label: "Learn",
     heading: "What do you want to understand?",
     blurb:
@@ -47,7 +37,7 @@ const MODES: Mode[] = [
     ],
   },
   ...PLUGINS,
-];
+].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
 
 export function StartScreen({
   error,

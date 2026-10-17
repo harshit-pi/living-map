@@ -22,6 +22,7 @@ import {
 } from "./scene.ts";
 import { splitStart } from "./start.ts";
 import type { Canvas, SceneData } from "./types.ts";
+import { explore } from "../../plugins/explore/server.ts";
 import type { ArrayState, BoardState, Diagram } from "../../shared/model.ts";
 
 type Of<F extends Diagram["form"]> = Extract<Diagram, { form: F }>;
@@ -225,8 +226,11 @@ test("outline and prompts", () => {
     lean.length < learn.length / 2,
     "a move that needs no extras sends far less",
   );
-  assert.match(systemPrompt("explore"), /EXPLORATION CANVAS/);
-  assert.doesNotMatch(systemPrompt("explore"), /TOPIC DIAGRAM/);
+  assert.match(systemPrompt("explore", [], explore), /EXPLORATION CANVAS/);
+  assert.doesNotMatch(
+    systemPrompt("explore", ["diagram"], explore),
+    /TOPIC DIAGRAM/,
+  );
 });
 
 test("a pasted problem page keeps its full text; the title drops the page chrome", () => {

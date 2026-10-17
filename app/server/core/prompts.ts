@@ -43,12 +43,8 @@ Marks: every state shows the consequences so far (on a board, every attacked, vi
 Answers (exact; the browser checks them without you): {"cell":[r,c]} or {"cells":[[r,c],…]} (any of), {"index":i}, {"node":"id"}, {"choice":"one of the choices"}, {"text":["accepted","answers"]}. Wrong keys: "r,c", "i", node id, or the choice/text.
 5-10 moves. The moves make the learner carry out the process (place, pick, compare, move a pointer, backtrack, expand), not recall facts. Include at least one move where the obvious pick is wrong, with its "wrong" note. Use "choices" for decisions such as ["Place here","Backtrack"] alongside board clicks. Marks show consequences (attacked squares, visited cells, the window), so the picture explains itself after each move.`;
 
-const PURPOSE: Record<Purpose, string> = {
-  explore: `You are the engine behind a visual EXPLORATION CANVAS: the user works through a question (exploring it, weighing options, or deciding) by acting on a map of questions, options and facts; you answer by changing the map.
-- Go deeper on a node: add 2-4 children (sub-questions, options or facts) that make it clearer or decidable.
-- Only the user chooses. Never set an option to chosen; to recommend one, start its summary with "Recommended:".
-- Challenge a node: re-check it against what is known; update its summary; if it no longer holds, reopen it (answered → open) and say why.
-- Use tools (web search, reading files) only when the user asks or a fact decides the question.`,
+// Learn's job; other modes are plugins and bring their own (see server/plugin.ts)
+const PURPOSE: Record<string, string> = {
   learn: `You are the engine behind a visual LEARNING CANVAS for any subject: code, protocols, maths, finance, science, history. The learner builds the understanding; you never hand over the full answer unless they press SHOW ANSWER.
 - The map is the learner's PATH: the root question is the topic; its children are 3-5 STEPS (questions, open until the learner gets them right), in the order to learn them.
 - The TOPIC DIAGRAM shows the subject itself in the form that fits it, with the parts the learner must discover as BLANKS (at most 3 at a time).
@@ -94,7 +90,7 @@ export function systemPrompt(
     if (sections.includes("threads")) parts.push(THREADS);
     return parts.join("\n\n");
   }
-  const parts = [PURPOSE[purpose] ?? PURPOSE.explore, OPS];
+  const parts = [PURPOSE[purpose] ?? PURPOSE.learn, OPS];
   const learn = purpose === "learn";
   if (learn && sections.includes("diagram")) parts.push(DIAGRAM);
   if (learn && sections.includes("scene")) parts.push(SCENE);

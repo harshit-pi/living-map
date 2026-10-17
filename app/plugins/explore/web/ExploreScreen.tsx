@@ -1,21 +1,22 @@
 import { ReactFlowProvider } from "@xyflow/react";
 
-import { Canvas } from "../components/Canvas.tsx";
-import { FloatingComposer } from "../components/FloatingComposer.tsx";
-import { NodePanel } from "../components/NodePanel.tsx";
-import { setAside } from "../lib/layout.ts";
-import type { Workspace } from "../lib/workspace.ts";
+import { useShowDropped } from "./view.ts";
+import { Canvas } from "../../../web/components/Canvas.tsx";
+import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
+import { NodePanel } from "../../../web/components/NodePanel.tsx";
+import { setAside } from "../../../web/lib/layout.ts";
+import type { Workspace } from "../../../web/lib/workspace.ts";
 
 // Explore: the question as a tree of options and facts, a panel for the node
 // you selected, and the main conversation at the bottom.
-export function ExploreScreen({
-  ws,
-  showDropped,
-}: {
-  ws: Workspace;
-  showDropped: boolean;
-}) {
-  const { map, live, selection, setSelection } = ws;
+export function ExploreScreen({ ws }: { ws: Workspace }) {
+  const [showDropped] = useShowDropped();
+  const { map, live, setSelection } = ws;
+  // what you selected, less anything hidden with the set-aside nodes: what you
+  // write is then about what you can see
+  const selection = showDropped
+    ? ws.selection
+    : ws.selection.filter((id) => !setAside(map.nodes, id));
   // a node hidden with the set-aside ones takes its panel with it
   const one =
     selection.length === 1 &&
@@ -52,7 +53,7 @@ export function ExploreScreen({
         />
       )}
       <FloatingComposer
-        ws={ws}
+        ws={{ ...ws, selection }}
         placeholder={
           selection.length
             ? "Say something about the selected nodes…"

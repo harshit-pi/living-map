@@ -151,7 +151,7 @@ export function createEngine({
     const sceneId = scope ?? opts.nodeId;
     const plugin = pluginFor(m.purpose);
     return [
-      `CANVAS (${plugin ? `${plugin.label.toLowerCase()} canvas` : m.purpose === "learn" ? "learning path" : "exploration map"}):\n${outline(m.nodes)}`,
+      `CANVAS (${plugin ? (plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`) : "learning path"}):\n${outline(m.nodes)}`,
       plugin?.outline?.(m) ?? "",
       m.purpose === "learn"
         ? `TOPIC DIAGRAM:\n${diagramOutline(m.diagram, m.fills, m.answers)}`
