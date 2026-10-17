@@ -61,6 +61,22 @@ export async function act(
     !own.core.includes(req.type)
   )
     return { error: "That action is not available on this map." };
+  // the selection names nodes the browser picked: only plain ids get through
+  const selection = Array.isArray((req as { selection?: unknown }).selection)
+    ? (req as { selection: unknown[] }).selection.filter(
+        (id): id is string => typeof id === "string" && safeId(id),
+      )
+    : [];
+  // a plugin may answer a core action its screen uses its own way (Explore's
+  // choose records why; its Next picks the gap): it gets the whole request
+  if (
+    own &&
+    req.type !== "plugin" &&
+    req.type !== "purpose" &&
+    own.core.includes(req.type) &&
+    Object.hasOwn(own.actions ?? {}, req.type)
+  )
+    return own.actions![req.type](ctx, { ...req, selection });
 
   switch (req.type) {
     case "purpose":
@@ -100,18 +116,7 @@ export async function act(
     case "next":
       return canvas.next(ctx);
     case "message":
-      // a plugin may answer the main conversation its own way
-      if (pluginFor(map.purpose)?.actions?.message)
-        return pluginFor(map.purpose)!.actions!.message(ctx, {
-          text: req.text,
-        });
-      return canvas.message(
-        ctx,
-        req.text,
-        Array.isArray(req.selection)
-          ? req.selection.filter((id) => typeof id === "string" && safeId(id))
-          : [],
-      );
+      return canvas.message(ctx, req.text, selection);
     case "fill":
       return learn.fill(ctx, req.blankId, req.text);
     case "hint":

@@ -1,6 +1,6 @@
 # Living Map
 
-A local web app that drives a model (your own Claude Code by default) from a visual canvas. **Explore**: a question as a tree of options and facts. **Learn**: any subject as a path of steps, a topic diagram with blanks you fill, and steps you play by hand.
+A local web app that drives a model (your own Claude Code by default) from a visual canvas. **Explore**: a question as a decision board of options against what you want, with a tree view. **Learn**: any subject as a path of steps, a topic diagram with blanks you fill, and steps you play by hand.
 
 The app lives in `app/`; run every npm command there.
 

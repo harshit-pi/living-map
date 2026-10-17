@@ -289,6 +289,7 @@ export function createEngine({
                 judge: opts.judge,
                 extra: opExtra,
                 keep: opts.keep,
+                keepYours: plugin?.keepUserNodes,
               });
             } catch (e) {
               console.error("[move] an op could not be applied:", e);
@@ -333,6 +334,7 @@ export function createEngine({
           judge: opts.judge,
           extra: opExtra,
           keep: opts.keep,
+          keepYours: plugin?.keepUserNodes,
         });
       // say so when some of the model's changes could not be read, rather than
       // dropping them silently
