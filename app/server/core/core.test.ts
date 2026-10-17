@@ -64,6 +64,8 @@ test("a map block without the ops wrapper is still read", () => {
   );
   const arr = 'Caption.\n```map\n[{"op":"add","id":"x"}]\n```';
   assert.equal(completeOps(arr).length, 1);
+  const keyed = 'C.\n```map\n{"v":1,"ops":[{"op":"add","id":"x"}]}\n```';
+  assert.equal(completeOps(keyed).length, 1);
 });
 
 test("ops build the tree; details stay lazy; Claude cannot choose", () => {

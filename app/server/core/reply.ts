@@ -27,7 +27,7 @@ function scan(text: string): { ops: Raw[]; broken: number } {
   // Only skip a leading "[" at the block's start: a "[" inside an op (a list in
   // its spec) is not the ops array.
   const head =
-    body.match(/^[^{[]*(?:\{\s*"ops"\s*:\s*)?\[/) ?? body.match(/^[^{[]*/);
+    body.match(/^[^{[]*(?:\{[^[]*?"ops"\s*:\s*)?\[/) ?? body.match(/^[^{[]*/);
   let depth = 0;
   let inStr = false;
   let esc = false;
