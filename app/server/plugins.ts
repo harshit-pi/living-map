@@ -3,8 +3,9 @@
 
 import type { ServerPlugin } from "./plugin.ts";
 import { design } from "../plugins/design/server.ts";
+import { explore } from "../plugins/explore/server.ts";
 
-export const PLUGINS: readonly ServerPlugin[] = [design];
+export const PLUGINS: readonly ServerPlugin[] = [explore, design];
 
 export const pluginFor = (purpose: string): ServerPlugin | undefined =>
   PLUGINS.find((p) => p.id === purpose);
