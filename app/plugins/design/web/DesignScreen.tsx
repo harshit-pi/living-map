@@ -55,6 +55,16 @@ function Design({ ws }: { ws: Workspace }) {
   const [hidStopped, setHidStopped] = useState(-1);
   // what you just removed, with Undo (also Cmd/Ctrl+Z) for a few seconds
   const [undo, setUndo] = useState<{ what: string; at: number } | null>(null);
+  // a wire refused here, told by the canvas's notes at the bottom, clear of
+  // the over-capacity warning along the top
+  const [warn, setWarn] = useState<{ text: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!warn) return;
+    const t = setTimeout(() => setWarn(null), 5000);
+    return () => clearTimeout(t);
+  }, [warn]);
+  // the brief's column folds away, so a narrow window has room to build
+  const [briefFolded, setBriefFolded] = useState(false);
   useEffect(() => {
     if (!undo) return;
     const t = setTimeout(() => setUndo(null), 8000);
@@ -117,7 +127,7 @@ function Design({ ws }: { ws: Workspace }) {
             ? "Those two are already wired that way."
             : "";
       if (why) {
-        ws.showError(why);
+        setWarn({ text: why, at: Date.now() });
         return Promise.resolve({ error: why });
       }
     }
@@ -173,52 +183,78 @@ function Design({ ws }: { ws: Workspace }) {
       .some((c) => c.role === "system" && /^(Stopped|Cancelled)/.test(c.text));
   return (
     <div className="flex h-full">
-      <aside className="flex w-[240px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface xl:w-[300px]">
-        <Brief view={view} />
-        <LastWord chat={map.chat} view={view} fresh={freshAnswer} />
-        <div className="border-t border-line px-4 py-3">
-          <div className="mb-1.5 text-[11px] font-semibold tracking-wide text-faint uppercase">
-            Then go deeper
+      {briefFolded ? (
+        <aside className="flex w-9 shrink-0 flex-col items-center border-r border-line bg-surface pt-2">
+          <button
+            onClick={() => setBriefFolded(false)}
+            title="Show the brief and the deep dives"
+            aria-label="Show the brief and the deep dives"
+            className="rounded-md px-1.5 py-1 text-muted hover:bg-panel hover:text-ink"
+          >
+            ›
+          </button>
+          <span className="mt-2 text-[11px] font-semibold tracking-wide text-faint uppercase [writing-mode:vertical-rl]">
+            The brief
+          </span>
+        </aside>
+      ) : (
+        <aside className="relative flex w-[240px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface xl:w-[300px]">
+          <button
+            onClick={() => setBriefFolded(true)}
+            title="Fold the brief away, for more room to build"
+            aria-label="Fold the brief away"
+            className="absolute top-2 right-2 rounded-md px-1.5 py-0.5 text-muted hover:bg-panel hover:text-ink"
+          >
+            ‹
+          </button>
+          <Brief view={view} />
+          <LastWord chat={map.chat} view={view} fresh={freshAnswer} />
+          <div className="border-t border-line px-4 py-3">
+            <div className="mb-1.5 text-[11px] font-semibold tracking-wide text-faint uppercase">
+              Then go deeper
+            </div>
+            {dives.length === 0 && <div className="text-sm text-faint">…</div>}
+            {dives.map((d, i) => {
+              // skipped from its panel: greyed out here, Restore is in the panel
+              const skipped = !!d.dropped || d.status === "dropped";
+              return (
+                <button
+                  key={d.id}
+                  onClick={() => setSelection(open?.id === d.id ? [] : [d.id])}
+                  title={skipped ? "Skipped: open it to restore it" : undefined}
+                  className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-panel ${open?.id === d.id ? "bg-panel ring-1 ring-primary-line" : ""}`}
+                >
+                  <span
+                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${d.status === "answered" ? "bg-success text-on-primary" : "ring-1 ring-line-strong text-muted"}`}
+                  >
+                    {skipped ? "–" : d.status === "answered" ? "✓" : i + 1}
+                  </span>
+                  <span
+                    className={
+                      skipped
+                        ? "text-faint line-through"
+                        : d.status === "answered"
+                          ? "text-muted"
+                          : "text-ink"
+                    }
+                  >
+                    {d.title}
+                    {d.status === "answered" && d.summary && (
+                      <span className="block text-[11.5px] text-muted">
+                        {d.summary}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          {dives.length === 0 && <div className="text-sm text-faint">…</div>}
-          {dives.map((d, i) => {
-            // skipped from its panel: greyed out here, Restore is in the panel
-            const skipped = !!d.dropped || d.status === "dropped";
-            return (
-              <button
-                key={d.id}
-                onClick={() => setSelection(open?.id === d.id ? [] : [d.id])}
-                title={skipped ? "Skipped: open it to restore it" : undefined}
-                className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-panel ${open?.id === d.id ? "bg-panel ring-1 ring-primary-line" : ""}`}
-              >
-                <span
-                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${d.status === "answered" ? "bg-success text-on-primary" : "ring-1 ring-line-strong text-muted"}`}
-                >
-                  {skipped ? "–" : d.status === "answered" ? "✓" : i + 1}
-                </span>
-                <span
-                  className={
-                    skipped
-                      ? "text-faint line-through"
-                      : d.status === "answered"
-                        ? "text-muted"
-                        : "text-ink"
-                  }
-                >
-                  {d.title}
-                  {d.status === "answered" && d.summary && (
-                    <span className="block text-[11.5px] text-muted">
-                      {d.summary}
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </aside>
+        </aside>
+      )}
 
-      <div className="relative min-w-0 flex-1">
+      {/* what floats over the canvas is marked keep-clear: new parts land
+          where they can be seen */}
+      <div className="relative min-w-0 flex-1" data-design-stage>
         <div
           className="h-full transition-[padding]"
           // on a narrow window the review floats over the canvas instead of
@@ -253,13 +289,17 @@ function Design({ ws }: { ws: Workspace }) {
         >
           {over.length > 0 && !showReference && (
             <div
+              data-keep-clear
               className="pointer-events-auto min-w-0 truncate rounded-lg bg-danger-soft px-3 py-1.5 text-[12.5px] text-danger-strong ring-1 ring-danger-line"
               title={over.map((c) => c.label).join(", ")}
             >
               Over capacity: {over.map((c) => c.label).join(", ")}
             </div>
           )}
-          <div className="ml-auto flex shrink-0 flex-col items-end gap-2">
+          <div
+            data-keep-clear
+            className="ml-auto flex shrink-0 flex-col items-end gap-2"
+          >
             <div className="flex gap-2">
               {view.reference && (
                 <button
@@ -283,7 +323,17 @@ function Design({ ws }: { ws: Workspace }) {
                 </button>
               )}
               <button
-                disabled={live.busy || checking || !view.comps.length}
+                // what the brief placed is not a design to check yet
+                disabled={
+                  live.busy ||
+                  checking ||
+                  !view.comps.some((c) => c.by === "you")
+                }
+                title={
+                  view.comps.some((c) => c.by === "you")
+                    ? undefined
+                    : "Place a few parts first, then check"
+                }
                 onClick={() => {
                   if (checking) return;
                   setChecking(true);
@@ -328,7 +378,10 @@ function Design({ ws }: { ws: Workspace }) {
         </div>
 
         {reviewOpen && view.review && (
-          <div className="absolute top-14 right-3 bottom-24 z-10 w-[356px]">
+          <div
+            data-keep-clear
+            className="absolute top-14 right-3 bottom-24 z-10 w-[356px]"
+          >
             <ReviewCard
               points={view.review.points.map((p) => ({
                 ...p,
@@ -348,26 +401,41 @@ function Design({ ws }: { ws: Workspace }) {
           </div>
         )}
 
-        {undo && (
-          <div className="absolute bottom-24 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-surface px-3 py-1.5 text-[12.5px] text-body shadow-md ring-1 ring-line">
-            <span className="max-w-[280px] truncate">Removed {undo.what}</span>
+        <div className="pointer-events-none absolute bottom-24 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2 [&>*]:pointer-events-auto">
+          {warn && (
+            <div className="flex items-center gap-3 rounded-lg bg-warning-soft px-3 py-1.5 text-[12.5px] text-warning-strong shadow-md ring-1 ring-warning-line">
+              <span>{warn.text}</span>
+              <button
+                onClick={() => setWarn(null)}
+                className="shrink-0 hover:text-ink"
+                aria-label="Hide this notice"
+              >
+                ×
+              </button>
+            </div>
+          )}
+          {undo && (
+            <div className="flex items-center gap-3 rounded-lg bg-surface px-3 py-1.5 text-[12.5px] text-body shadow-md ring-1 ring-line">
+              <span className="max-w-[280px] truncate">
+                Removed {undo.what}
+              </span>
+              <button
+                onClick={() => void act("undo")}
+                className="font-medium text-primary-strong hover:underline"
+              >
+                Undo
+              </button>
+            </div>
+          )}
+          {freshAnswer && !undo && !open && (
             <button
-              onClick={() => void act("undo")}
-              className="font-medium text-primary-strong hover:underline"
+              onClick={showAnswer}
+              className="rounded-lg bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary-strong shadow-md ring-1 ring-primary-line hover:ring-primary"
             >
-              Undo
+              ← Claude answered you on the left, under "You asked"
             </button>
-          </div>
-        )}
-
-        {freshAnswer && !undo && !open && (
-          <button
-            onClick={showAnswer}
-            className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-lg bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary-strong shadow-md ring-1 ring-primary-line hover:ring-primary"
-          >
-            ← Claude answered you on the left, under "You asked"
-          </button>
-        )}
+          )}
+        </div>
 
         {picked && !showReference && (
           <Inspector
@@ -525,6 +593,9 @@ function LastWord({
   fresh: boolean;
 }) {
   const { next, asked } = lastWord(chat);
+  // a deep dive settled since: its next step replaces the review's
+  const since =
+    view.next && (next < 0 || view.next.at > chat[next].ts) ? view.next : null;
   const block = (title: string, text: string, q?: string) => (
     <div
       id={q ? ASKED_ID : undefined}
@@ -543,7 +614,9 @@ function LastWord({
   );
   return (
     <>
-      {next >= 0 && block("Next step", chat[next].text)}
+      {since
+        ? block("Next step", since.text)
+        : next >= 0 && block("Next step", chat[next].text)}
       {asked && block("You asked", chat[asked.i].text, asked.q)}
     </>
   );

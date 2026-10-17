@@ -423,6 +423,63 @@ test("the model's ops are cleaned: unknown kinds, bad ids and stray points are d
   assert.match(outlineOf(s), /REFERENCE DESIGN \(yours, hidden/);
 });
 
+test("a settled deep dive's next step replaces the review's, and takes the points it settles", () => {
+  const s = newState();
+  applyDesignOp(
+    s,
+    {
+      op: "review",
+      summary: "Resize first.",
+      points: [
+        { level: "fix", text: "Resize both services" },
+        { level: "think", text: "Who orders two edits in one doc?" },
+      ],
+    },
+    100,
+  );
+  assert.match(outlineOf(s), /\[1 fix\] Resize both services \[2 think\]/);
+  assert.equal(
+    applyDesignOp(
+      s,
+      {
+        op: "next",
+        text: "Resize both, then shard the op store.",
+        settles: [2, "x", 9],
+      },
+      200,
+    ),
+    1,
+  );
+  assert.deepEqual(s.next, {
+    at: 200,
+    text: "Resize both, then shard the op store.",
+  });
+  assert.deepEqual(
+    s.review?.points.map((p) => p.text),
+    ["Resize both services"],
+  );
+  assert.match(outlineOf(s), /YOUR NEXT STEP SINCE: Resize both/);
+  assert.equal(applyDesignOp(s, { op: "next", text: " " }), 0);
+  // the next review is newer: it brings its own next step
+  applyDesignOp(s, { op: "review", summary: "Better.", points: [] }, 300);
+  assert.equal(s.next, null);
+});
+
+test("the outline gives load over capacity as the cards do, and says what the brief placed", () => {
+  const s = newState();
+  s.brief = { ...brief, reads: 2_000_000, writes: 1_000_000 };
+  addComp(s, "client", "Docs editor", 0, 0, "claude", "app");
+  addComp(s, "sql", "SQL database", 0, 0, "you", "db");
+  connect(s, "app", "db");
+  const out = outlineOf(s);
+  assert.match(out, /"Docs editor", placed by you with the brief/);
+  assert.match(
+    out,
+    /"SQL database" — 2M reads\/s, 1M writes\/s.*, 533x its capacity \(over\)/,
+  );
+  assert.doesNotMatch(out, /53333%/);
+});
+
 test("a wire keeps the dots you dragged it between", () => {
   const s = build(
     [

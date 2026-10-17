@@ -5,7 +5,7 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { NodeCard } from "./NodeCard.tsx";
 import type { MapDoc } from "../../shared/model.ts";
@@ -74,10 +74,18 @@ export function Canvas({
       c[t.nodeId] = (c[t.nodeId] ?? 0) + 1;
     return c;
   }, [map.threads]);
+  // each card's measured size, kept on the nodes: the layout hands over new
+  // nodes on every change, and one without a size is hidden until React Flow
+  // measures it again, which a card whose size did not change may never get,
+  // leaving the tree blank but for the newest card
+  const [sizes, setSizes] = useState<
+    Record<string, { width: number; height: number }>
+  >({});
   const nodes = useMemo(
     () =>
       laid.nodes.map((n) => ({
         ...n,
+        measured: sizes[n.id],
         selected: selected.includes(n.id),
         data: {
           ...n.data,
@@ -86,7 +94,7 @@ export function Canvas({
           working: n.id === workingId,
         },
       })),
-    [laid, selected, map.purpose, threads, workingId],
+    [laid, sizes, selected, map.purpose, threads, workingId],
   );
   const { fitView } = useReactFlow();
   // every node the map has had while this canvas was open: one shown again
@@ -129,6 +137,19 @@ export function Canvas({
     return () => clearTimeout(t);
   }, [laid, map.nodes, fitView]);
 
+  // Showing or hiding set-aside nodes lays the tree out again: frame the whole
+  // of it, so the root does not end up off the top
+  const shownDropped = useRef(showDropped);
+  useEffect(() => {
+    if (shownDropped.current === showDropped) return;
+    // once the new layout is measured
+    const t = setTimeout(() => {
+      shownDropped.current = showDropped;
+      void fitView({ ...WHOLE, duration: 300 });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [showDropped, fitView]);
+
   // When Claude finishes a move, frame the whole new branch with its parent,
   // zooming out further if the branch is big, so nothing is left cut off.
   const wasBusy = useRef(busy);
@@ -164,6 +185,17 @@ export function Canvas({
       elementsSelectable={false}
       nodesDraggable={false}
       nodesConnectable={false}
+      onNodesChange={(changes) => {
+        for (const ch of changes)
+          if (ch.type === "dimensions" && ch.dimensions) {
+            const { width, height } = ch.dimensions;
+            setSizes((s) =>
+              s[ch.id]?.width === width && s[ch.id]?.height === height
+                ? s
+                : { ...s, [ch.id]: { width, height } },
+            );
+          }
+      }}
       onNodeClick={(e, node) => {
         if (e.shiftKey)
           onSelect(

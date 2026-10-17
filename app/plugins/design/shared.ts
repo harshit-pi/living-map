@@ -307,6 +307,19 @@ export type ReviewPoint = {
 
 export type Review = { at: number; summary: string; points: ReviewPoint[] };
 
+// the next thing to do, written when a deep dive is settled between checks,
+// so the sidebar stops asking what you have just decided
+export type NextStep = { at: number; text: string };
+
+// how many times its capacity a part takes, as the cards and the review both
+// say it: "1.3", "15", "533", "1.2k"
+export const timesCap = (util: number): string =>
+  util >= 1000
+    ? `${+(util / 1000).toFixed(util >= 1e4 ? 0 : 1)}k`
+    : util >= 100
+      ? String(Math.round(util))
+      : String(+util.toFixed(1));
+
 export type Reference = {
   comps: { id: string; kind: KindId; label: string }[];
   wires: { from: string; to: string; carries: Carries; times: number }[];
@@ -331,5 +344,6 @@ export type DesignView = {
   wires: Wire[];
   load: Record<string, Load>;
   review: Review | null;
+  next: NextStep | null;
   reference: Reference | null;
 };

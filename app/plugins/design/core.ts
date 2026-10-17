@@ -10,10 +10,12 @@ import {
   type Comp,
   type KindId,
   type Load,
+  type NextStep,
   type Reference,
   type Review,
   type ReviewPoint,
   type Wire,
+  timesCap,
 } from "./shared.ts";
 import { list, safeId, str, type Raw } from "../../server/core/types.ts";
 
@@ -22,6 +24,8 @@ export type DesignState = {
   comps: Comp[];
   wires: Wire[];
   review: Review | null;
+  // the next step Claude wrote when a deep dive was settled after the review
+  next?: NextStep | null;
   // the design Claude judges against; never sent to the browser until revealed
   reference: Reference | null;
   revealed: boolean;
@@ -35,6 +39,7 @@ export const newState = (): DesignState => ({
   comps: [],
   wires: [],
   review: null,
+  next: null,
   reference: null,
   revealed: false,
   removed: [],
@@ -454,9 +459,13 @@ export function cleanReview(
   return { at: now, summary, points };
 }
 
-// An op from the model's reply: brief, reference, place, wire, review.
+// An op from the model's reply: brief, reference, place, wire, review, next.
 // Returns how many things changed, or null when the op is not Design's.
-export function applyDesignOp(s: DesignState, op: Raw): number | null {
+export function applyDesignOp(
+  s: DesignState,
+  op: Raw,
+  now = Date.now(),
+): number | null {
   switch (op?.op) {
     case "brief": {
       const b = cleanBrief(op);
@@ -490,9 +499,24 @@ export function applyDesignOp(s: DesignState, op: Raw): number | null {
     case "wire":
       return connect(s, op.from, op.to, op.carries, op.times) ? 1 : 0;
     case "review": {
-      const rv = cleanReview(op, s);
+      const rv = cleanReview(op, s, now);
       if (!rv) return 0;
       s.review = rv;
+      s.next = null;
+      return 1;
+    }
+    case "next": {
+      // a deep dive was settled: the next thing to do, and the points of the
+      // last review (numbered from 1) that it settles, which leave the review
+      const text = str(op.text, 280).trim();
+      if (!text) return 0;
+      s.next = { at: now, text };
+      const settled = new Set(list(op.settles, 8).map((n) => Number(n) - 1));
+      if (s.review && settled.size)
+        s.review = {
+          ...s.review,
+          points: s.review.points.filter((_, i) => !settled.has(i)),
+        };
       return 1;
     }
     default:
@@ -527,7 +551,7 @@ export function outlineOf(s: DesignState): string {
   else lines.push("DESIGN BRIEF: not written yet.");
   lines.push(
     s.comps.length
-      ? `THE LEARNER'S DESIGN (components; load is the rough check: reads and writes share a part's capacity, so its % already counts both; quote it, do not work it out again):\n${s.comps
+      ? `THE LEARNER'S DESIGN (components; load is the rough check: reads and writes share a part's capacity, so its load already counts both; quote it as given, e.g. "533x its capacity", do not work it out again):\n${s.comps
           .map((c) => {
             const l = load[c.id];
             const k = KINDS[c.kind];
@@ -541,7 +565,14 @@ export function outlineOf(s: DesignState): string {
             const makes = sh
               ? `, makes ${Math.round(sh.reads)}% of the brief's reads and ${Math.round(sh.writes)}% of its writes (set on the client, not by its wires)`
               : "";
-            return `[${c.id}] ${k.label} "${c.label}"${scale}${makes} — ${fmt(l.reads)} reads/s, ${fmt(l.writes)} writes/s${cap}, ${Math.round(l.util * 100)}% of capacity (${l.status})${l.async ? ", async" : ""}`;
+            const used =
+              l.util > 1
+                ? `${timesCap(l.util)}x its capacity`
+                : `${Math.round(l.util * 100)}% of capacity`;
+            // what the brief started with is not the learner's work
+            const by =
+              c.by === "claude" ? ", placed by you with the brief" : "";
+            return `[${c.id}] ${k.label} "${c.label}"${scale}${by}${makes} — ${fmt(l.reads)} reads/s, ${fmt(l.writes)} writes/s${cap}, ${used} (${l.status})${l.async ? ", async" : ""}`;
           })
           .join("\n")}`
       : "THE LEARNER'S DESIGN: empty so far.",
@@ -565,7 +596,8 @@ export function outlineOf(s: DesignState): string {
     );
   if (s.review)
     lines.push(
-      `YOUR LAST REVIEW: ${s.review.summary} ${s.review.points.map((p) => `[${p.level}] ${p.text}`).join(" ")}`,
+      `YOUR LAST REVIEW: ${s.review.summary} ${s.review.points.map((p, i) => `[${i + 1} ${p.level}] ${p.text}`).join(" ")}`,
     );
+  if (s.next) lines.push(`YOUR NEXT STEP SINCE: ${s.next.text}`);
   return lines.join("\n");
 }

@@ -30,15 +30,18 @@ const PROMPT = `You are the engine behind a SYSTEM DESIGN CANVAS. The learner de
 - The learner places and wires the components (THE LEARNER'S DESIGN below). You only place the clients at the start.
 - HINT on a deep dive: add a fact under it titled "Hint 1" (then 2, 3) with one pointed question that leads to the idea, never the answer itself.
 - When the learner answers a deep dive in its thread, judge it: if it holds up at the brief's scale, set it answered and say what they got right; if not, name the part that breaks, with numbers, not the fix.
+- When you set a deep dive answered, also write a next op: the single next thing to do now that it is settled (never the question just settled), and the numbers of YOUR LAST REVIEW's points the answer settles.
 - Talk to the learner as "you". Be concrete: real numbers from the brief and the load check, components by their names in quotes (e.g. "Chat service"), never by their [id]: the learner never sees ids. Ids go only in a review point's "on".
 DESIGN OPS (in the same map block as node ops):
   {"op":"brief","title":"Design Twitter","goals":["post a tweet","see a home timeline"],"constraints":["timeline loads in under 200 ms"],"scale":[{"label":"Daily users","value":"200M"},{"label":"Tweets a day","value":"500M"}],"reads":300000,"writes":6000,"readIs":"one home timeline load","writeIs":"one tweet posted"}
-    goals and constraints at most 5 each, a few words each; scale at most 5 lines; reads and writes are PEAK requests per second that read and that write, following from the scale lines so the learner can check them. readIs and writeIs say in a few words what ONE read and ONE write are; pick them so the numbers agree with the scale lines (if each message goes to 20 people, deliveries are 20x the sends).
+    goals and constraints at most 5 each, a few words each; scale at most 5 lines; reads and writes are PEAK requests per second that read and that write, following from the scale lines so the learner can check them. readIs and writeIs say in a few words what ONE read and ONE write are; pick them so the numbers agree with the scale lines (if each message goes to 20 people, deliveries are 20x the sends). When a read is a push to other users (a message or an edit delivered), say "delivered" or "pushed" in readIs: it reads no store.
   {"op":"reference","comps":[{"id":"lb","kind":"lb","label":"Load balancer"}],"wires":[{"from":"app","to":"lb","carries":"both","times":1}],"notes":["one line per key decision"]}
-    Your own complete high-level design for the brief, as a strong answer would draw it (8-16 components). Use the client's id from your place op. carries: read | write | both; times: fan-out (e.g. 200 when one tweet is written into each follower's feed).
+    Your own complete high-level design for the brief, as a strong answer would draw it (8-16 components). Use the client's id from your place op. carries: read | write | both; times: fan-out (e.g. 200 when one tweet is written into each follower's feed). The wires must show what the notes say: a store a note says is read (e.g. ops replayed on open) has a wire that reads it from the part that does; only an archive or analytics is written and never read.
   {"op":"place","id":"app","kind":"client","label":"Mobile app","x":40,"y":220,"readShare":100,"writeShare":100}
     readShare and writeShare (clients only) are the percent of the brief's reads and writes this client makes: with a "Viewer app" and a "Creator app", the viewer makes 100 and 0, the creator 0 and 100. The load check starts each client's traffic from its shares, whatever it is wired to: wiring never moves traffic from one client to another.
   {"op":"review","summary":"one sentence","points":[{"level":"good|fix|think","text":"at most 40 words","on":["component ids"]}]}
+  {"op":"next","text":"one sentence","settles":[2]}
+    Only with a deep dive you just set answered: the next thing to do, shown as the learner's next step until the next review; settles lists the numbers of YOUR LAST REVIEW's points that answer settles (they leave the review), [] for none.
 COMPONENT KINDS: ${Object.entries(KINDS)
   .map(([id, k]) => `${id} (${k.hint})`)
   .join("; ")}.`;
@@ -47,7 +50,9 @@ const START = `START: write, in one map block: the root question (a node with pa
 
 const REVIEW = `CHECK MY DESIGN: review the learner's design against the brief, the load check and your reference. Write one review op: 3-6 points, the most important first.
 - good: something that works at this scale, said in a few words.
-- fix: what breaks or is missing. Name the SYMPTOM with numbers from the load check, as it gives them (its % counts reads and writes together) (e.g. "Tweet store takes 300k reads/s, about 30x what one SQL node handles"), not the component that fixes it. If YOUR LAST REVIEW already raised the same problem and it is still there, you may now name the fix.
+- fix: what breaks or is missing. Name the SYMPTOM with numbers from the load check, as it gives them (its load counts reads and writes together; over capacity it is "Nx its capacity", never a percentage over 100) (e.g. "Tweet store takes 300k reads/s, about 30x its capacity"), not the component that fixes it. If YOUR LAST REVIEW already raised the same problem and it is still there, you may now name the fix.
+- The load check sends every read the brief counts down each wire that carries reads. When the brief's read (its readIs) is a push to other users that reads no store (an edit or a message delivered), a store taking those reads is a wiring slip, not a load to scale for: say so first, and tell the learner to click that wire and set Carries to Writes.
+- Credit only the learner's work: parts "placed by you with the brief" (the clients) are not theirs.
 - think: one question that leads to the next idea in your reference.
 Point "on" at the learner's component ids; in the text, name parts by their names, never by id. If the design already settles a deep dive, set that question answered with a summary of what they chose. The caption is one sentence: the single most important thing to do next.`;
 
@@ -82,8 +87,9 @@ export const design: ServerPlugin = {
     "message",
   ],
   applyOp: (map, op, { scope }) => {
-    // a side thread may hint and judge, but not rewrite the brief or the design
-    if (scope && op?.op !== "review")
+    // a side thread may hint and judge (and say what comes next), but not
+    // rewrite the brief or the design
+    if (scope && op?.op !== "review" && op?.op !== "next")
       return op?.op && ["brief", "reference", "place", "wire"].includes(op.op)
         ? 0
         : null;
@@ -195,7 +201,8 @@ export const design: ServerPlugin = {
       return { ok: true };
     },
     check(ctx) {
-      if (!state(ctx.map).comps.length)
+      // what the brief placed (the clients) is not a design to review yet
+      if (!state(ctx.map).comps.some((c) => c.by === "you"))
         return { error: "Place a few components first, then check." };
       // a second click while a review runs or waits asks for the same review
       if (ctx.engine.isQueuedOrRunning(null, REVIEWING)) return {};
@@ -239,6 +246,7 @@ export const design: ServerPlugin = {
       wires: s.wires,
       load: loadCheck(s),
       review: s.review,
+      next: s.next ?? null,
       reference: s.revealed ? s.reference : null,
     };
   },

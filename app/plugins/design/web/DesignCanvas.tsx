@@ -176,7 +176,7 @@ export function DesignCanvas({
   act: Act;
 }) {
   const rf = useReactFlow();
-  const { screenToFlowPosition } = rf;
+  const { screenToFlowPosition, flowToScreenPosition } = rf;
   const box = useRef<HTMLDivElement>(null);
   // where you are dragging a component, until the server has the new position
   const [drag, setDrag] = useState<Record<string, At>>({});
@@ -322,12 +322,13 @@ export function DesignCanvas({
       x: r.left + r.width / 2,
       y: r.top + (r.height - COMPOSER_H) / 2,
     });
-    // what is visible of the canvas, above the message box
-    const tl = screenToFlowPosition({ x: r.left + 8, y: r.top + 8 });
-    const br = screenToFlowPosition({
-      x: r.right - 8,
-      y: r.bottom - COMPOSER_H,
-    });
+    // what floats over the canvas (the buttons and notices along the top, a
+    // floating review) hides a part as surely as the canvas's edge does
+    const covers = [
+      ...(box.current
+        ?.closest("[data-design-stage]")
+        ?.querySelectorAll("[data-keep-clear]") ?? []),
+    ].map((el) => el.getBoundingClientRect());
     const now = Date.now();
     recent.current = recent.current.filter((p) => now - p.at < 3000);
     const taken: At[] = [...view.comps, ...recent.current];
@@ -336,17 +337,59 @@ export function DesignCanvas({
         (c) =>
           Math.abs(c.x - x) > NODE_W + 24 || Math.abs(c.y - y) > NODE_H + 24,
       );
-    const seen = (x: number, y: number) =>
-      x >= tl.x && y >= tl.y && x + NODE_W <= br.x && y + NODE_H <= br.y;
-    const place = (x: number, y: number) => {
+    // the whole card on the canvas, above the message box, under nothing
+    const seen = (x: number, y: number) => {
+      const a = flowToScreenPosition({ x, y });
+      const b = flowToScreenPosition({ x: x + NODE_W, y: y + NODE_H });
+      return (
+        a.x >= r.left + 8 &&
+        a.y >= r.top + 8 &&
+        b.x <= r.right - 8 &&
+        b.y <= r.bottom - COMPOSER_H &&
+        covers.every(
+          (c) =>
+            b.x + 8 <= c.left ||
+            a.x - 8 >= c.right ||
+            b.y + 8 <= c.top ||
+            a.y - 8 >= c.bottom,
+        )
+      );
+    };
+    const place = (x: number, y: number, inSight: boolean) => {
       const p = { x: Math.round(x), y: Math.round(y) };
       recent.current.push({ ...p, at: now });
       act("add", { kind, ...p });
+      if (inSight) return;
+      // no room in sight: zoom out to show it with the rest
+      const all = rf.getNodes();
+      const b = all.length
+        ? rf.getNodesBounds(all)
+        : { x: p.x, y: p.y, width: 0, height: 0 };
+      const x0 = Math.min(b.x, p.x);
+      const y0 = Math.min(b.y, p.y);
+      const vp = getViewportForBounds(
+        {
+          x: x0,
+          y: y0,
+          width: Math.max(b.x + b.width, p.x + NODE_W) - x0,
+          height: Math.max(b.y + b.height, p.y + NODE_H) - y0,
+        },
+        r.width,
+        r.height,
+        0.3,
+        FIT.maxZoom,
+        FIT.padding,
+      );
+      void rf.setViewport(vp, { duration: 200 });
     };
     const start = { x: mid.x - NODE_W / 2, y: mid.y - NODE_H / 2 };
-    // a free spot in sight first; failing that, any free spot
-    for (const inSight of [true, false])
-      for (let ring = 0; ring < 12; ring++)
+    // a free spot in sight first, on a grid of half a card so the gaps
+    // between parts spread over the canvas count; failing that, any free spot
+    for (const [inSight, step, rings] of [
+      [true, 0.5, 24],
+      [false, 1, 12],
+    ] as const)
+      for (let ring = 0; ring < rings; ring++)
         for (let i = -ring; i <= ring; i++)
           for (const [dx, dy] of [
             [i, -ring],
@@ -354,11 +397,12 @@ export function DesignCanvas({
             [-ring, i],
             [ring, i],
           ]) {
-            const x = start.x + dx * (NODE_W + 40);
-            const y = start.y + dy * (NODE_H + 40);
-            if (free(x, y) && (!inSight || seen(x, y))) return place(x, y);
+            const x = start.x + dx * step * (NODE_W + 40);
+            const y = start.y + dy * step * (NODE_H + 40);
+            if (free(x, y) && (!inSight || seen(x, y)))
+              return place(x, y, inSight);
           }
-    place(start.x, start.y);
+    place(start.x, start.y, false);
   };
   const onDrop = (e: DragEvent) => {
     const kind = e.dataTransfer.getData(DRAG_TYPE);

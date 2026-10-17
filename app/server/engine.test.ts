@@ -748,8 +748,18 @@ test("switching an explored map to Learn keeps every node and thread", async () 
   assert.match(calls[1].req.message, /Remove nothing/);
 });
 
+test("Check my design waits for a part of your own: the brief's clients are not a design", async () => {
+  const { engine, calls } = setup(designMap());
+  assert.match(
+    (await act(engine, design("check"))).error ?? "",
+    /Place a few components first/,
+  );
+  assert.equal(calls.length, 0, "no review is paid for");
+});
+
 test("a second Check my design while one runs asks for no second review", async () => {
   const { engine, calls } = setup(designMap());
+  await act(engine, design("add", { kind: "service", x: 300, y: 220 }));
   const first = act(engine, design("check"));
   await settled(calls, 1);
   assert.deepEqual(await act(engine, design("check")), {});
@@ -825,6 +835,28 @@ test("a Design map refuses the core actions its screen has no use for", async ()
   calls[0].release("Think about when Alice sees sent.");
   await hint;
   assert.equal(m.chat.at(-1)?.nodeId, "dd");
+  // settled in its thread, it says what comes next, for the sidebar
+  const answer = act(engine, {
+    type: "thread",
+    nodeId: "dd",
+    text: "Acks per hop, and a retry queue.",
+  });
+  await settled(calls, 2);
+  calls[1].release(
+    'Right.\n```map\n{"ops":[{"op":"update","id":"dd","status":"answered"},{"op":"next","text":"Now size the chat service.","settles":[]},{"op":"brief","title":"Rewritten"}]}\n```',
+  );
+  await answer;
+  const ds = m.data?.design as {
+    next: { text: string };
+    brief: { title: string };
+  };
+  assert.equal(m.nodes.dd.status, "answered");
+  assert.equal(ds.next.text, "Now size the chat service.");
+  assert.equal(
+    ds.brief.title,
+    "Design Twitter",
+    "a thread cannot rewrite the brief",
+  );
   // a request with no type is plainly invalid
   assert.deepEqual(await act(engine, {} as Parameters<typeof act>[1]), {
     error: "That request is not valid.",

@@ -1,6 +1,6 @@
 // Numbers and colours the Design screen shares.
 
-import type { Group, Load } from "../shared.ts";
+import { timesCap, type Group, type Load } from "../shared.ts";
 
 export const fmt = (n: number): string =>
   !Number.isFinite(n)
@@ -78,9 +78,7 @@ export const STATUS_TONE: Record<
 
 // how far over or under capacity, short enough for a card: "70%", "3.5× cap", "7k× cap"
 export const utilText = (util: number): string =>
-  util > 1
-    ? `${util >= 100 ? fmt(Math.round(util)) : +util.toFixed(1)}× cap`
-    : `${Math.round(util * 100)}%`;
+  util > 1 ? `${timesCap(util)}× cap` : `${Math.round(util * 100)}%`;
 
 // A part's id the model let slip into its text ("service-3") reads as the
 // part's name instead: ids made from a name (with a dash or a number, or in
