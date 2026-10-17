@@ -137,6 +137,11 @@ export type ExploreState = {
   added: Record<string, true>;
 };
 
+// a Fill's labels, from its button and from Next: the board's Fill button
+// knows one is on its way by them
+export const FILLING_LABEL = "Filling the board";
+export const FILL_LABEL = "Fill the board";
+
 export const cellKey = (option: string, row: string) => `${option}|${row}`;
 
 // A check still to run is not a fact: Claude starts its summary "To check:",
@@ -279,6 +284,7 @@ export type OpenKind =
   | "question"
   | "no-against"
   | "no-premortem"
+  | "chosen-unsure"
   | "broken";
 
 export type OpenItem = {
@@ -289,8 +295,9 @@ export type OpenItem = {
   q: string;
 };
 
-// "run" is yours, not Claude's: a check Claude picked to run first, which
-// Next opens (its thread is where you say what it found)
+// "run" and "tell" are yours, not Claude's: a check Claude picked to run
+// first, which Next opens (its thread is where you say what it found), and a
+// must Claude cannot tell without you, whose want Next opens
 export type GapKind =
   | "fill"
   | "something"
@@ -299,13 +306,18 @@ export type GapKind =
   | "wrap"
   | "question"
   | "run"
+  | "tell"
   | "sum";
+
+// Next's gaps you act on yourself: pressing Next pays for no move
+export const YOURS: ReadonlySet<GapKind> = new Set(["run", "tell"]);
 
 export type Gap = {
   kind: GapKind;
   q: string;
   // the option, or for "run" the check
   option?: string;
+  // the want ("ask", and for "tell" the one Next opens)
   want?: string;
   label: string;
   reason: string;

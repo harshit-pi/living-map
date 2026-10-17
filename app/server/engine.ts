@@ -50,6 +50,10 @@ export type TurnOptions = {
   // the instructions this move needs beyond the canvas's job (see prompts.ts)
   sections?: readonly Section[];
   keep?: boolean; // may add and change nodes, never remove one
+  // what the working bar says once the move's ops show what it is doing
+  // (null: keep the label): the first move's label is a guess from the
+  // question's words until the model frames it
+  relabel?: (m: StoredMap) => string | null;
 };
 
 export type Engine = ReturnType<typeof createEngine>;
@@ -295,6 +299,8 @@ export function createEngine({
               console.error("[move] an op could not be applied:", e);
             }
             applied = ops.length;
+            const label = opts.relabel?.(m);
+            if (label && state.working) state.working.label = label;
             const now = Date.now();
             if (now - lastPush > 120) {
               lastPush = now;

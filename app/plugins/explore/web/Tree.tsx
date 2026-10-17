@@ -1,10 +1,17 @@
 import {
   Background,
+  BaseEdge,
   Controls,
+  Handle,
+  Position,
   ReactFlow,
   useNodesInitialized,
   useReactFlow,
   useStore,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps,
 } from "@xyflow/react";
 import {
   useEffect,
@@ -15,37 +22,103 @@ import {
   useState,
 } from "react";
 
+import {
+  CARD_W,
+  frameOf,
+  SPINE,
+  treeLayout,
+  type TreeEdge,
+} from "./treeLayout.ts";
 import { exploreView, tagOf } from "./view.ts";
-import type { MapDoc } from "../../../shared/model.ts";
+import type { MapDoc, MapNode } from "../../../shared/model.ts";
+import { lookOf } from "../../../web/components/look.ts";
 import { NodeCard } from "../../../web/components/NodeCard.tsx";
-import { layout, setAside } from "../../../web/lib/layout.ts";
+import { setAside } from "../../../web/lib/layout.ts";
 
 // the floating message box, and Claude's reply above it, cover the bottom of
 // the canvas: frame above both
-const FRAME = {
-  top: "24px",
-  left: "24px",
-  right: "24px",
-  bottom: "200px",
-} as const;
+const FRAME = { top: 24, left: 24, right: 24, bottom: 200 };
+const px = (f: typeof FRAME) =>
+  ({
+    top: `${f.top}px`,
+    left: `${f.left}px`,
+    right: `${f.right}px`,
+    bottom: `${f.bottom}px`,
+  }) as const;
 
-const nodeTypes = { map: NodeCard };
+// The card as Learn draws it, with the Tree's own handles: a question's
+// line leaves its bottom for the row under it, a column's runs down the
+// spine near the left edge and into each card's left side. NodeCard keeps
+// its own left and right handles, which no edge here uses.
+function TreeCard(props: NodeProps) {
+  const hidden = { opacity: 0 };
+  return (
+    <>
+      <NodeCard {...props} />
+      <Handle id="top" type="target" position={Position.Top} style={hidden} />
+      <Handle id="side" type="target" position={Position.Left} style={hidden} />
+      <Handle
+        id="down"
+        type="source"
+        position={Position.Bottom}
+        style={hidden}
+      />
+      <Handle
+        id="spine"
+        type="source"
+        position={Position.Bottom}
+        style={{ ...hidden, left: SPINE }}
+      />
+    </>
+  );
+}
+const nodeTypes = { map: TreeCard };
 
-// the smallest zoom a card can still be read at: a tree too big to fit at
-// it opens at this zoom on its root (left edge, middle of the room above the
-// message box), and you pan for the rest
+// Square lines along the waypoints the layout gave: under the question
+// along its bus (and for a wrapped row down the trunk on the left to that
+// row's bus), then down into the card; down a column's spine, then across.
+function TreeLine({
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  data,
+  style,
+}: EdgeProps) {
+  const e = data as TreeEdge | undefined;
+  const path =
+    e?.kind === "row" && e.bus !== undefined
+      ? `M ${sourceX} ${sourceY} V ${e.bus}` +
+        (e.trunk !== undefined && e.rowBus !== undefined
+          ? ` H ${e.trunk} V ${e.rowBus}`
+          : "") +
+        ` H ${targetX} V ${targetY}`
+      : `M ${sourceX} ${sourceY} V ${targetY} H ${targetX}`;
+  return <BaseEdge path={path} style={style} />;
+}
+const edgeTypes = { tree: TreeLine };
+
+// the smallest zoom a card can still be read at: a tree too big to read
+// whole opens at its question and the cards right under it, and you pan
+// down their columns for the rest
 const READABLE = 0.7;
-const PAD = 24;
-const BELOW = 200;
-// the whole tree, above the message box: on first load and from the fit button
-const WHOLE = { padding: FRAME, maxZoom: 1, minZoom: READABLE };
 // the node panel (420px wide, 12px from the edge) covers the right of the
 // canvas: new work is framed to its left, unless the canvas is too narrow
 const PANEL_W = 420 + 12;
 
-// Explore's Tree tab: the question as a left-to-right tree of options and
-// facts. The app owns the selection: a click selects one node, Shift-click
-// adds or removes, a click on empty canvas clears.
+// Rough height from text, so the tree lays out before the browser measures.
+function heightOf(n: MapNode) {
+  const lines = (s: string, per: number) =>
+    Math.max(1, Math.ceil(s.length / per));
+  return (
+    54 + lines(n.title, 22) * 21 + (n.summary ? lines(n.summary, 30) * 18 : 0)
+  );
+}
+
+// Explore's Tree tab: the question on top, what is under it side by side,
+// and each branch down its own column (treeLayout.ts). The app owns the
+// selection: a click selects one node, Shift-click adds or removes, a click
+// on empty canvas clears. A selected card unfolds its branch.
 export function Tree({
   map,
   showDropped,
@@ -69,7 +142,7 @@ export function Tree({
   const frame = useMemo(
     () =>
       panelOpen && width > PANEL_W * 2
-        ? { ...FRAME, right: `${PANEL_W + 24}px` as const }
+        ? { ...FRAME, right: PANEL_W + 24 }
         : FRAME,
     [panelOpen, width],
   );
@@ -94,13 +167,6 @@ export function Tree({
       ),
     [map, showDropped, wants],
   );
-  const laid = useMemo(() => layout(visible), [visible]);
-  const threads = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const t of Object.values(map.threads ?? {}))
-      c[t.nodeId] = (c[t.nodeId] ?? 0) + 1;
-    return c;
-  }, [map.threads]);
   // each card's measured size, kept on the nodes: the layout hands over new
   // nodes on every change, and one without a size is hidden until React Flow
   // measures it again, which a card whose size did not change may never get,
@@ -108,105 +174,157 @@ export function Tree({
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
   >({});
+  // A set-aside branch, and a settled question below the root, folds to its
+  // own card: what is under it is done with, and drawn out it pushed the
+  // open work off the screen. Selecting the card, or anything under it,
+  // unfolds it.
+  const settled = useMemo(
+    () =>
+      new Set(
+        (view?.questions ?? [])
+          .filter((q) => q.settled && q.id !== view?.root)
+          .map((q) => q.id),
+      ),
+    [view],
+  );
+  const opened = useMemo(() => {
+    const ids = new Set<string>();
+    for (const id of selected)
+      for (
+        let n: MapNode | undefined = map.nodes[id], i = 0;
+        n && i < 100;
+        i++
+      ) {
+        ids.add(n.id);
+        n = n.parent ? map.nodes[n.parent] : undefined;
+      }
+    return ids;
+  }, [selected, map.nodes]);
+  // as many columns across as fit at a readable zoom; then a new row
+  const perRow = Math.max(
+    3,
+    Math.floor(
+      ((width || window.innerWidth) - FRAME.left - FRAME.right) /
+        READABLE /
+        (CARD_W + 2 * 24 + 32),
+    ),
+  );
+  const tree = useMemo(
+    () =>
+      treeLayout(visible, {
+        perRow,
+        heightOf: (n) => sizes[n.id]?.height ?? heightOf(n),
+        folds: (n) =>
+          !opened.has(n.id) &&
+          (settled.has(n.id) || (!!n.parent && setAside(map.nodes, n.id))),
+      }),
+    [visible, perRow, sizes, opened, settled, map.nodes],
+  );
+  const laid = useMemo(() => {
+    const shown = visible.filter((n) => tree.boxes[n.id]);
+    return {
+      nodes: shown.map((n): Node => ({
+        id: n.id,
+        type: "map",
+        position: { x: tree.boxes[n.id].x, y: tree.boxes[n.id].y },
+        data: { node: n },
+      })),
+      edges: tree.edges.map((e): Edge => {
+        const n = map.nodes[e.target];
+        return {
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.kind === "row" ? "down" : "spine",
+          targetHandle: e.kind === "row" ? "top" : "side",
+          type: "tree",
+          data: e,
+          style: {
+            stroke:
+              n?.status === "dropped" || n?.dropped
+                ? "var(--color-line-strong)"
+                : n?.status === "chosen"
+                  ? "var(--color-success)"
+                  : "var(--color-faint)",
+            strokeWidth: n?.status === "chosen" ? 2 : 1.2,
+          },
+        };
+      }),
+    };
+  }, [visible, tree, map.nodes]);
+  const threads = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const t of Object.values(map.threads ?? {}))
+      c[t.nodeId] = (c[t.nodeId] ?? 0) + 1;
+    return c;
+  }, [map.threads]);
   const nodes = useMemo(
     () =>
-      laid.nodes.map((n) => ({
-        ...n,
-        measured: sizes[n.id],
-        selected: selected.includes(n.id),
-        data: {
-          ...n.data,
-          purpose: map.purpose,
-          threads: threads[n.id] ?? 0,
-          working: n.id === workingId,
-          tag: tagOf(view, map.nodes, map.nodes[n.id]),
-        },
-      })),
-    [laid, sizes, selected, map.purpose, map.nodes, view, threads, workingId],
+      laid.nodes.map((n) => {
+        const node = map.nodes[n.id];
+        const tag = tagOf(view, map.nodes, node);
+        const folded = tree.folded[n.id];
+        return {
+          ...n,
+          measured: sizes[n.id],
+          selected: selected.includes(n.id),
+          data: {
+            ...n.data,
+            purpose: map.purpose,
+            threads: threads[n.id] ?? 0,
+            working: n.id === workingId,
+            // the one line a folded branch is summed up in
+            tag: folded
+              ? `${tag ?? lookOf(node, map.purpose).tag} · ▸ ${folded} folded`
+              : tag,
+          },
+        };
+      }),
+    [
+      laid,
+      tree,
+      sizes,
+      selected,
+      map.purpose,
+      map.nodes,
+      view,
+      threads,
+      workingId,
+    ],
   );
   const { fitView, getViewport, setViewport } = useReactFlow();
+  const transform = useStore((s) => s.transform);
 
-  // The box around some laid-out cards, in tree units.
-  const boundsOf = (ids: Set<string>) => {
-    const ns = laid.nodes.filter((n) => ids.has(n.id));
-    const x = Math.min(...ns.map((n) => n.position.x));
-    const y = Math.min(...ns.map((n) => n.position.y));
-    const right = Math.max(
-      ...ns.map((n) => n.position.x + (sizes[n.id]?.width ?? 260)),
-    );
-    const bottom = Math.max(
-      ...ns.map((n) => n.position.y + (sizes[n.id]?.height ?? 120)),
-    );
-    return { x, y, w: right - x, h: bottom - y };
-  };
-  // The whole tree, or, when it cannot be read whole, the root and its
-  // options (for a why-question, every cause): those are where it stands.
-  // The checks and steps under the root are left to pan to: counted in, they
-  // made the box too tall, and the top causes ended above the room. A fit at
-  // the smallest readable zoom would frame the middle of the bounds, which
-  // on a lopsided tree is no card in particular. When even the options do
-  // not fit, the room starts at the first of them, moved down only as far as
-  // keeps Claude's guess (else the root) in view. The first frame is
-  // instant, so the camera does not sweep from one frame to another as the
-  // tree opens.
-  const frameWhole = async (duration = 300) => {
-    await fitView({ ...WHOLE, duration });
-    const root = laid.nodes.find((n) => !map.nodes[n.id]?.parent);
-    if (!root || getViewport().zoom > READABLE + 0.001) return;
-    const z = READABLE;
-    const room = Math.max(height - BELOW, 200) - PAD;
-    const all = boundsOf(new Set(laid.nodes.map((n) => n.id)));
-    const under = laid.nodes.filter((n) => map.nodes[n.id]?.parent === root.id);
-    const options = under.filter((n) => map.nodes[n.id]?.kind === "option");
-    const near = boundsOf(
-      new Set([
-        root.id,
-        ...(options.length ? options : under).map((n) => n.id),
-      ]),
-    );
-    // across: the whole width centred when it fits, else from the root
-    const x =
-      all.w * z <= width - 2 * PAD
-        ? (width - all.w * z) / 2 - all.x * z
-        : PAD - all.x * z;
-    // down: the whole tree, else the root and its options, centred in the
-    // room above the message box; else the stretch of them that shows the
-    // most (the root and the options in play), Claude's guess always among
-    // them, the earliest of equals
-    const box = all.h * z <= room ? all : near;
-    const lead = view?.stand[root.id]?.lead;
-    const keep = boundsOf(
-      new Set([lead && laid.nodes.some((n) => n.id === lead) ? lead : root.id]),
-    );
-    const span = room / z;
-    const counted = [
-      root,
-      ...options.filter((n) => !setAside(map.nodes, n.id)),
-    ].map((n) => boundsOf(new Set([n.id])));
-    const shows = (from: number) =>
-      counted.filter((b) => b.y >= from && b.y + b.h <= from + span).length;
-    const top =
-      [keep.y + keep.h - span, ...counted.map((b) => b.y)]
-        .map((from) => Math.max(from, near.y))
-        .filter((from) => from <= keep.y && from + span >= keep.y + keep.h)
-        .sort((a, c) => shows(c) - shows(a) || a - c)[0] ?? keep.y;
-    const y =
-      box.h * z <= room
-        ? PAD + (room - box.h * z) / 2 - box.y * z
-        : PAD - top * z;
-    await setViewport({ x, y, zoom: z }, { duration: duration && 200 });
-  };
+  // the room the tree is framed in, on screen, above the message box and
+  // beside the panel
+  const roomOf = (f: typeof FRAME) => ({
+    left: f.left,
+    top: f.top,
+    w: Math.max(width - f.left - f.right, 200),
+    h: Math.max(height - f.top - f.bottom, 200),
+  });
 
-  // The camera holds still: it frames the whole tree when the tree first
-  // opens and from the fit button, never on its own as Claude adds nodes, so
-  // what you were reading stays where you left it. New nodes light up a pill
-  // instead, and the pill frames them.
+  // The whole tree when it reads whole, else its question and the cards
+  // right under it (frameOf). The first frame is instant, so the camera
+  // does not sweep from one frame to another as the tree opens.
+  const frameWhole = (duration = 300) =>
+    setViewport(
+      frameOf(tree, roomOf(framing.current), { readable: READABLE }),
+      { duration },
+    );
+
+  // The camera holds still: it frames the tree when it first opens and from
+  // the fit button, never on its own as Claude adds nodes, so what you were
+  // reading stays where you left it. New nodes light up a pill instead, and
+  // the pill frames them.
   // the layout as it is when the fit runs, not when it was asked for
   const frameNow = useEffectEvent(
     (duration: number) => void frameWhole(duration),
   );
-  // once the cards are measured, or there is nothing to frame yet
-  const measured = useNodesInitialized();
+  // once the cards are measured and laid out at their measured size, or
+  // there is nothing to frame yet
+  const measured =
+    useNodesInitialized() && laid.nodes.every((n) => sizes[n.id]);
   const count = laid.nodes.length;
   // A lone question is no tree yet: while Claude's first move lays it out,
   // card by card, the tree is framed whole as it grows, and once more when
@@ -227,11 +345,11 @@ export function Tree({
   const [seen, setSeen] = useState(() => new Set(Object.keys(map.nodes)));
   if (growing && seen.size !== Object.keys(map.nodes).length)
     setSeen(new Set(Object.keys(map.nodes)));
-  // The layout re-centres a parent on its children as they change, so the
-  // card you are reading would jump: the camera follows it instead (the
-  // card you selected, else the one nearest the middle of what you see,
-  // where it was before the change), so it stays where it was on screen.
-  // The root alone moved the rest under a still camera.
+  // The layout moves cards as the tree changes (a branch unfolds, a column
+  // grows), so the card you are reading would jump: the camera follows it
+  // instead (the card you selected, else the one nearest the middle of what
+  // you see, where it was before the change), so it stays where it was on
+  // screen.
   const lastAt = useRef<Map<string, { x: number; y: number }> | null>(null);
   useLayoutEffect(() => {
     const now = new Map(laid.nodes.map((n) => [n.id, n.position]));
@@ -243,11 +361,11 @@ export function Tree({
     let id = selected.find(both);
     if (!id) {
       const cx = (width / 2 - v.x) / v.zoom;
-      const cy = (Math.max(height - BELOW, 200) / 2 - v.y) / v.zoom;
+      const cy = (Math.max(height - FRAME.bottom, 200) / 2 - v.y) / v.zoom;
       let best = Infinity;
       for (const [k, p] of was) {
         if (!now.has(k)) continue;
-        const sz = sizes[k] ?? { width: 260, height: 120 };
+        const sz = sizes[k] ?? { width: CARD_W, height: 120 };
         const d =
           (p.x + sz.width / 2 - cx) ** 2 + (p.y + sz.height / 2 - cy) ** 2;
         if (d < best) {
@@ -275,7 +393,7 @@ export function Tree({
     void (async () => {
       await fitView({
         nodes: [...ids].map((id) => ({ id })),
-        padding: framing.current,
+        padding: px(framing.current),
         duration: 300,
         maxZoom: 1,
         minZoom: READABLE,
@@ -287,10 +405,30 @@ export function Tree({
         ...laid.nodes.filter((n) => ids.has(n.id)).map((n) => n.position.y),
       );
       if (v.zoom <= READABLE + 0.001 && Number.isFinite(top))
-        await setViewport({ ...v, y: PAD - top * v.zoom }, { duration: 200 });
+        await setViewport(
+          { ...v, y: FRAME.top - top * v.zoom },
+          { duration: 200 },
+        );
     })();
     setSeen(new Set([...seen, ...Object.keys(map.nodes)]));
   };
+  // The cards past the bottom of the room, and above its top: a tree too
+  // tall to read whole runs on down its columns, and the pill says so (cut
+  // cards under the message box said nothing).
+  const [tx, ty, zoom] = transform;
+  const roomBottom = height - FRAME.bottom;
+  const beyond = (dir: 1 | -1) =>
+    Object.values(tree.boxes).filter((b) =>
+      dir > 0 ? b.y * zoom + ty > roomBottom : (b.y + b.h) * zoom + ty < 0,
+    );
+  const below = height ? beyond(1) : [];
+  const above = height ? beyond(-1) : [];
+  // a page down (or up) the columns, keeping a little of what you saw
+  const pan = (dir: 1 | -1) =>
+    void setViewport(
+      { x: tx, y: ty - dir * 0.8 * (roomBottom - FRAME.top), zoom },
+      { duration: 300 },
+    );
 
   return (
     <>
@@ -298,6 +436,7 @@ export function Tree({
         nodes={nodes}
         edges={laid.edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         elementsSelectable={false}
         nodesDraggable={false}
         nodesConnectable={false}
@@ -340,8 +479,7 @@ export function Tree({
         />
       </ReactFlow>
       {fresh.length > 0 && (
-        // beside the zoom buttons: on a left-to-right tree the corner above
-        // the root is the one a card is least often in
+        // beside the zoom buttons, in the corner a card is least often in
         <button
           onClick={showNew}
           title="Frame the nodes Claude added since you last looked"
@@ -349,6 +487,27 @@ export function Tree({
         >
           {fresh.length} new ▸
         </button>
+      )}
+      {(above.length > 0 || below.length > 0) && (
+        // bottom left, beside the message box
+        <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-1">
+          {above.length > 0 && (
+            <button
+              onClick={() => pan(-1)}
+              className="rounded-full bg-surface px-2.5 py-0.5 text-xs text-body shadow-md ring-1 ring-line hover:text-ink"
+            >
+              ▴ {above.length} more above
+            </button>
+          )}
+          {below.length > 0 && (
+            <button
+              onClick={() => pan(1)}
+              className="rounded-full bg-surface px-2.5 py-0.5 text-xs text-body shadow-md ring-1 ring-line hover:text-ink"
+            >
+              ▾ {below.length} more below
+            </button>
+          )}
+        </div>
       )}
     </>
   );

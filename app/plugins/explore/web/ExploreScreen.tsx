@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { AfterChoice } from "./AfterChoice.tsx";
 import { Board } from "./Board.tsx";
 import { CommitSheet } from "./CommitSheet.tsx";
-import { TabAndShape } from "./Header.tsx";
+import { SetAsideToggle, TabAndShape } from "./Header.tsx";
 import { PanelActions, PanelExtra } from "./PanelParts.tsx";
 import { StandLine } from "./StandLine.tsx";
 import { Tree } from "./Tree.tsx";
@@ -71,8 +71,9 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
         <StandLine here={here} q={standOn} onBoard={!onTree} />
       )}
       {view && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-1.5 lg:hidden">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-1.5 xl:hidden">
           <TabAndShape ws={ws} />
+          <SetAsideToggle ws={ws} className="flex" />
         </div>
       )}
       <div className="relative min-h-0 flex-1">

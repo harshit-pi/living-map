@@ -34,6 +34,8 @@ import {
   MARK_LOOK,
   MARKS,
   NAME_MAX,
+  FILL_LABEL,
+  FILLING_LABEL,
   PLUGIN_ID,
   SHAPE_WORD,
   SHAPES,
@@ -42,6 +44,7 @@ import {
   type Board,
   type Gap,
   type Outcome,
+  type Shape,
   type Weight,
 } from "./shared.ts";
 import * as canvas from "../../server/actions/canvas.ts";
@@ -91,12 +94,13 @@ WRAP: the ACTION names the option chosen, its question and your last lead. It is
 
 const SUGGEST = `SUGGEST WANTS for the question named in the ACTION: from what is on the map, write 4-6 want ops for what the user seems to want. Where an existing fact states a want, reuse its id so it becomes the row. No cells.`;
 
-const LAYING_OUT = "Laying out the board";
-// a why-question opens as a tree of causes, not a board
-const LAYING_OUT_CAUSES = "Laying out the causes";
-const FILLING = "Filling the board";
-// Next's label for a fill (core.ts nextGap)
-const FILL_LABEL = "Fill the board";
+// what the first move lays out, by the shape Claude frames the root as
+const LAYING_OUT: Record<Shape, string> = {
+  choose: "Laying out the board",
+  causes: "Laying out the causes",
+  open: "Laying out the question",
+};
+const FILLING = FILLING_LABEL;
 const SUGGESTING = "Suggesting what to weigh";
 const ANOTHER = "Looking for another option";
 
@@ -363,6 +367,10 @@ function gapTurn(ctx: Ctx, gap: Gap) {
   // yours to run: the screen opens the check, and no move is paid for
   if (gap.kind === "run")
     return fail("Run that check, then say what it found in its thread.");
+  if (gap.kind === "tell")
+    return fail(
+      "Claude can't tell this must without you: say what you know in the want's thread, or rate the cell yourself.",
+    );
   ctx.say("Next");
   // causes are told apart by a fact, never by a choice
   if (
@@ -487,7 +495,11 @@ function want(ctx: Ctx, a: Raw): ActionResult {
     n.updatedAt = Date.now();
     b.rows.push({ id: n.id, weight, suggested: false, by: "you" });
     touched(b);
-    return ok(ctx, `Added what you want: ${t(n)} (${weight}).`);
+    // the board keeps the new want on screen by its id, folded group or not
+    return {
+      ...ok(ctx, `Added what you want: ${t(n)} (${weight}).`),
+      nodeId: n.id,
+    };
   }
   const row = b.rows.find((r) => r.id === id);
   const n = own(nodes, id);
@@ -632,9 +644,15 @@ export const explore: ServerPlugin = {
       `START EXPLORE: "${ctx.map.title}".`,
       ctx.settings,
       {
-        label: /^\s*why\b/i.test(ctx.map.title)
-          ? LAYING_OUT_CAUSES
-          : LAYING_OUT,
+        // a guess from the words until the frame op says what it is: "What
+        // could explain…" is a causes question too
+        label:
+          LAYING_OUT[/^\s*why\b/i.test(ctx.map.title) ? "causes" : "choose"],
+        relabel: (m) => {
+          const root = rootOf(m.nodes);
+          const shape = root && own(peek(m).boards, root.id)?.shape;
+          return shape ? LAYING_OUT[shape] : null;
+        },
         sections: ["start"],
       },
     );

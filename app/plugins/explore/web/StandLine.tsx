@@ -102,15 +102,22 @@ export function StandLine({
                 {" "}
                 · Claude agrees{stand.sure !== undefined && ` ~${stand.sure}%`}
               </span>
+            ) : stand?.lead ? (
+              <span className="text-muted">
+                {" "}
+                · Claude leads{" "}
+                <span className="text-primary-strong">
+                  ★ {title(stand.lead)}
+                </span>
+                {stand.sure !== undefined && ` ~${stand.sure}%`}
+              </span>
             ) : (
-              stand?.lead && (
-                <span className="text-muted">
+              // with no lead Claude agrees with no choice: said here, not
+              // only in a caption that is gone in seconds
+              stand && (
+                <span className="text-muted" title={stand.line}>
                   {" "}
-                  · Claude leads{" "}
-                  <span className="text-primary-strong">
-                    ★ {title(stand.lead)}
-                  </span>
-                  {stand.sure !== undefined && ` ~${stand.sure}%`}
+                  · Claude: no lead yet
                 </span>
               )
             )}

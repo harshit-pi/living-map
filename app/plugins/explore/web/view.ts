@@ -28,12 +28,16 @@ type Ui = {
   opened: Record<string, Weight[]>;
 };
 
+// v2: the first record also held every group a want was added to, which
+// then never folded again; what you opened by hand is quick to open again
+const OPENED = "explore.opened.v2";
+
 let ui: Ui = {
   mapId: null,
   tab: null,
   board: null,
   showDropped: true,
-  opened: stored<Record<string, Weight[]>>("explore.opened", {}),
+  opened: stored<Record<string, Weight[]>>(OPENED, {}),
 };
 const listeners = new Set<() => void>();
 const subscribe = (cb: () => void) => {
@@ -97,7 +101,7 @@ export function useOpened(
       if (open) cur.add(w);
       else cur.delete(w);
       const opened = { ...ui.opened, [k]: [...cur] };
-      store("explore.opened", opened);
+      store(OPENED, opened);
       set({ opened });
     },
   ];
@@ -149,18 +153,29 @@ export function tagOf(
     return view.questions.some((q) => q.runFirst?.id === n.id)
       ? "to check · ▶ run first"
       : "to check";
-  if (n.kind !== "option") return undefined;
+  if (n.kind !== "option" || nodes[n.parent]?.kind !== "question")
+    return undefined;
   const shape =
     view.boards[n.parent]?.shape ??
     view.questions.find((p) => p.id === n.parent)?.shape;
-  if (shape !== "causes" || nodes[n.parent]?.kind !== "question")
-    return undefined;
+  if (!shape || shape === "open") return undefined;
+  // an option on a choice carries the board's badges too: on the Tree a
+  // sub-choice is read as cards, and its lead and case against were only
+  // on its board
+  const causes = shape === "causes";
   const against = view.boards[n.parent]?.columns.find(
     (c) => c.id === n.id,
   )?.against;
   return [
-    n.status === "chosen" ? "✓ marked likely" : "possible cause",
-    view.stand[n.parent]?.lead === n.id && "★ Claude's guess",
+    n.status === "chosen"
+      ? causes
+        ? "✓ marked likely"
+        : "✓ your choice"
+      : causes
+        ? "possible cause"
+        : "option",
+    view.stand[n.parent]?.lead === n.id &&
+      (causes ? "★ Claude's guess" : "★ Claude's lead"),
     against && `against: survives ${against.survives}`,
   ]
     .filter(Boolean)

@@ -117,6 +117,25 @@ test("a move streams the model reply onto the canvas, through the provider only"
   assert.equal(m.usage.turns, 1, "usage recorded when the provider reports it");
 });
 
+test("the first move's label follows the shape Claude frames, not the question's first word", async () => {
+  const { engine, calls, events } = setup();
+  const done = act(engine, {
+    type: "new",
+    text: "What could explain a sudden rise in AWS costs?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  assert.equal(engine.state.working?.label, "Laying out the board");
+  calls[0].release(
+    'Laid out.\n```map\n{"ops":[\n{"op":"add","id":"q","parent":null,"kind":"question","title":"What could explain it?"},\n{"op":"add","id":"c1","parent":"q","kind":"option","title":"Orphaned volumes"},\n{"op":"frame","q":"q","shape":"causes"}\n]}\n```',
+  );
+  await done;
+  const labels = events.flatMap((e) =>
+    e.type === "map" && e.working ? [e.working.label] : [],
+  );
+  assert.equal(labels.at(-1), "Laying out the causes");
+});
+
 test("moves asked while the model is busy wait their turn instead of being refused", async () => {
   const { engine, calls } = setup();
   const first = act(engine, {

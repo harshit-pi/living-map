@@ -17,6 +17,8 @@ import { Btn } from "./ui.tsx";
 import { anchorOf, useOpened, type Anchor, type Here } from "./view.ts";
 import {
   cellKey,
+  FILL_LABEL,
+  FILLING_LABEL,
   MARK_LOOK,
   NAME_MAX,
   WEIGHT_WORD,
@@ -67,6 +69,10 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [opened, setOpened] = useOpened(ws.map.id, q);
+  // the wants you added while on this board: they stay on screen under a
+  // folded group's counts. Adding one is no choice to open its group, which
+  // then never folded again.
+  const [added, setAdded] = useState<string[]>([]);
   // The board scrolls with its pane (ExploreScreen), both ways, and never
   // on its own: the option names stay pinned on top and the rail on the
   // left. The lines that span the board (the banner, + what else do you
@@ -113,7 +119,13 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
         </div>
       ),
     });
-  else if (hasRows && !anyCell)
+  else if (hasRows && !anyCell) {
+    // a Fill already on its way (from here or from Next) is not asked twice
+    const filling = [ws.live.working, ...ws.live.waiting].some(
+      (m) =>
+        m?.nodeId === q &&
+        (m.label === FILLING_LABEL || m.label === `Next: ${FILL_LABEL}`),
+    );
     lines.push({
       key: "frame",
       span: (
@@ -122,12 +134,18 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
             Claude suggested what to weigh. Keep, skip or add your own, mark the
             musts, then press <b>Fill the board</b>.
           </span>
-          <Btn small primary onClick={() => void act("fill", { q })}>
-            Fill the board ▸
+          <Btn
+            small
+            primary
+            disabled={filling}
+            onClick={() => void act("fill", { q })}
+          >
+            {filling ? "Filling…" : "Fill the board ▸"}
           </Btn>
         </div>
       ),
     });
+  }
 
   for (const g of board.groups) {
     const folded = g.folded && !opened.has(g.weight);
@@ -147,28 +165,27 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
         ? (c) => <FoldedCounts board={board} g={g} col={c} />
         : undefined,
     });
-    if (!folded)
-      for (const r of g.rows)
-        lines.push({
-          key: `r-${r.id}`,
-          rail: (
-            <button
-              onClick={() => here.select(r.id)}
-              title="Open it: how much it matters, and its thread"
-              className="flex w-full items-start justify-between gap-2 px-3 py-1.5 text-left text-[13px] leading-snug text-ink hover:bg-panel"
-            >
-              <span className="min-w-0">{r.title}</span>
-              {r.by === "you" && (
-                <span className="shrink-0 text-[10.5px] font-semibold text-muted">
-                  you
-                </span>
-              )}
-            </button>
-          ),
-          cell: (c) => (
-            <Cell here={here} board={board} col={c} row={r} onOpen={openCell} />
-          ),
-        });
+    for (const r of g.rows.filter((x) => !folded || added.includes(x.id)))
+      lines.push({
+        key: `r-${r.id}`,
+        rail: (
+          <button
+            onClick={() => here.select(r.id)}
+            title="Open it: how much it matters, and its thread"
+            className="flex w-full items-start justify-between gap-2 px-3 py-1.5 text-left text-[13px] leading-snug text-ink hover:bg-panel"
+          >
+            <span className="min-w-0">{r.title}</span>
+            {r.by === "you" && (
+              <span className="shrink-0 text-[10.5px] font-semibold text-muted">
+                you
+              </span>
+            )}
+          </button>
+        ),
+        cell: (c) => (
+          <Cell here={here} board={board} col={c} row={r} onOpen={openCell} />
+        ),
+      });
   }
   for (const r of board.suggestions)
     lines.push({
@@ -230,11 +247,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
       <AddWant
         here={here}
         q={q}
-        // the group you add to stays open, so the want you typed stays on
-        // screen when the board grows past the fold
-        onAdded={(w) => {
-          if (w !== "must" && !opened.has(w)) setOpened(w, true);
-        }}
+        onAdded={(id) => setAdded((a) => [...a, id])}
       />
     ),
   });
@@ -529,21 +542,26 @@ function ColumnHead({
           <span className="text-muted">you</span>
         )}
       </div>
+      {/* the title and summary are one button: a click on the summary
+          opened nothing, and a pointer said nothing was there to click */}
       <button
         onClick={() => here.select(col.id)}
         title="Open it: threads, the case against, set aside"
-        className={`mt-0.5 text-left text-[13.5px] font-semibold leading-snug hover:text-primary-strong ${greyed ? "text-muted" : "text-ink"} ${col.faded ? "line-through decoration-line-strong" : ""}`}
+        className="group mt-0.5 cursor-pointer text-left"
       >
-        {col.title}
-      </button>
-      {col.summary && (
-        <div
-          className={`mt-0.5 line-clamp-3 text-[12px] leading-snug ${greyed ? "text-faint" : "text-body"}`}
-          title={col.summary}
+        <span
+          className={`block text-[13.5px] font-semibold leading-snug group-hover:text-primary-strong ${greyed ? "text-muted" : "text-ink"} ${col.faded ? "line-through decoration-line-strong" : ""}`}
         >
-          {col.summary}
-        </div>
-      )}
+          {col.title}
+        </span>
+        {col.summary && (
+          <span
+            className={`mt-0.5 line-clamp-3 text-[12px] leading-snug ${greyed ? "text-faint" : "text-body"}`}
+          >
+            {col.summary}
+          </span>
+        )}
+      </button>
       <div className="mt-auto pt-1 text-[11.5px] leading-snug text-muted">
         {col.threads > 0 && <span title="Side threads">💬{col.threads}</span>}
         {col.takeaway && (
@@ -586,7 +604,13 @@ function Strip({
 }
 
 function AgainstCell({ here, col }: { here: Here; col: ColumnView }) {
-  if (col.against)
+  // a case against this option waits or runs (from here, or from Next):
+  // said in the cell, as an ask is
+  const { working, waiting } = here.ws.live;
+  const making = [working, ...waiting].some(
+    (m) => m?.nodeId === col.id && /\bcase against\b/i.test(m.label),
+  );
+  if (col.against && !making)
     return (
       <div
         className={`px-2 py-1.5 text-xs leading-snug ${col.faded ? "opacity-50" : ""}`}
@@ -610,6 +634,13 @@ function AgainstCell({ here, col }: { here: Here; col: ColumnView }) {
       </div>
     );
   if (col.faded) return <div className="px-2 py-1.5 text-xs text-faint">—</div>;
+  if (making)
+    return (
+      <div className="flex items-start gap-1 px-2 py-1.5 text-xs text-muted">
+        <span className="h-2 w-2 shrink-0 translate-y-1 animate-pulse rounded-full bg-primary" />
+        Claude is making the case…
+      </div>
+    );
   // the lead or your lean with no case against is a gap, until you choose
   const gap = (col.lead || col.lean) && !col.chosen;
   return (
@@ -651,8 +682,13 @@ function TallyCell({
     .filter(([k]) => k)
     .map(([k, s]) => `${k}${s}`)
     // "?" is Claude's can't-tell, a mark; a cell no one has judged yet is
-    // counted apart, on every want
-    .concat(t.blank && !col.faded ? [`${t.blank} empty`] : [])
+    // counted apart. The empty musts are said on the line above, so here
+    // only the other wants' count
+    .concat(
+      t.blank - t.empty > 0 && !col.faded
+        ? [`${t.blank - t.empty} empty${t.musts ? " elsewhere" : ""}`]
+        : [],
+    )
     .join(" ");
   return (
     <div className={`px-2 py-1.5 text-xs ${col.faded ? "opacity-50" : ""}`}>
@@ -701,7 +737,7 @@ function AddWant({
 }: {
   here: Here;
   q: string;
-  onAdded: (w: Weight) => void;
+  onAdded: (id: string) => void;
 }) {
   const [title, setTitle] = useState("");
   const [weight, setWeight] = useState<Weight>("matters");
@@ -712,15 +748,22 @@ function AddWant({
         onSubmit={(e) => {
           e.preventDefault();
           if (!title.trim()) return;
-          // cleared only once it is on the board: a refused want (the board
-          // is full, it is there already) stays for you to change
-          void here.act("want", { q, title, weight }).then((r) => {
-            if (r.error) return;
-            onAdded(weight);
-            setTitle("");
-            // back to the usual weight: a must you meant once would
-            // otherwise make the next want a must too
-            setWeight("matters");
+          // cleared at once, so the next want you type starts empty (cleared
+          // only once the server answered, what you typed meanwhile was added
+          // to the old text and sent with it); a refused want (the board is
+          // full, it is there already) comes back for you to change, unless
+          // you have started another
+          const sent = { title, weight };
+          setTitle("");
+          // back to the usual weight: a must you meant once would otherwise
+          // make the next want a must too
+          setWeight("matters");
+          void here.act("want", { q, ...sent }).then((r) => {
+            if (r.error) {
+              setTitle((now) => now || sent.title);
+              return;
+            }
+            if (r.nodeId) onAdded(r.nodeId);
           });
         }}
         className="flex flex-wrap items-center gap-1.5"

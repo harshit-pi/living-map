@@ -85,21 +85,22 @@ export function Pop({
 }) {
   const box = useRef<HTMLDivElement>(null);
   // The listeners are added once, for as long as the popover is open. Esc
-  // also clears the selection (App), which re-renders this with a new
-  // onClose: listeners swapped then would be swapped mid-event, and a
-  // listener added during an event never hears it, so Esc did nothing.
+  // closes the top layer only: heard first (capture, on the window) and kept
+  // from the app's own Esc, which would also close the panel under it.
   const close = useEffectEvent(() => onClose());
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close();
     };
     const onDown = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) close();
     };
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     document.addEventListener("mousedown", onDown);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
       document.removeEventListener("mousedown", onDown);
     };
   }, []);

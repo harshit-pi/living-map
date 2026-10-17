@@ -340,36 +340,25 @@ export function liveLead(s: ExploreState, nodes: Nodes, q: string) {
 }
 
 type Hole = { option: string; want: string; guess: boolean };
-// Empty or guess cells on the given rows, over the options still in play,
-// most worth filling first: the lead's column, then empty cells before
-// guesses, keep-as-is after the other options (it is your current setup,
-// which you know and Claude can mostly only guess at). A column that already
+
+// The options a gap can be on: in play, and not out already. A column that
 // fails a must is out, so its other cells are no gap: filling them cannot
-// change the choice. With `rechecks` off (Next), a guess Claude has already
-// answered (one it checked in a thread, or "can't tell" with what would
-// tell) is left out until a fact that bears on it is newer than its mark:
-// asking again would only get the same answer, for another paid move.
-function holes(
-  s: ExploreState,
-  nodes: Nodes,
-  b: Board,
-  weight: Weight,
-  { guesses = true, rechecks = true } = {},
-): Hole[] {
-  const lead = liveLead(s, nodes, b.question)?.id;
+// change the choice.
+function liveColumns(nodes: Nodes, b: Board): MapNode[] {
   const t = tally(b, nodes);
-  const cols = columnsOf(nodes, b).filter(
-    (o) => inPlay(o) && !t[o.id]?.failsMust,
-  );
+  return columnsOf(nodes, b).filter((o) => inPlay(o) && !t[o.id]?.failsMust);
+}
+
+// Whether Claude's side of a cell has said all it can: checked in a thread,
+// or "can't tell" with what would tell, and no fact that bears on it is
+// newer than its mark. A fact bears on a cell when it is yours, or a cell on
+// the same want cites it: Go deeper's facts about one option (a risk, a
+// check) are no news on that option's first paying customer.
+function answeredOn(nodes: Nodes, b: Board) {
   const rowIds = new Set(b.rows.map((r) => r.id));
-  const facts = rechecks
-    ? []
-    : [...subtree(nodes, b.question)]
-        .map((id) => nodes[id])
-        .filter((n) => n?.kind === "fact" && !rowIds.has(n.id) && !isCheck(n));
-  // a fact bears on a cell when it is yours, or a cell on the same want
-  // cites it: Go deeper's facts about one option (a risk, a check) are no
-  // news on that option's first paying customer
+  const facts = [...subtree(nodes, b.question)]
+    .map((id) => nodes[id])
+    .filter((n) => n?.kind === "fact" && !rowIds.has(n.id) && !isCheck(n));
   const citedOn = (want: string) =>
     new Set(
       Object.entries(b.cells)
@@ -379,7 +368,7 @@ function holes(
           ...(c.claude?.facts ?? []),
         ]),
     );
-  const settledGuess = (side: Side, want: string) => {
+  return (side: Side, want: string) => {
     if (!side.checked && side.mark !== "unknown") return false;
     const cited = citedOn(want);
     return !facts.some(
@@ -389,16 +378,76 @@ function holes(
         (f.by === "you" || cited.has(f.id)),
     );
   };
+}
+
+// The wants Claude cannot judge without you, each with the cell that says
+// what it lacks: on one, Claude checked a cell in a thread and still could
+// not tell, or it could not tell on two options, and nothing newer bears on
+// it. What it lacks then is yours (your budget, where you work), the same on
+// every option: Next asks you for it, rather than paying for another move
+// that ends "can't tell" on the option beside it.
+export function waitsOnYou(
+  nodes: Nodes,
+  b: Board,
+  weight: Weight,
+): { want: string; option: string; note: string }[] {
+  const cols = liveColumns(nodes, b);
+  const answered = answeredOn(nodes, b);
+  const out: { want: string; option: string; note: string }[] = [];
+  for (const r of keptRows(b).filter((x) => x.weight === weight)) {
+    const cants = cols
+      .map((o) => ({ o, cell: own(b.cells, cellKey(o.id, r.id)) }))
+      .filter(
+        ({ cell }) =>
+          !cell?.you &&
+          cell?.claude?.mark === "unknown" &&
+          answered(cell.claude, r.id),
+      );
+    const checked = cants.find(({ cell }) => cell?.claude?.checked);
+    const first = checked ?? (cants.length >= 2 ? cants[0] : undefined);
+    if (first)
+      out.push({
+        want: r.id,
+        option: first.o.id,
+        note: first.cell?.claude?.note ?? "",
+      });
+  }
+  return out;
+}
+
+// Empty or guess cells on the given rows, over the options still in play,
+// most worth filling first: the lead's column, then empty cells before
+// guesses, keep-as-is after the other options (it is your current setup,
+// which you know and Claude can mostly only guess at). With `rechecks` off
+// (Next), a guess Claude has already answered is left out until a fact that
+// bears on it is newer than its mark, and so is every cell on a want that
+// waits on you: asking again would only get the same answer, for another
+// paid move.
+function holes(
+  s: ExploreState,
+  nodes: Nodes,
+  b: Board,
+  weight: Weight,
+  { guesses = true, rechecks = true } = {},
+): Hole[] {
+  const lead = liveLead(s, nodes, b.question)?.id;
+  const cols = liveColumns(nodes, b);
+  const answered = answeredOn(nodes, b);
+  const yours = new Set(
+    rechecks ? [] : waitsOnYou(nodes, b, weight).map((w) => w.want),
+  );
   const out: Hole[] = [];
   for (const o of cols)
-    for (const r of keptRows(b).filter((x) => x.weight === weight)) {
+    for (const r of keptRows(b).filter(
+      (x) => x.weight === weight && !yours.has(x.id),
+    )) {
       const cell = own(b.cells, cellKey(o.id, r.id));
       const sc = shown(cell);
       if (!sc) out.push({ option: o.id, want: r.id, guess: false });
       else if (
         guesses &&
         sc.guess &&
-        (rechecks || !cell?.claude || !settledGuess(cell.claude, r.id))
+        (rechecks || !cell?.claude || !answered(cell.claude, r.id))
       )
         out.push({ option: o.id, want: r.id, guess: true });
     }
@@ -644,6 +693,20 @@ export function openItems(
     guess.map((h) => qOf.get(h)!),
     (n) => `${plural(n, "guess", "guesses")} ${onMusts(guess)}`,
   );
+  // a choice made with musts still empty or a guess on the option chosen:
+  // choosing settles the board, not what is unknown about the choice
+  const unsure = Object.values(s.boards).flatMap((b) =>
+    b.commit && b.shape === "choose"
+      ? holes(s, nodes, b, "must")
+          .filter((h) => h.option === b.commit?.option)
+          .map(() => b.question)
+      : [],
+  );
+  add("chosen-unsure", unsure, (n) =>
+    n === 1
+      ? "1 must unsure on your choice"
+      : `${n} musts unsure on your choice`,
+  );
   const choices = roll.points.filter(
     (p) => p.shape === "choose" && p.open && p.id !== root,
   );
@@ -699,11 +762,23 @@ export function openItems(
 }
 
 // The newest change on a question's board: a cell, a case against, an option
-// or a want node, the commit.
+// or a want node, the commit. A question that is not a choice is told apart
+// by what is under its options, not by cells: there a fact or a check that
+// changed (a check run, its result written in) is news too; a question
+// below has a stand of its own.
 export function newestChange(s: ExploreState, nodes: Nodes, q: string): number {
   const b = own(s.boards, q);
   let t = 0;
   for (const n of optionsOf(nodes, q)) t = Math.max(t, n.updatedAt);
+  if (shapeOf(s, nodes, q) !== "choose")
+    for (const id of subtree(nodes, q)) {
+      const n = own(nodes, id);
+      if (!n || n.kind === "question") continue;
+      let up = n.parent ? own(nodes, n.parent) : undefined;
+      for (let i = 0; up && up.kind !== "question" && i < 100; i++)
+        up = up.parent ? own(nodes, up.parent) : undefined;
+      if (up?.id === q) t = Math.max(t, n.updatedAt);
+    }
   if (!b) return t;
   for (const r of b.rows) t = Math.max(t, own(nodes, r.id)?.updatedAt ?? 0);
   for (const c of Object.values(b.cells))
@@ -819,6 +894,18 @@ export function nextGap(
         want: must.want,
         label: checkLabel(nodes, must.option, must.want),
         reason: must.guess ? "a must, only a guess" : "a must, still empty",
+      };
+    // a must only you can settle: yours to say, in its thread, or to rate,
+    // and no move is paid for
+    const tell = waitsOnYou(nodes, b, "must")[0];
+    if (tell)
+      return {
+        kind: "tell",
+        q,
+        option: tell.option,
+        want: tell.want,
+        label: `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
+        reason: `a must Claude can't tell without you${tell.note ? ` (${clip(tell.note, 24, 160)})` : ""}`,
       };
     const lead = liveLead(s, nodes, q);
     const lean = b.lean && own(nodes, b.lean.option);
@@ -1690,11 +1777,14 @@ export function summaryOf(s: ExploreState, nodes: Nodes): string {
   if (b && b.shape === "choose" && keptRows(b).length) {
     const cols = columnsOf(nodes, b).filter(inPlay).length;
     // empty cells: a guess is a mark already
+    // what is open first, as the stand line says it: "0 gaps" read as
+    // nothing left to do while every must was a guess
     const gaps = WEIGHTS.reduce(
       (a, w) => a + holes(s, nodes, b, w, { guesses: false }).length,
       0,
     );
-    return `${plural(cols, "option")} × ${plural(keptRows(b).length, "want")} · ${plural(gaps, "gap")}`;
+    const open = openItems(s, nodes, roll)[0]?.label;
+    return `${plural(cols, "option")} × ${plural(keptRows(b).length, "want")} · ${open ?? (gaps ? plural(gaps, "gap") : "nothing open")}`;
   }
   const word = { decided: "Decided", leaning: "Leaning", open: "Open" }[
     roll.state

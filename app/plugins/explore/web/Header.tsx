@@ -6,7 +6,7 @@ import { pluginAct, usePlace, useShowDropped } from "./view.ts";
 import { Segmented } from "../../../web/components/Segmented.tsx";
 import { setAside } from "../../../web/lib/layout.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
-import { SHAPE_WORD, SHAPES, type Shape } from "../shared.ts";
+import { SHAPE_WORD, SHAPES, YOURS, type Shape } from "../shared.ts";
 
 // Board / Tree and the shape: in the header on a wide window, above the work
 // on a narrower one
@@ -58,49 +58,65 @@ export function TabAndShape({ ws }: { ws: Workspace }) {
   );
 }
 
-export function ExploreHeader({ ws }: { ws: Workspace }) {
+// Show or hide what you set aside, on the Tree. Kept in place on the board,
+// only hidden, so Board / Tree and the rest of the header do not shift as
+// you switch.
+export function SetAsideToggle({
+  ws,
+  className = "",
+}: {
+  ws: Workspace;
+  className?: string;
+}) {
   const [showDropped, setShowDropped] = useShowDropped();
+  const { tab, board } = usePlace(ws.map);
+  if (tab !== "tree" && !board) return <></>;
+  return (
+    <label
+      aria-hidden={tab !== "tree"}
+      className={`items-center gap-1 whitespace-nowrap text-xs text-muted ${tab === "tree" ? "" : "invisible"} ${className}`}
+    >
+      <input
+        type="checkbox"
+        disabled={tab !== "tree"}
+        checked={showDropped}
+        onChange={(e) => {
+          setShowDropped(e.target.checked);
+          // a node hidden with the set-aside ones leaves the selection, so
+          // what you write is about what you can see
+          if (!e.target.checked)
+            ws.setSelection((s) =>
+              s.filter((id) => !setAside(ws.map.nodes, id)),
+            );
+        }}
+      />{" "}
+      Set aside
+    </label>
+  );
+}
+
+export function ExploreHeader({ ws }: { ws: Workspace }) {
   const place = usePlace(ws.map);
   const { view, tab, board } = place;
   const onBoard = tab === "board" && !!board;
   const gap = view ? (onBoard ? view.boards[board].next : view.next) : null;
-  // the move Next names is already queued or running (a Choose starts its
-  // pre-mortem): pressing would ask for it twice
-  const { working, waiting } = ws.live;
+  // Next's step is worked out from the map as it is, so while any move runs
+  // or waits it may be that very move (a Fill, an Ask on the cell Next
+  // names, a Choose's pre-mortem) or one it is about to change: pressing
+  // would queue a second paid move. Next waits for the map to settle; a step
+  // that is yours (a check to run, a must to tell) pays for nothing and
+  // stays open.
+  const { busy, working, waiting } = ws.live;
   const onItsWay =
-    !!gap &&
-    [working, ...waiting].some(
-      (m) => m && (m.label === gap.label || m.label === `Next: ${gap.label}`),
-    );
+    !!gap && !YOURS.has(gap.kind) && (busy || !!working || waiting.length > 0);
   return (
     <>
-      <div className="hidden items-center gap-2 lg:flex">
+      {/* on a window narrower than xl these sit above the work
+          (ExploreScreen): with them, the header ran past 1024px */}
+      <div className="hidden items-center gap-2 xl:flex">
         <TabAndShape ws={ws} />
       </div>
-      {/* kept in place on the board, only hidden, so Board / Tree and the
-          rest of the header do not shift as you switch */}
-      {(tab === "tree" || board) && (
-        <label
-          aria-hidden={tab !== "tree"}
-          className={`hidden items-center gap-1 whitespace-nowrap text-xs text-muted lg:flex ${tab === "tree" ? "" : "invisible"}`}
-        >
-          <input
-            type="checkbox"
-            disabled={tab !== "tree"}
-            checked={showDropped}
-            onChange={(e) => {
-              setShowDropped(e.target.checked);
-              // a node hidden with the set-aside ones leaves the selection, so
-              // what you write is about what you can see
-              if (!e.target.checked)
-                ws.setSelection((s) =>
-                  s.filter((id) => !setAside(ws.map.nodes, id)),
-                );
-            }}
-          />{" "}
-          Set aside
-        </label>
-      )}
+      <SetAsideToggle ws={ws} className="hidden xl:flex" />
       <button
         disabled={onItsWay}
         onClick={() => {
@@ -109,6 +125,14 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
           if (gap?.kind === "run" && gap.option) {
             place.setTab("tree");
             ws.setSelection([gap.option]);
+            return;
+          }
+          // a must only you can settle: Next opens its want, whose thread
+          // writes the whole row once you say what you know
+          if (gap?.kind === "tell" && gap.want) {
+            if (view?.boards[gap.q]?.shape === "choose" && gap.q !== board)
+              place.openBoard(gap.q);
+            ws.setSelection([gap.want]);
             return;
           }
           if (!view) {
@@ -127,7 +151,7 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
         }}
         title={
           onItsWay
-            ? `${gap.label}: Claude is on it`
+            ? "Claude is working: Next picks its step once the map settles"
             : gap
               ? `${gap.label}: ${gap.reason}`
               : "Claude takes the next step"
