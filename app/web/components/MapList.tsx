@@ -77,7 +77,7 @@ export function MapsMenu({ onOpen }: { onOpen: (id: string) => void }) {
     <div ref={box} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
+        className="whitespace-nowrap rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
       >
         Maps ▾
       </button>

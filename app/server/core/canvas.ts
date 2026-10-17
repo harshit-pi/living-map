@@ -53,6 +53,48 @@ export function pathTo(nodes: Record<string, MapNode>, id: string): MapNode[] {
   return path;
 }
 
+// A new node, cleaned as an add op is: a kind and status it may have, a
+// parent that is on the map (else the root), titles cut to length. Shared
+// with plugins that create nodes of their own (Explore's wants), so their
+// nodes are the same shape as the model's.
+export function makeNode(
+  nodes: Record<string, MapNode>,
+  f: {
+    id: string;
+    parent?: unknown;
+    kind?: unknown;
+    title?: unknown;
+    summary?: unknown;
+    detail?: unknown;
+    status?: unknown;
+    by?: "claude" | "you";
+  },
+  now = Date.now(),
+): MapNode {
+  const kind: Kind = KINDS.has(f.kind as Kind) ? (f.kind as Kind) : "fact";
+  const parent =
+    f.parent && own(nodes, String(f.parent))
+      ? String(f.parent)
+      : (Object.values(nodes).find((x) => !x.parent)?.id ?? null);
+  const node: MapNode = {
+    id: f.id,
+    parent,
+    kind,
+    title: String(f.title ?? f.id).slice(0, 80),
+    summary: String(f.summary ?? "").slice(0, 220),
+    detail: typeof f.detail === "string" ? f.detail : "",
+    status: STATUS[kind].includes(f.status as Status)
+      ? (f.status as Status)
+      : STATUS[kind][0],
+    by: f.by ?? "claude",
+    updatedAt: now,
+    order: Object.keys(nodes).length,
+    fresh: true,
+  };
+  nodes[f.id] = node;
+  return node;
+}
+
 export function removeTree(nodes: Record<string, MapNode>, id: string) {
   for (const n of Object.values(nodes))
     if (n.parent === id) removeTree(nodes, n.id);
@@ -72,8 +114,12 @@ export function applyOps(
     judge = false,
     // a plugin's handler for ops core does not know (null: not its op either)
     extra = undefined as ((op: Raw) => number | null) | undefined,
-    // nothing on the map may be removed (a mode switch: what you explored stays)
+    // nothing on the map may be removed or reworded (a mode switch: what you
+    // explored stays, and reads the same when you switch back)
     keep = false,
+    // nodes you made, chose or settled are yours: the model may not change or
+    // remove them (a plugin opts in; Explore does)
+    keepYours = false,
     now = Date.now(),
   } = {},
 ): number {
@@ -105,6 +151,12 @@ export function applyOps(
       continue;
     }
     if (op?.op === "scene" || op?.op === "move") {
+      // a move with no step is not a scene's: a plugin may own it (Explore
+      // files a node under another parent with it); otherwise it is ignored
+      if (op.op === "move" && op.step === undefined) {
+        if (extra) changed += extra(op) ?? 0;
+        continue;
+      }
       const step = String(op.step ?? "");
       if (!safeId(step) || !own(nodes, step)) continue;
       if (scope && !inScope()?.has(step)) continue;
@@ -152,6 +204,19 @@ export function applyOps(
     if (!safeId(id)) continue;
     const allowed = inScope();
     const cur = own(nodes, id);
+    if (keepYours && cur?.by === "you") {
+      // yours stays as you left it; only its explanation, written when you
+      // open it, may still arrive
+      if (
+        op.op === "update" &&
+        typeof op.detail === "string" &&
+        (!allowed || allowed.has(id))
+      ) {
+        cur.detail = op.detail;
+        changed++;
+      }
+      continue;
+    }
     if (op.op === "remove") {
       // the root holds the whole map: it is never removed
       if (
@@ -166,30 +231,30 @@ export function applyOps(
       continue;
     }
     if (op.op === "add" && !cur) {
-      const kind: Kind = KINDS.has(op.kind) ? op.kind : "fact";
       let parent: string | null =
         op.parent && own(nodes, String(op.parent)) ? String(op.parent) : null;
       if (!parent)
         parent = Object.values(nodes).find((x) => !x.parent)?.id ?? null;
       if (allowed && scope && !allowed.has(parent ?? "")) parent = scope; // a thread adds under its own node
-      nodes[id] = {
-        id,
-        parent,
-        kind,
-        title: String(op.title ?? id).slice(0, 80),
-        summary: String(op.summary ?? "").slice(0, 220),
-        detail: typeof op.detail === "string" ? op.detail : "",
-        status: STATUS[kind].includes(op.status) ? op.status : STATUS[kind][0],
-        by: "claude",
-        updatedAt: now,
-        order: Object.keys(nodes).length,
-        fresh: true,
-      };
+      makeNode(
+        nodes,
+        {
+          id,
+          parent,
+          kind: op.kind,
+          title: op.title,
+          summary: op.summary,
+          detail: op.detail,
+          status: op.status,
+        },
+        now,
+      );
       changed++;
     } else if (cur) {
       if (allowed && !allowed.has(id)) continue;
       for (const k of ["title", "summary", "detail"] as const)
-        if (typeof op[k] === "string") cur[k] = op[k];
+        if (typeof op[k] === "string" && !(keep && k !== "detail"))
+          cur[k] = op[k];
       // only you choose
       if (
         op.status &&

@@ -77,7 +77,7 @@ export function switchPurpose(
   engine.push();
   if (map.purpose === "learn" && !map.diagram && !engine.state.busy)
     return engine.turn(
-      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order, and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first. Remove nothing: every node already on the map stays where it is (the learner explored it, and it is listed under what they looked into); a useful existing question can be one of the steps.",
+      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order, and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first. Remove nothing: every node already on the map stays where it is (the learner explored it, and it is listed under what they looked into); a useful existing question can be one of the steps, but keep its title and summary as they are (Explore reads them when the learner switches back): say what a step is in the caption, never by rewriting an existing node.",
       ctx.settings,
       // what you explored stays, with its threads, for when you switch back
       {

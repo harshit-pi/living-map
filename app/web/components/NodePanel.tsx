@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -72,6 +72,9 @@ export function NodePanel({
   onSelect,
   onClose,
   asSteps,
+  actions,
+  extra,
+  tag,
 }: {
   map: MapDoc;
   node: MapNode;
@@ -86,6 +89,12 @@ export function NodePanel({
   onClose: () => void;
   // treat questions as steps to work out (hints, show answer), as Learn does
   asSteps?: boolean;
+  // a plugin's own buttons for this node, in place of the usual row
+  actions?: ReactNode;
+  // a plugin's own lines under the summary (e.g. a board's case against)
+  extra?: ReactNode;
+  // a plugin's own word for the node's kind, over the title
+  tag?: string;
 }) {
   const learn = asSteps ?? map.purpose === "learn";
   const threads = useMemo(
@@ -155,7 +164,7 @@ export function NodePanel({
             <div
               className={`text-[10px] font-semibold uppercase tracking-wide ${look.tagCls}`}
             >
-              {look.tag}
+              {tag ?? look.tag}
             </div>
             <div className="mt-0.5 text-[17px] font-semibold leading-snug text-ink">
               {node.title}
@@ -174,81 +183,83 @@ export function NodePanel({
             {node.summary.replace(/^Recommended:\s*/, "")}
           </div>
         )}
+        {extra}
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {gone ? (
-            <Btn onClick={() => act("restore")}>Restore</Btn>
-          ) : (
-            <>
-              {node.kind === "option" && node.status !== "chosen" && (
-                <Btn primary onClick={() => act("choose")}>
-                  {learn ? "Try this" : "Choose"}
-                </Btn>
-              )}
-              {openStep && (
-                <Btn
-                  primary
-                  disabled={hints.length >= 3}
-                  onClick={() => act("hint")}
-                  title="Each press gives a little more"
-                >
-                  {hints.length >= 3
-                    ? "No more hints"
-                    : `Hint ${hints.length + 1} of 3`}
-                </Btn>
-              )}
-              <Btn onClick={() => act("deeper")}>
-                {learn && node.kind === "question"
-                  ? "Smaller steps"
-                  : "Go deeper"}
-              </Btn>
-              {!learn &&
-                (node.kind !== "option" || node.status === "chosen") && (
-                  <Btn onClick={() => act("challenge")}>Challenge</Btn>
+          {actions ??
+            (gone ? (
+              <Btn onClick={() => act("restore")}>Restore</Btn>
+            ) : (
+              <>
+                {node.kind === "option" && node.status !== "chosen" && (
+                  <Btn primary onClick={() => act("choose")}>
+                    {learn ? "Try this" : "Choose"}
+                  </Btn>
                 )}
-              {!node.detail && (
-                <Btn onClick={() => act("explain")}>Explain</Btn>
-              )}
-              {openStep && (
-                <Btn
-                  onClick={async () => {
-                    // the answer arrives in this step's thread: show that one
-                    const r = await run({
-                      type: "answer",
-                      nodeId: node.id,
-                      threadId: active?.id,
-                    });
-                    if (r.threadId) setActiveId(r.threadId);
-                  }}
-                  title="Shown answers are not counted as yours"
-                >
-                  Show answer
+                {openStep && (
+                  <Btn
+                    primary
+                    disabled={hints.length >= 3}
+                    onClick={() => act("hint")}
+                    title="Each press gives a little more"
+                  >
+                    {hints.length >= 3
+                      ? "No more hints"
+                      : `Hint ${hints.length + 1} of 3`}
+                  </Btn>
+                )}
+                <Btn onClick={() => act("deeper")}>
+                  {learn && node.kind === "question"
+                    ? "Smaller steps"
+                    : "Go deeper"}
                 </Btn>
-              )}
-              {/* a step you have settled is done, not one to skip */}
-              {!(
-                learn &&
-                node.kind === "question" &&
-                node.status === "answered"
-              ) && (
-                <Btn
-                  onClick={() => act("drop")}
-                  title={
-                    learn
+                {!learn &&
+                  (node.kind !== "option" || node.status === "chosen") && (
+                    <Btn onClick={() => act("challenge")}>Challenge</Btn>
+                  )}
+                {!node.detail && (
+                  <Btn onClick={() => act("explain")}>Explain</Btn>
+                )}
+                {openStep && (
+                  <Btn
+                    onClick={async () => {
+                      // the answer arrives in this step's thread: show that one
+                      const r = await run({
+                        type: "answer",
+                        nodeId: node.id,
+                        threadId: active?.id,
+                      });
+                      if (r.threadId) setActiveId(r.threadId);
+                    }}
+                    title="Shown answers are not counted as yours"
+                  >
+                    Show answer
+                  </Btn>
+                )}
+                {/* a step you have settled is done, not one to skip */}
+                {!(
+                  learn &&
+                  node.kind === "question" &&
+                  node.status === "answered"
+                ) && (
+                  <Btn
+                    onClick={() => act("drop")}
+                    title={
+                      learn
+                        ? node.kind === "question"
+                          ? "Skip this step: it is greyed out and Claude stops raising it"
+                          : "Remove it from what you looked into"
+                        : "Rule this out: it is greyed out and Claude stops raising it"
+                    }
+                  >
+                    {learn
                       ? node.kind === "question"
-                        ? "Skip this step: it is greyed out and Claude stops raising it"
-                        : "Remove it from what you looked into"
-                      : "Rule this out: it is greyed out and Claude stops raising it"
-                  }
-                >
-                  {learn
-                    ? node.kind === "question"
-                      ? "Skip this step"
-                      : "Remove"
-                    : "Set aside"}
-                </Btn>
-              )}
-            </>
-          )}
+                        ? "Skip this step"
+                        : "Remove"
+                      : "Set aside"}
+                  </Btn>
+                )}
+              </>
+            ))}
         </div>
       </div>
 

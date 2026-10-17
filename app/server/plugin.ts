@@ -30,6 +30,9 @@ export type ServerPlugin = {
     op: Raw,
     opts: { scope: string | null },
   ) => number | null;
+  // the model may not change or remove a node you made, chose or settled
+  // (by: "you"), whatever its reply says
+  keepUserNodes?: boolean;
   // the first move on a new map of this purpose
   start: (ctx: Ctx) => Promise<ActionResult>;
   // actions the browser sends as {type: "plugin", plugin: id, name, args}
