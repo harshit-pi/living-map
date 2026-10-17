@@ -3,6 +3,8 @@
 <p align="center"><b>Understand anything by seeing it, and by doing it.</b><br>
 A visual canvas that drives your own Claude Code: you steer and answer on the picture, not in a wall of text.</p>
 
+https://github.com/user-attachments/assets/f302e420-b58d-40e9-a0a5-711e2ca41fd5
+
 ---
 
 Long AI answers are hard to hold in your head. Living Map turns the conversation into a picture you work on directly:
