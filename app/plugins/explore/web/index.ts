@@ -12,7 +12,7 @@ export const exploreWeb: WebPlugin = {
   switchesWith: ["learn"],
   heading: "What do you want to think through?",
   blurb:
-    "A question to explore or a choice to make. Claude lays it out as a map; you steer by clicking and replying on the nodes.",
+    "A choice to make or a question to think through. Claude lays out the options against what you want on a board, fills in what it knows and marks its guesses; you rate, choose and settle.",
   placeholder: "e.g. Which database for the new service?",
   examples: [
     "Which learning vertical should Living Map start with?",
