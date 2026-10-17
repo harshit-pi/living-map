@@ -207,6 +207,8 @@ export function DesignCanvas({
   // spots just asked for, so quick clicks in the palette do not stack parts
   // before the server has them
   const recent = useRef<(At & { at: number })[]>([]);
+  // when a wire drag last ended: letting go over a part is not a click on it
+  const wiredAt = useRef(0);
   const ref = showReference ? view.reference : null;
   const mode = ref ? "reference" : "design";
 
@@ -408,11 +410,17 @@ export function DesignCanvas({
               y: Math.round(n.position.y),
             })
           }
+          onConnectEnd={() => {
+            wiredAt.current = Date.now();
+          }}
           onConnect={(c) => {
             if (c.source && c.target)
               act("connect", { from: c.source, to: c.target });
           }}
-          onNodeClick={(_, n) => !ref && onPick({ type: "comp", id: n.id })}
+          onNodeClick={(_, n) => {
+            if (!ref && Date.now() - wiredAt.current > 300)
+              onPick({ type: "comp", id: n.id });
+          }}
           onEdgeClick={(_, e) => !ref && onPick({ type: "wire", id: e.id })}
           onPaneClick={() => onPick(null)}
           proOptions={{ hideAttribution: true }}

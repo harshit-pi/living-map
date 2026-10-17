@@ -9,7 +9,7 @@ import {
   PALETTE_W,
   type Picked,
 } from "./DesignCanvas.tsx";
-import { fmt, STATUS_TONE } from "./format.ts";
+import { fmt, named, STATUS_TONE } from "./format.ts";
 import type { ChatLine } from "../../../shared/model.ts";
 import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
@@ -28,9 +28,11 @@ const CHECK = "Check my design."; // what a check says in the conversation
 // Design: the brief and the deep dives on the left; the canvas you build on in
 // the middle, with the palette; Claude's review and the selected part on top.
 export function DesignScreen({ ws }: { ws: Workspace }) {
-  // the provider wraps the whole screen, so the inspector can sit by its part
+  // the provider wraps the whole screen, so the inspector can sit by its part.
+  // Each map gets its own: another map opens fitted to its design, with its
+  // own review and its reference hidden until you ask on that map.
   return (
-    <ReactFlowProvider>
+    <ReactFlowProvider key={ws.map.id}>
       <Design ws={ws} />
     </ReactFlowProvider>
   );
@@ -48,8 +50,8 @@ function Design({ ws }: { ws: Workspace }) {
   const [folded, setFolded] = useState<number | null>(null);
   // set from the click until the review is back, so a second click asks nothing
   const [checking, setChecking] = useState(false);
-  // the part you just removed, with Undo (also Cmd/Ctrl+Z) for a few seconds
-  const [undo, setUndo] = useState<{ label: string; at: number } | null>(null);
+  // what you just removed, with Undo (also Cmd/Ctrl+Z) for a few seconds
+  const [undo, setUndo] = useState<{ what: string; at: number } | null>(null);
   useEffect(() => {
     if (!undo) return;
     const t = setTimeout(() => setUndo(null), 8000);
@@ -79,7 +81,17 @@ function Design({ ws }: { ws: Workspace }) {
   const act = (name: string, args: Record<string, unknown> = {}) => {
     if (name === "remove") {
       const c = view?.comps.find((x) => x.id === args.id);
-      if (c) setUndo({ label: c.label, at: Date.now() });
+      if (c) setUndo({ what: `"${c.label}"`, at: Date.now() });
+    }
+    if (name === "unwire") {
+      const w = view?.wires.find((x) => x.id === args.id);
+      const label = (id?: string) =>
+        view?.comps.find((c) => c.id === id)?.label ?? "";
+      if (w)
+        setUndo({
+          what: `the wire "${label(w.from)}" → "${label(w.to)}"`,
+          at: Date.now(),
+        });
     }
     if (name === "undo") setUndo(null);
     return run({ type: "plugin", plugin: PLUGIN_ID, name, args });
@@ -100,39 +112,64 @@ function Design({ ws }: { ws: Workspace }) {
 
   const over = view.comps.filter((c) => view.load[c.id]?.status === "over");
   const ref = showReference ? view.reference : null;
+  // the last check was stopped (a new map, Stop) before its review came back
+  const lastCheck = map.chat.findLastIndex(
+    (c) => c.role === "you" && c.text === CHECK,
+  );
+  const checkStopped =
+    lastCheck >= 0 &&
+    !reviewing &&
+    !checking &&
+    !map.chat
+      .slice(lastCheck + 1)
+      .some((c) => c.role === "claude" && !c.nodeId) &&
+    map.chat
+      .slice(lastCheck + 1)
+      .some((c) => c.role === "system" && /^(Stopped|Cancelled)/.test(c.text));
   return (
     <div className="flex h-full">
       <aside className="flex w-[240px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface xl:w-[300px]">
         <Brief view={view} />
-        <LastWord chat={map.chat} />
+        <LastWord chat={map.chat} view={view} />
         <div className="border-t border-line px-4 py-3">
           <div className="mb-1.5 text-[11px] font-semibold tracking-wide text-faint uppercase">
             Then go deeper
           </div>
           {dives.length === 0 && <div className="text-sm text-faint">…</div>}
-          {dives.map((d, i) => (
-            <button
-              key={d.id}
-              onClick={() => setSelection(open?.id === d.id ? [] : [d.id])}
-              className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-panel ${open?.id === d.id ? "bg-panel ring-1 ring-primary-line" : ""}`}
-            >
-              <span
-                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${d.status === "answered" ? "bg-success text-on-primary" : "ring-1 ring-line-strong text-muted"}`}
+          {dives.map((d, i) => {
+            // skipped from its panel: greyed out here, Restore is in the panel
+            const skipped = !!d.dropped || d.status === "dropped";
+            return (
+              <button
+                key={d.id}
+                onClick={() => setSelection(open?.id === d.id ? [] : [d.id])}
+                title={skipped ? "Skipped: open it to restore it" : undefined}
+                className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-panel ${open?.id === d.id ? "bg-panel ring-1 ring-primary-line" : ""}`}
               >
-                {d.status === "answered" ? "✓" : i + 1}
-              </span>
-              <span
-                className={d.status === "answered" ? "text-muted" : "text-ink"}
-              >
-                {d.title}
-                {d.status === "answered" && d.summary && (
-                  <span className="block text-[11.5px] text-muted">
-                    {d.summary}
-                  </span>
-                )}
-              </span>
-            </button>
-          ))}
+                <span
+                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${d.status === "answered" ? "bg-success text-on-primary" : "ring-1 ring-line-strong text-muted"}`}
+                >
+                  {skipped ? "–" : d.status === "answered" ? "✓" : i + 1}
+                </span>
+                <span
+                  className={
+                    skipped
+                      ? "text-faint line-through"
+                      : d.status === "answered"
+                        ? "text-muted"
+                        : "text-ink"
+                  }
+                >
+                  {d.title}
+                  {d.status === "answered" && d.summary && (
+                    <span className="block text-[11.5px] text-muted">
+                      {d.summary}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </aside>
 
@@ -159,64 +196,86 @@ function Design({ ws }: { ws: Workspace }) {
           />
         </div>
 
-        {/* what to do next, and the review */}
-        <div className="absolute top-3 right-3 z-10 flex w-[340px] flex-col items-end gap-2">
-          <div className="flex gap-2">
-            {view.reference && (
-              <button
-                onClick={() => setShowReference((v) => !v)}
-                className="rounded-lg bg-surface px-3 py-1.5 text-sm text-body shadow-xs ring-1 ring-line-strong hover:ring-primary"
-              >
-                {showReference ? "← Your design" : "Reference design"}
-              </button>
-            )}
-            {!view.reference && view.review && (
-              <button
-                onClick={() => {
-                  // two steps: the reference is the answer, so ask once
-                  if (!sure) return setSure(true);
-                  void act("reveal").then(() => setShowReference(true));
-                }}
-                onMouseLeave={() => setSure(false)}
-                className={`rounded-lg px-3 py-1.5 text-sm shadow-xs ring-1 ${sure ? "bg-warning-soft text-warning-strong ring-warning-line" : "bg-surface text-muted ring-line hover:text-ink"}`}
-              >
-                {sure ? "It's the answer: show it?" : "Show reference"}
-              </button>
-            )}
-            <button
-              disabled={live.busy || checking || !view.comps.length}
-              onClick={() => {
-                if (checking) return;
-                setChecking(true);
-                setShowReference(false);
-                void act("check").finally(() => setChecking(false));
-              }}
-              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary shadow-xs hover:bg-primary-strong disabled:opacity-40"
+        {/* what is over capacity on the left; checking, the reference and
+            the review on the right, clear of a deep dive's panel. When the
+            two do not fit side by side, the warning goes under the buttons. */}
+        <div
+          className="pointer-events-none absolute top-3 z-10 flex flex-wrap-reverse items-end gap-2 [&_button]:pointer-events-auto"
+          style={{
+            left: ref ? 12 : PALETTE_W + 12,
+            right: open && roomy ? 444 : 12,
+          }}
+        >
+          {over.length > 0 && !showReference && (
+            <div
+              className="pointer-events-auto min-w-0 truncate rounded-lg bg-danger-soft px-3 py-1.5 text-[12.5px] text-danger-strong ring-1 ring-danger-line"
+              title={over.map((c) => c.label).join(", ")}
             >
-              {reviewing || checking ? "Reviewing…" : "Check my design"}
-            </button>
-          </div>
-          {view.review && !showReference && !reviewOpen && (
-            <button
-              onClick={() => setFolded(null)}
-              className="rounded-lg bg-surface px-3 py-1.5 text-[12.5px] text-body shadow-xs ring-1 ring-line hover:ring-primary"
-            >
-              Claude's review ▾
-            </button>
+              Over capacity: {over.map((c) => c.label).join(", ")}
+            </div>
           )}
-        </div>
-
-        {over.length > 0 && !showReference && (
-          <div className="absolute top-3 left-[180px] z-10 rounded-lg bg-danger-soft px-3 py-1.5 text-[12.5px] text-danger-strong ring-1 ring-danger-line">
-            Over capacity: {over.map((c) => c.label).join(", ")}
+          <div className="ml-auto flex shrink-0 flex-col items-end gap-2">
+            <div className="flex gap-2">
+              {view.reference && (
+                <button
+                  onClick={() => setShowReference((v) => !v)}
+                  className="rounded-lg bg-surface px-3 py-1.5 text-sm text-body shadow-xs ring-1 ring-line-strong hover:ring-primary"
+                >
+                  {showReference ? "← Your design" : "Reference design"}
+                </button>
+              )}
+              {!view.reference && view.review && (
+                <button
+                  onClick={() => {
+                    // two steps: the reference is the answer, so ask once
+                    if (!sure) return setSure(true);
+                    void act("reveal").then(() => setShowReference(true));
+                  }}
+                  onMouseLeave={() => setSure(false)}
+                  className={`rounded-lg px-3 py-1.5 text-sm shadow-xs ring-1 ${sure ? "bg-warning-soft text-warning-strong ring-warning-line" : "bg-surface text-muted ring-line hover:text-ink"}`}
+                >
+                  {sure ? "It's the answer: show it?" : "Show reference"}
+                </button>
+              )}
+              <button
+                disabled={live.busy || checking || !view.comps.length}
+                onClick={() => {
+                  if (checking) return;
+                  setChecking(true);
+                  setShowReference(false);
+                  void act("check").finally(() => setChecking(false));
+                }}
+                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary shadow-xs hover:bg-primary-strong disabled:opacity-40"
+              >
+                {reviewing || checking ? "Reviewing…" : "Check my design"}
+              </button>
+            </div>
+            {view.review && !showReference && !reviewOpen && (
+              <button
+                onClick={() => setFolded(null)}
+                className="rounded-lg bg-surface px-3 py-1.5 text-[12.5px] text-body shadow-xs ring-1 ring-line hover:ring-primary"
+              >
+                Claude's review ▾
+              </button>
+            )}
+            {checkStopped && !showReference && (
+              <div className="pointer-events-auto max-w-[300px] rounded-lg bg-warning-soft px-3 py-1.5 text-[12.5px] text-warning-strong ring-1 ring-warning-line">
+                Your last check was stopped before Claude finished
+                {view.review ? ": the review is the one before it" : ""}. Check
+                again for a new one.
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
         {reviewOpen && view.review && (
           <div className="absolute top-14 right-3 bottom-24 z-10 w-[356px]">
             <ReviewCard
-              points={view.review.points}
-              summary={view.review.summary}
+              points={view.review.points.map((p) => ({
+                ...p,
+                text: named(p.text, view.comps),
+              }))}
+              summary={named(view.review.summary, view.comps)}
               onHover={setHover}
               onFold={() => setFolded(view.review!.at)}
             />
@@ -231,9 +290,7 @@ function Design({ ws }: { ws: Workspace }) {
 
         {undo && (
           <div className="absolute bottom-24 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-surface px-3 py-1.5 text-[12.5px] text-body shadow-md ring-1 ring-line">
-            <span className="max-w-[240px] truncate">
-              Removed "{undo.label}"
-            </span>
+            <span className="max-w-[280px] truncate">Removed {undo.what}</span>
             <button
               onClick={() => void act("undo")}
               className="font-medium text-primary-strong hover:underline"
@@ -300,8 +357,16 @@ function Brief({ view }: { view: DesignView }) {
       </div>
       <div className="mt-0.5 font-serif text-xl text-ink">{b.title}</div>
       <div className="mt-2 flex gap-2">
-        <Stat label="reads / s at peak" value={fmt(b.reads)} />
-        <Stat label="writes / s at peak" value={fmt(b.writes)} />
+        <Stat
+          label="reads / s at peak"
+          value={fmt(b.reads)}
+          note={b.readIs && `a read: ${b.readIs}`}
+        />
+        <Stat
+          label="writes / s at peak"
+          value={fmt(b.writes)}
+          note={b.writeIs && `a write: ${b.writeIs}`}
+        />
       </div>
       {b.scale.length > 0 && (
         <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
@@ -324,10 +389,22 @@ function Brief({ view }: { view: DesignView }) {
   );
 }
 
-const Stat = ({ label, value }: { label: string; value: string }) => (
+const Stat = ({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  // what one of them is, e.g. "a read: a message delivered to one phone"
+  note?: string;
+}) => (
   <div className="flex-1 rounded-lg bg-panel px-2.5 py-1.5">
     <div className="text-lg font-semibold text-ink tabular-nums">{value}</div>
     <div className="text-[10.5px] text-muted">{label}</div>
+    {note && (
+      <div className="mt-0.5 text-[10.5px] leading-snug text-body">{note}</div>
+    )}
   </div>
 );
 
@@ -343,33 +420,46 @@ const List = ({ title, items }: { title: string; items: string[] }) =>
     </div>
   ) : null;
 
-// Claude's last word in the main conversation, kept on screen: the first
-// thing to build, a review's next step, or the answer to what you asked
-function LastWord({ chat }: { chat: ChatLine[] }) {
-  const i = chat.findLastIndex((c) => c.role === "claude");
-  if (i < 0) return null;
-  // what you asked just before it, if it answers a question (not the map's
-  // title, nor a check)
-  let j = i - 1;
-  while (j > 0 && chat[j].role === "system") j--;
-  const question =
-    j > 0 && chat[j].role === "you" && chat[j].text !== CHECK
-      ? chat[j].text
-      : "";
-  return (
+// Older maps have no tag on a reply about one node: what was asked tells
+const ABOUT_A_NODE = /^(Hint|Go deeper|Challenge): |^Next$/;
+
+// The design's next step, kept on screen: the first thing to build, or the
+// last review's next step. Below it, the answer to what you last asked in the
+// box, when that came after. Hints and a deep dive's replies stay with it.
+function LastWord({ chat, view }: { chat: ChatLine[]; view: DesignView }) {
+  let next = -1;
+  let asked: { q: string; i: number } | null = null;
+  for (let i = chat.length - 1; i >= 0 && next < 0; i--) {
+    const c = chat[i];
+    if (c.role !== "claude" || c.nodeId || c.blankId) continue;
+    // what it answers: skip notes like "Stopped."; the first line is the title
+    let j = i - 1;
+    while (j > 0 && chat[j].role === "system") j--;
+    const q = j > 0 && chat[j].role === "you" ? chat[j].text : "";
+    if (ABOUT_A_NODE.test(q)) continue;
+    if (!q || q === CHECK) next = i;
+    else asked ??= { q, i };
+  }
+  const block = (title: string, text: string, q?: string) => (
     <div className="border-t border-line px-4 py-3">
       <div className="mb-1 text-[11px] font-semibold tracking-wide text-faint uppercase">
-        {question ? "You asked" : "Next step"}
+        {title}
       </div>
-      {question && (
-        <div className="mb-1.5 text-[12.5px] text-muted italic">{question}</div>
-      )}
+      {q && <div className="mb-1.5 text-[12.5px] text-muted italic">{q}</div>}
       <div className="answer answer-sm max-h-60 overflow-y-auto text-[13px]">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {chat[i].text}
+          {named(text, view.comps)}
         </ReactMarkdown>
       </div>
     </div>
+  );
+  return (
+    <>
+      {next >= 0 && block("Next step", chat[next].text)}
+      {asked &&
+        asked.i > next &&
+        block("You asked", chat[asked.i].text, asked.q)}
+    </>
   );
 }
 
@@ -544,20 +634,31 @@ function Inspector({
         </label>
       )}
       {l && (
+        // reads and writes share one capacity, so it is shown once, with
+        // what the two together use of it
         <div className="mt-2 rounded-lg bg-panel px-2.5 py-1.5 text-[12px] tabular-nums">
           <div className="flex justify-between">
             <span className="text-muted">Reads</span>
-            <span>
-              {fmt(l.reads)} / {fmt(l.capRead)} per s
-            </span>
+            <span>{fmt(l.reads)} per s</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted">Writes</span>
-            <span>
-              {fmt(l.writes)} / {fmt(l.capWrite)} per s
+            <span>{fmt(l.writes)} per s</span>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span className="text-muted">Can take</span>
+            <span className="text-right">
+              {!Number.isFinite(l.capRead)
+                ? "no limit here"
+                : l.capRead === l.capWrite
+                  ? `${fmt(l.capRead)} requests per s`
+                  : `${fmt(l.capRead)} reads or ${fmt(l.capWrite)} writes per s`}
             </span>
           </div>
           <div className={`mt-0.5 font-medium ${st.text}`}>
+            {Number.isFinite(l.capRead) && l.reads + l.writes > 0
+              ? `${l.util > 1 ? `${+l.util.toFixed(1)}× its capacity` : `${Math.round(l.util * 100)}% of capacity`} · `
+              : ""}
             {st.label}
             {l.async && " · behind a queue"}
           </div>
@@ -627,7 +728,7 @@ const Head = ({ title, onClose }: { title: string; onClose: () => void }) => (
 );
 
 // A count you can type or step. It shows what you typed or stepped to while
-// that is on its way, then what was saved (the server keeps 1 to 1000), so
+// that is on its way, then what was saved (the server keeps 1 to 10,000: a brief at chat-app scale needs over 1,000 instances), so
 // quick clicks add up and a typed number is what − and + start from.
 function NumberField({
   value,

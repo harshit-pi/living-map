@@ -81,3 +81,28 @@ export const utilText = (util: number): string =>
   util > 1
     ? `${util >= 100 ? fmt(Math.round(util)) : +util.toFixed(1)}× cap`
     : `${Math.round(util * 100)}%`;
+
+// A part's id the model let slip into its text ("service-3") reads as the
+// part's name instead: ids made from a name (with a dash or a number, or in
+// [brackets]) only, so a plain word such as "cache" is never touched.
+export function named(
+  text: string,
+  comps: { id: string; label: string }[],
+): string {
+  const byId = new Map(comps.map((c) => [c.id, c.label]));
+  if (!byId.size) return text;
+  const ids = [...byId.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(
+    `\\[(${ids.join("|")})\\]|(?<![\\w-])(${ids.join("|")})(?![\\w-])`,
+    "g",
+  );
+  return text
+    .replace(re, (all, inBrackets?: string, bare?: string) => {
+      const id = inBrackets ?? bare ?? "";
+      if (!inBrackets && !/[-\d]/.test(id)) return all;
+      return `"${byId.get(id)}"`;
+    })
+    .replace(/""([^"\n]+)""/g, '"$1"');
+}

@@ -25,7 +25,8 @@ function Picker({
       title={title}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="cursor-pointer rounded-lg border-0 bg-transparent py-1 pl-2 pr-6 text-[12.5px] text-muted hover:bg-panel focus:ring-0"
+      // gives up width before the send button does on a narrow window
+      className="min-w-0 cursor-pointer truncate rounded-lg border-0 bg-transparent py-1 pl-2 pr-6 text-[12.5px] text-muted hover:bg-panel focus:ring-0"
     >
       {options.map((o) => (
         <option key={o.id} value={o.id}>
@@ -135,7 +136,7 @@ export const Composer = forwardRef<
           <button
             onClick={onStop}
             title="Stop Claude"
-            className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-on-primary hover:bg-ink"
+            className="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink text-on-primary hover:bg-ink"
           >
             <span className="h-2.5 w-2.5 rounded-[2px] bg-surface" />
           </button>
@@ -144,7 +145,7 @@ export const Composer = forwardRef<
             onClick={send}
             disabled={!text.trim()}
             title={busy ? "Send (runs when Claude finishes)" : "Send"}
-            className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary hover:bg-primary-strong disabled:opacity-40"
+            className="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-on-primary hover:bg-primary-strong disabled:opacity-40"
           >
             ↑
           </button>

@@ -24,8 +24,9 @@ export type DesignState = {
   // the design Claude judges against; never sent to the browser until revealed
   reference: Reference | null;
   revealed: boolean;
-  // the parts you removed last, with their wires, newest last, for Undo
-  removed?: { comp: Comp; wires: Wire[] }[];
+  // what you removed last, newest last, for Undo: a part with its wires, or
+  // a wire on its own
+  removed?: { comp?: Comp; wires: Wire[] }[];
 };
 
 export const newState = (): DesignState => ({
@@ -138,10 +139,12 @@ export function loadCheck(s: {
     const cap = capacity(c);
     const reads = Math.round(r.get(c.id) ?? 0);
     const writes = Math.round(w.get(c.id) ?? 0);
-    const util = Math.max(
-      Number.isFinite(cap.read) ? reads / cap.read : 0,
-      Number.isFinite(cap.write) ? writes / cap.write : 0,
-    );
+    // reads and writes share one capacity: each takes its share of what an
+    // instance (or a store's node) can do, so 5k reads/s and 5k writes/s on
+    // a 5k requests/s service is twice its capacity, not exactly it
+    const util =
+      (Number.isFinite(cap.read) ? reads / cap.read : 0) +
+      (Number.isFinite(cap.write) ? writes / cap.write : 0);
     const isAsync = asyncFrom.has(c.id);
     load[c.id] = {
       reads,
@@ -184,6 +187,17 @@ function freshId(s: DesignState, base: string): string {
   return id;
 }
 
+// A second "Service" becomes "Service 2", so every part can be told apart on
+// the canvas and named in a review.
+function uniqueLabel(s: DesignState, name: string): string {
+  const taken = new Set(s.comps.map((c) => c.label));
+  if (!taken.has(name)) return name;
+  for (let i = 2; ; i++) {
+    const next = `${name.slice(0, 40 - String(i).length - 1)} ${i}`;
+    if (!taken.has(next)) return next;
+  }
+}
+
 export function addComp(
   s: DesignState,
   kind: unknown,
@@ -194,7 +208,7 @@ export function addComp(
   id?: string,
 ): Comp | null {
   if (!isKind(kind) || s.comps.length >= 60) return null;
-  const name = str(label, 40).trim() || KINDS[kind].label;
+  const name = uniqueLabel(s, str(label, 40).trim() || KINDS[kind].label);
   const c: Comp = {
     id:
       id && safeId(id) && !s.comps.some((o) => o.id === id)
@@ -219,9 +233,9 @@ export function updateComp(s: DesignState, id: unknown, a: Raw): Comp | null {
   const c = findComp(s, id);
   if (!c) return null;
   if (a.label !== undefined) c.label = str(a.label, 40).trim() || c.label;
-  if (a.count !== undefined) c.count = num(a.count, 1, 1000, c.count);
+  if (a.count !== undefined) c.count = num(a.count, 1, 10_000, c.count);
   if (a.shards !== undefined && KINDS[c.kind].shards)
-    c.shards = num(a.shards, 1, 1000, c.shards);
+    c.shards = num(a.shards, 1, 10_000, c.shards);
   if (a.x !== undefined) c.x = num(a.x, -5000, 5000, c.x);
   if (a.y !== undefined) c.y = num(a.y, -5000, 5000, c.y);
   return c;
@@ -237,14 +251,19 @@ export function removeComp(s: DesignState, id: unknown): boolean {
   return true;
 }
 
-// Undo the last removal: the part comes back where it was, with the wires
-// whose other end is still there.
-export function restoreComp(s: DesignState): Comp | null {
+// Undo the last removal: a part comes back where it was, with the wires whose
+// other end is still there; a wire comes back if both its ends are there.
+export function restoreRemoved(
+  s: DesignState,
+): { comp?: Comp; wires: Wire[] } | null {
   const last = s.removed?.pop();
-  if (!last || s.comps.length >= 60) return null;
+  if (!last) return null;
   const { comp, wires } = last;
-  if (findComp(s, comp.id)) return null;
-  s.comps.push(comp);
+  if (comp) {
+    if (s.comps.length >= 60 || findComp(s, comp.id)) return null;
+    s.comps.push(comp);
+  }
+  const back: Wire[] = [];
   for (const w of wires)
     if (
       findComp(s, w.from) &&
@@ -253,9 +272,12 @@ export function restoreComp(s: DesignState): Comp | null {
       !s.wires.some(
         (o) => o.id === w.id || (o.from === w.from && o.to === w.to),
       )
-    )
+    ) {
       s.wires.push(w);
-  return comp;
+      back.push(w);
+    }
+  if (!comp && !back.length) return null;
+  return { comp, wires: back };
 }
 
 export function connect(
@@ -289,9 +311,11 @@ export function updateWire(s: DesignState, id: unknown, a: Raw): Wire | null {
 }
 
 export function removeWire(s: DesignState, id: unknown): boolean {
-  const n = s.wires.length;
-  s.wires = s.wires.filter((w) => w.id !== id);
-  return s.wires.length < n;
+  const w = s.wires.find((x) => x.id === id);
+  if (!w) return false;
+  s.wires = s.wires.filter((x) => x !== w);
+  s.removed = [...(s.removed ?? []), { wires: [w] }].slice(-10);
+  return true;
 }
 
 // ---------------------------------------------------------------- model ops
@@ -313,6 +337,8 @@ export function cleanBrief(raw: Raw): Brief | null {
       .filter((x) => x.label && x.value),
     reads: num(raw.reads, 0, 100_000_000, 0),
     writes: num(raw.writes, 0, 100_000_000, 0),
+    readIs: str(raw.readIs, 60).trim(),
+    writeIs: str(raw.writeIs, 60).trim(),
   };
 }
 
@@ -426,7 +452,7 @@ export function outlineOf(s: DesignState): string {
   const lines: string[] = [];
   if (s.brief)
     lines.push(
-      `DESIGN BRIEF: ${s.brief.title}. Peak ${fmt(s.brief.reads)} reads/s, ${fmt(s.brief.writes)} writes/s.`,
+      `DESIGN BRIEF: ${s.brief.title}. Peak ${fmt(s.brief.reads)} reads/s${s.brief.readIs ? ` (a read: ${s.brief.readIs})` : ""}, ${fmt(s.brief.writes)} writes/s${s.brief.writeIs ? ` (a write: ${s.brief.writeIs})` : ""}.`,
       ...s.brief.goals.map((g) => `- must: ${g}`),
       ...s.brief.constraints.map((g) => `- constraint: ${g}`),
       ...s.brief.scale.map((x) => `- scale: ${x.label}: ${x.value}`),
@@ -434,12 +460,17 @@ export function outlineOf(s: DesignState): string {
   else lines.push("DESIGN BRIEF: not written yet.");
   lines.push(
     s.comps.length
-      ? `THE LEARNER'S DESIGN (components; load is the rough check):\n${s.comps
+      ? `THE LEARNER'S DESIGN (components; load is the rough check: reads and writes share a part's capacity, so its % already counts both; quote it, do not work it out again):\n${s.comps
           .map((c) => {
             const l = load[c.id];
             const k = KINDS[c.kind];
             const scale = `${c.count > 1 ? ` ×${c.count}` : ""}${k.shards && c.shards > 1 ? `, ${c.shards} shards` : ""}`;
-            return `[${c.id}] ${k.label} "${c.label}"${scale} — ${fmt(l.reads)} reads/s, ${fmt(l.writes)} writes/s, ${Math.round(l.util * 100)}% of capacity (${l.status})${l.async ? ", async" : ""}`;
+            const cap = Number.isFinite(l.capRead)
+              ? l.capRead === l.capWrite
+                ? `, capacity ${fmt(l.capRead)} requests/s in all`
+                : `, capacity ${fmt(l.capRead)} reads/s or ${fmt(l.capWrite)} writes/s in all`
+              : "";
+            return `[${c.id}] ${k.label} "${c.label}"${scale} — ${fmt(l.reads)} reads/s, ${fmt(l.writes)} writes/s${cap}, ${Math.round(l.util * 100)}% of capacity (${l.status})${l.async ? ", async" : ""}`;
           })
           .join("\n")}`
       : "THE LEARNER'S DESIGN: empty so far.",

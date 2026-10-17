@@ -33,7 +33,8 @@ export function MapRows({
             className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-panel disabled:cursor-default disabled:bg-primary-soft/50"
           >
             <span
-              className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${m.purpose === "learn" ? "bg-success-soft text-success-strong" : "bg-warning-soft text-warning-strong"}`}
+              // one width for every kind, so the titles line up
+              className={`w-[62px] shrink-0 rounded-sm py-0.5 text-center text-[10px] font-semibold uppercase tracking-wide ${m.purpose === "learn" ? "bg-success-soft text-success-strong" : "bg-warning-soft text-warning-strong"}`}
             >
               {m.purpose}
             </span>

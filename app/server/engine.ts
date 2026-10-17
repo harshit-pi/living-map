@@ -353,6 +353,7 @@ export function createEngine({
         ts: Date.now(),
         view,
         ...(opts.blankId ? { blankId: opts.blankId } : {}),
+        ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
       });
       void reply.usage.then((u) =>
         recordUsage(m, u, reply.firstMs, reply.endMs),

@@ -714,3 +714,76 @@ test("a second Check my design while one runs asks for no second review", async 
     1,
   );
 });
+
+test("a Design map refuses the core actions its screen has no use for", async () => {
+  const { engine, calls } = setup(designMap());
+  const m = engine.state.map!;
+  m.nodes.dd = {
+    id: "dd",
+    parent: null,
+    kind: "question",
+    title: "How is no message lost?",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
+  const chat = m.chat.length;
+  for (const req of [
+    { type: "next" },
+    { type: "challenge", nodeId: "dd" },
+    { type: "fill", blankId: "b1", text: "x" },
+    { type: "scene", nodeId: "dd" },
+    { type: "play", nodeId: "dd", key: "a" },
+  ])
+    assert.deepEqual(
+      await act(engine, req as Parameters<typeof act>[1]),
+      { error: "That action is not available on this map." },
+      req.type,
+    );
+  await tick();
+  assert.equal(calls.length, 0, "no model call");
+  assert.equal(m.chat.length, chat, "nothing said");
+
+  // a deep dive's own actions still work, and a hint's reply stays with it
+  const hint = act(engine, { type: "hint", nodeId: "dd" });
+  await settled(calls, 1);
+  calls[0].release("Think about when Alice sees sent.");
+  await hint;
+  assert.equal(m.chat.at(-1)?.nodeId, "dd");
+  // a request with no type is plainly invalid
+  assert.deepEqual(await act(engine, {} as Parameters<typeof act>[1]), {
+    error: "That request is not valid.",
+  });
+});
+
+test("Undo on a Design map puts back a removed wire", async () => {
+  const { engine } = setup(designMap());
+  const s = () =>
+    engine.state.map?.data?.design as {
+      wires: { id: string; times: number }[];
+    };
+  await act(engine, design("add", { kind: "service", x: 300, y: 220 }));
+  await act(engine, design("connect", { from: "app", to: "service" }));
+  const id = s().wires[0].id;
+  await act(engine, design("wire", { id, times: 10 }));
+  await act(engine, design("unwire", { id }));
+  assert.equal(s().wires.length, 0);
+  assert.deepEqual(await act(engine, design("undo")), { ok: true });
+  assert.deepEqual(
+    s().wires.map((w) => [w.id, w.times]),
+    [[id, 10]],
+  );
+  assert.match(
+    (await act(engine, design("connect", { from: "app", to: "app" }))).error ??
+      "",
+    /itself/,
+  );
+  assert.match(
+    (await act(engine, design("connect", { from: "app", to: "service" })))
+      .error ?? "",
+    /already wired/,
+  );
+});

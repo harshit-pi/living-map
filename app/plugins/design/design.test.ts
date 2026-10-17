@@ -12,10 +12,12 @@ import {
   newState,
   outlineOf,
   removeComp,
-  restoreComp,
+  removeWire,
+  restoreRemoved,
   updateComp,
   type DesignState,
 } from "./core.ts";
+import { named } from "./web/format.ts";
 
 const brief = {
   title: "Twitter",
@@ -82,8 +84,43 @@ test("a cache beside the database leaves it only the misses", () => {
   assert.equal(load.db.reads, 30_000, "90% of reads stop at the cache");
   assert.equal(load.db.writes, 6_000, "writes still reach the store");
   assert.equal(load.db.status, "over");
-  updateComp(s, "db", { count: 3, shards: 2 });
+  // 30k reads over 12 nodes and 6k writes over 4 shards: a quarter of each
+  // node on reads and half on writes
+  updateComp(s, "db", { count: 3, shards: 4 });
+  assert.equal(loadCheck(s).db.util, 0.75);
   assert.equal(loadCheck(s).db.status, "busy");
+});
+
+test("reads and writes share a part's capacity", () => {
+  // a chat app: 4M reads and 3.5M writes a second through one service
+  const s = build(
+    [
+      ["app", "client"],
+      ["lb", "lb"],
+      ["chat", "service"],
+    ],
+    [
+      ["app", "lb"],
+      ["lb", "chat"],
+    ],
+  );
+  s.brief = { ...brief, reads: 4_000_000, writes: 3_500_000 };
+  updateComp(s, "chat", { count: 800 });
+  updateComp(s, "lb", { count: 20 });
+  let load = loadCheck(s);
+  assert.equal(load.chat.util, 1.88, "7.5M requests on 800 × 5k");
+  assert.equal(load.chat.status, "over");
+  assert.equal(load.lb.util, 1.88, "7.5M requests on 20 × 200k");
+  // sized from the hint's ~5k requests/s, it fits
+  updateComp(s, "chat", { count: 1600 });
+  updateComp(s, "lb", { count: 40 });
+  load = loadCheck(s);
+  assert.equal(load.chat.status, "busy");
+  assert.equal(load.lb.status, "busy");
+  assert.match(
+    outlineOf(s),
+    /"chat" ×1600 — 4M reads\/s, 3\.5M writes\/s, capacity 8M requests\/s in all, 94% of capacity/,
+  );
 });
 
 test("replicas add reads but only shards add writes", () => {
@@ -191,13 +228,17 @@ test("Undo puts a removed part back with its wires", () => {
   removeComp(s, "api");
   removeComp(s, "db");
   assert.equal(s.wires.length, 0);
-  assert.equal(restoreComp(s)?.id, "db", "the last removed comes back first");
+  assert.equal(
+    restoreRemoved(s)?.comp?.id,
+    "db",
+    "the last removed comes back first",
+  );
   assert.equal(
     s.wires.length,
     0,
     "its wire waits for the part at its other end",
   );
-  assert.equal(restoreComp(s)?.count, 7);
+  assert.equal(restoreRemoved(s)?.comp?.count, 7);
   assert.deepEqual(
     s.wires.map((w) => [w.from, w.to, w.carries, w.times]),
     [
@@ -205,7 +246,50 @@ test("Undo puts a removed part back with its wires", () => {
       ["api", "db", "read", 3],
     ],
   );
-  assert.equal(restoreComp(s), null, "nothing left to undo");
+  assert.equal(restoreRemoved(s), null, "nothing left to undo");
+});
+
+test("Undo puts a removed wire back as it was", () => {
+  const s = build(
+    [
+      ["app", "client"],
+      ["api", "service"],
+    ],
+    [["app", "api", { carries: "read", times: 10_000 }]],
+  );
+  const id = s.wires[0].id;
+  assert.ok(removeWire(s, id));
+  assert.equal(s.wires.length, 0);
+  assert.deepEqual(
+    restoreRemoved(s)?.wires.map((w) => [w.id, w.times]),
+    [[id, 10_000]],
+  );
+  assert.equal(s.wires[0].carries, "read");
+  assert.equal(restoreRemoved(s), null);
+});
+
+test("a second part of a kind gets its own name, and a stray id in Claude's text reads as it", () => {
+  const s = newState();
+  const a = addComp(s, "service", "", 0, 0)!;
+  const b = addComp(s, "service", "", 0, 0)!;
+  const c = addComp(s, "service", "Service", 0, 0)!;
+  assert.deepEqual(
+    [a, b, c].map((x) => [x.id, x.label]),
+    [
+      ["service", "Service"],
+      ["service-2", "Service 2"],
+      ["service-3", "Service 3"],
+    ],
+  );
+  const cache = addComp(s, "cache", "Redis", 0, 0)!;
+  assert.equal(
+    named(
+      `service-3 → service-2 carries no traffic; [${cache.id}] and the cache sit idle.`,
+      s.comps,
+    ),
+    `"Service 3" → "Service 2" carries no traffic; "Redis" and the cache sit idle.`,
+  );
+  assert.equal(named(`"service-2" is idle`, s.comps), `"Service 2" is idle`);
 });
 
 test("the model's ops are cleaned: unknown kinds, bad ids and stray points are dropped", () => {

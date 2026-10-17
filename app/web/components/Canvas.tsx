@@ -5,12 +5,13 @@ import { NodeCard } from "./NodeCard.tsx";
 import type { MapDoc } from "../../shared/model.ts";
 import { layout, setAside } from "../lib/layout.ts";
 
-// the floating message box covers the bottom of the canvas: frame above it
+// the floating message box, and Claude's reply above it, cover the bottom of
+// the canvas: frame above both
 const FRAME = {
   top: "24px",
   left: "24px",
   right: "24px",
-  bottom: "140px",
+  bottom: "200px",
 } as const;
 
 const nodeTypes = { map: NodeCard };

@@ -279,6 +279,10 @@ export type Brief = {
   scale: { label: string; value: string }[];
   reads: number; // requests/s at peak that read
   writes: number; // and that write
+  // what one read and one write are for this system, e.g. "a message
+  // delivered to one phone" (older maps have none)
+  readIs?: string;
+  writeIs?: string;
 };
 
 export type ReviewPoint = {
@@ -300,7 +304,8 @@ export type Load = {
   writes: number;
   capRead: number;
   capWrite: number;
-  util: number; // the busier of reads and writes, as a share of capacity
+  // reads and writes together, as a share of capacity (they share it)
+  util: number;
   status: "idle" | "ok" | "busy" | "over" | "backlog";
   async: boolean;
 };

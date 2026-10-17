@@ -51,11 +51,14 @@ const MODES: Mode[] = [
 
 export function StartScreen({
   error,
+  working,
   onStart,
   onCancel,
   onOpen,
 }: {
   error: string;
+  // what Claude is still doing on the open map, if anything
+  working: string | null;
   onStart: (text: string, purpose: Purpose) => void;
   onCancel?: () => void;
   onOpen: (id: string) => void;
@@ -118,6 +121,13 @@ export function StartScreen({
             </button>
           </div>
         </div>
+        {working !== null && (
+          <div className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">
+            Claude is still working on the open map
+            {working ? ` (${working.toLowerCase()})` : ""}. Starting or opening
+            another map stops it.
+          </div>
+        )}
         {error && (
           <div className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">
             {error}

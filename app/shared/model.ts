@@ -35,6 +35,9 @@ export type ChatLine = {
   view?: View;
   // a reply that checks a blank: it is shown on the blank, not as a caption
   blankId?: string;
+  // a main-conversation reply about one node (a hint, going deeper): it
+  // belongs with that node, not with the map's next step
+  nodeId?: string;
 };
 export type Thread = {
   id: string;

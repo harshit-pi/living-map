@@ -33,6 +33,9 @@ export type ServerPlugin = {
     string,
     (ctx: Ctx, args: Raw) => Promise<ActionResult> | ActionResult
   >;
+  // the core actions its screen sends (e.g. a deep dive's thread and hints);
+  // any other core action is refused on its maps
+  core: readonly string[];
   // the state the browser may see; leave out anything the user should work out
   view?: (map: StoredMap) => unknown;
   // one line for the maps list, e.g. "7 parts · 6 wires"

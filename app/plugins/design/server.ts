@@ -11,7 +11,7 @@ import {
   outlineOf,
   removeComp,
   removeWire,
-  restoreComp,
+  restoreRemoved,
   updateComp,
   updateWire,
   type DesignState,
@@ -30,10 +30,10 @@ const PROMPT = `You are the engine behind a SYSTEM DESIGN CANVAS. The learner de
 - The learner places and wires the components (THE LEARNER'S DESIGN below). You only place the clients at the start.
 - HINT on a deep dive: add a fact under it titled "Hint 1" (then 2, 3) with one pointed question that leads to the idea, never the answer itself.
 - When the learner answers a deep dive in its thread, judge it: if it holds up at the brief's scale, set it answered and say what they got right; if not, name the part that breaks, with numbers, not the fix.
-- Talk to the learner as "you". Be concrete: real numbers from the brief and the load check, components by their names.
+- Talk to the learner as "you". Be concrete: real numbers from the brief and the load check, components by their names in quotes (e.g. "Chat service"), never by their [id]: the learner never sees ids. Ids go only in a review point's "on".
 DESIGN OPS (in the same map block as node ops):
-  {"op":"brief","title":"Design Twitter","goals":["post a tweet","see a home timeline"],"constraints":["timeline loads in under 200 ms"],"scale":[{"label":"Daily users","value":"200M"},{"label":"Tweets a day","value":"500M"}],"reads":300000,"writes":6000}
-    goals and constraints at most 5 each, a few words each; scale at most 5 lines; reads and writes are PEAK requests per second that read and that write, following from the scale lines.
+  {"op":"brief","title":"Design Twitter","goals":["post a tweet","see a home timeline"],"constraints":["timeline loads in under 200 ms"],"scale":[{"label":"Daily users","value":"200M"},{"label":"Tweets a day","value":"500M"}],"reads":300000,"writes":6000,"readIs":"one home timeline load","writeIs":"one tweet posted"}
+    goals and constraints at most 5 each, a few words each; scale at most 5 lines; reads and writes are PEAK requests per second that read and that write, following from the scale lines so the learner can check them. readIs and writeIs say in a few words what ONE read and ONE write are; pick them so the numbers agree with the scale lines (if each message goes to 20 people, deliveries are 20x the sends).
   {"op":"reference","comps":[{"id":"lb","kind":"lb","label":"Load balancer"}],"wires":[{"from":"app","to":"lb","carries":"both","times":1}],"notes":["one line per key decision"]}
     Your own complete high-level design for the brief, as a strong answer would draw it (8-16 components). Use the client's id from your place op. carries: read | write | both; times: fan-out (e.g. 200 when one tweet is written into each follower's feed).
   {"op":"place","id":"app","kind":"client","label":"Mobile app","x":40,"y":220}
@@ -46,9 +46,9 @@ const START = `START: write, in one map block: the root question (a node with pa
 
 const REVIEW = `CHECK MY DESIGN: review the learner's design against the brief, the load check and your reference. Write one review op: 3-6 points, the most important first.
 - good: something that works at this scale, said in a few words.
-- fix: what breaks or is missing. Name the SYMPTOM with numbers from the load check (e.g. "Tweet store takes 300k reads/s, about 30x what one SQL node handles"), not the component that fixes it. If YOUR LAST REVIEW already raised the same problem and it is still there, you may now name the fix.
+- fix: what breaks or is missing. Name the SYMPTOM with numbers from the load check, as it gives them (its % counts reads and writes together) (e.g. "Tweet store takes 300k reads/s, about 30x what one SQL node handles"), not the component that fixes it. If YOUR LAST REVIEW already raised the same problem and it is still there, you may now name the fix.
 - think: one question that leads to the next idea in your reference.
-Point "on" at the learner's component ids. If the design already settles a deep dive, set that question answered with a summary of what they chose. The caption is one sentence: the single most important thing to do next.`;
+Point "on" at the learner's component ids; in the text, name parts by their names, never by id. If the design already settles a deep dive, set that question answered with a summary of what they chose. The caption is one sentence: the single most important thing to do next.`;
 
 const REVIEWING = "Reviewing your design";
 
@@ -67,6 +67,19 @@ export const design: ServerPlugin = {
   prompt: PROMPT,
   sections: { start: START, review: REVIEW },
   outline: (map) => outlineOf(state(map)),
+  // a deep dive's panel: its threads, hints, answer, going deeper, skipping it
+  core: [
+    "thread",
+    "fork",
+    "explain",
+    "deeper",
+    "hint",
+    "answer",
+    "choose",
+    "drop",
+    "restore",
+    "message",
+  ],
   applyOp: (map, op, { scope }) => {
     // a side thread may hint and judge, but not rewrite the brief or the design
     if (scope && op?.op !== "review")
@@ -129,7 +142,12 @@ export const design: ServerPlugin = {
       const w = connect(s, a.from, a.to, a.carries);
       if (!w)
         return {
-          error: "Those two cannot be wired (already wired, or the same part).",
+          error:
+            a.from === a.to
+              ? "A part cannot be wired to itself."
+              : s.wires.some((x) => x.from === a.from && x.to === a.to)
+                ? "Those two are already wired that way."
+                : "Those two cannot be wired.",
         };
       note(ctx, `Wired ${name(s, w.from)} → ${name(s, w.to)}.`);
       return { ok: true };
@@ -153,10 +171,21 @@ export const design: ServerPlugin = {
     },
     undo(ctx): ActionResult {
       const s = state(ctx.map);
-      const c = restoreComp(s);
-      if (!c) return { error: "Nothing to undo." };
-      note(ctx, `Put back ${name(s, c.id)}, which was removed by mistake.`);
-      return { ok: true, nodeId: c.id };
+      const back = restoreRemoved(s);
+      if (!back) return { error: "Nothing to undo." };
+      if (back.comp) {
+        note(
+          ctx,
+          `Put back ${name(s, back.comp.id)}, which was removed by mistake.`,
+        );
+        return { ok: true, nodeId: back.comp.id };
+      }
+      const w = back.wires[0];
+      note(
+        ctx,
+        `Put back the wire ${name(s, w.from)} → ${name(s, w.to)}, which was removed by mistake.`,
+      );
+      return { ok: true };
     },
     check(ctx) {
       if (!state(ctx.map).comps.length)

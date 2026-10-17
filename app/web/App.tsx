@@ -7,6 +7,7 @@ import { Segmented } from "./components/Segmented.tsx";
 import { UpdateButton } from "./components/UpdateButton.tsx";
 import { WorkingBar, WorkingPill } from "./components/WorkingBar.tsx";
 import { act } from "./lib/api.ts";
+import { setAside } from "./lib/layout.ts";
 import { useLiveMap } from "./lib/live.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
@@ -72,6 +73,12 @@ export default function App() {
   // a node that disappears (removed by Claude) closes its panel
   if (map && selection.some((id) => !map.nodes[id]))
     setSelection((s) => s.filter((id) => map.nodes[id]));
+  // so does one hidden with the set-aside nodes: what you write is then about
+  // the whole map, not a node you cannot see
+  const hidden = (id: string) =>
+    !!map && map.purpose === "explore" && setAside(map.nodes, id);
+  if (!showDropped && selection.some(hidden))
+    setSelection((s) => s.filter((id) => !hidden(id)));
 
   const openMap = async (mapId: string) => {
     setSelection([]);
@@ -87,6 +94,8 @@ export default function App() {
     return (
       <StartScreen
         error={startError}
+        // a move still running on the open map stops when another one starts
+        working={hasContent && live.busy ? (live.working?.label ?? "") : null}
         onCancel={hasContent ? () => setStarting(false) : undefined}
         onOpen={(id) => {
           void openMap(id);
@@ -203,15 +212,19 @@ export default function App() {
           Lost the connection to the Living Map server; reconnecting…
         </div>
       )}
-      {error && (
-        <div className="flex items-center bg-warning-soft px-4 py-1.5 text-sm text-warning-strong">
-          <span className="flex-1">{error}</span>
-          <button onClick={() => setError("")} className="text-warning-strong">
-            ×
-          </button>
-        </div>
-      )}
       <main className="relative min-h-0 flex-1">
+        {/* floats over the top of the work, so nothing below it moves */}
+        {error && (
+          <div className="absolute top-2 left-1/2 z-40 flex max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-3 rounded-lg bg-warning-soft px-3 py-1.5 text-sm text-warning-strong shadow-md ring-1 ring-warning-line">
+            <span className="min-w-0 flex-1">{error}</span>
+            <button
+              onClick={() => setError("")}
+              className="shrink-0 text-warning-strong"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {plugin ? (
           <plugin.Screen ws={ws} />
         ) : learn ? (

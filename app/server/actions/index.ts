@@ -36,6 +36,8 @@ export async function act(
 ): Promise<ActionResult> {
   if (!req || typeof req !== "object" || badIds(req))
     return { error: "That request is not valid." };
+  if (typeof req.type !== "string")
+    return { error: "That request is not valid." };
   const settings = cleanSettings(engine, req.settings);
   switch (req.type) {
     case "stop":
@@ -50,6 +52,15 @@ export async function act(
   const map = engine.state.map;
   if (!map) return { error: "Start first." };
   const ctx = makeCtx(engine, settings, map);
+  // a plugin's map takes its own actions and only the core ones its screen uses
+  const own = pluginFor(map.purpose);
+  if (
+    own &&
+    req.type !== "plugin" &&
+    req.type !== "purpose" &&
+    !own.core.includes(req.type)
+  )
+    return { error: "That action is not available on this map." };
 
   switch (req.type) {
     case "purpose":
@@ -116,6 +127,6 @@ export async function act(
     case "replay":
       return learn.replay(ctx, req.nodeId);
     default:
-      return { error: `Unknown action ${(req as { type?: string }).type}` };
+      return { error: `Unknown action "${(req as { type: string }).type}".` };
   }
 }

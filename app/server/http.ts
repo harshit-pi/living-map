@@ -43,7 +43,9 @@ export function createApp(engine: Engine, hub: Hub) {
 
   app.post("/api/action", async (req, res) => {
     try {
-      res.json(await act(engine, (req.body ?? {}) as ActionRequest));
+      const r = await act(engine, (req.body ?? {}) as ActionRequest);
+      // an action that did not go through says so with the status too
+      res.status(r.error ? 400 : 200).json(r);
     } catch (e) {
       console.error("[action] failed:", e);
       res
