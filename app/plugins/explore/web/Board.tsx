@@ -13,14 +13,14 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Cell, CellPopover } from "./Cell.tsx";
-import { Btn } from "./ui.tsx";
+import { Btn, NameLeft } from "./ui.tsx";
 import { anchorOf, useOpened, type Anchor, type Here } from "./view.ts";
 import {
   cellKey,
+  tooLong,
   FILL_LABEL,
   FILLING_LABEL,
   MARK_LOOK,
-  NAME_MAX,
   WEIGHT_WORD,
   WEIGHTS,
   type BoardView,
@@ -33,17 +33,6 @@ const RAIL = 200;
 const COL = 184;
 const STRIP = 48;
 const DRAWER = 132;
-// how much room is left, once a name nears the limit, so nothing is cut
-// without your seeing it
-function Left({ text }: { text: string }) {
-  if (text.length < NAME_MAX - 20) return null;
-  return (
-    <span className="text-[11px] text-muted tabular-nums">
-      {NAME_MAX - text.length} left
-    </span>
-  );
-}
-
 // the categories people most often leave out of what they want
 const MISSED = ["Cost", "Time", "Risk", "People", "Undo", "Regret"];
 
@@ -53,7 +42,9 @@ type Line = {
   cell?: (c: ColumnView) => ReactNode;
   // one cell from the rail to the last option
   span?: ReactNode;
-  tone?: "head" | "group" | "foot";
+  // a banner's tint is on the whole line, not on what sticks to the left
+  // as the board scrolls: that stops short of the last columns
+  tone?: "head" | "group" | "foot" | "banner";
 };
 
 // after a Choose, a column that fails a must shrinks to a strip
@@ -69,10 +60,16 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [opened, setOpened] = useOpened(ws.map.id, q);
-  // the wants you added while on this board: they stay on screen under a
-  // folded group's counts. Adding one is no choice to open its group, which
-  // then never folded again.
+  // the wants you added or kept while on this board: their group stays open
+  // while you are here, so the row you just made never vanishes into a
+  // count. Not saved as opened: adding one is no choice to open its group,
+  // which then never folded again. A group folds whole or not at all (rows
+  // shown under its counts read as a half-folded group).
   const [added, setAdded] = useState<string[]>([]);
+  const keep = (id: string, how: { keep: true } | { weight: string }) =>
+    void act("want", { q, id, ...how }).then((r) => {
+      if (!r.error) setAdded((a) => [...a, id]);
+    });
   // The board scrolls with its pane (ExploreScreen), both ways, and never
   // on its own: the option names stay pinned on top and the rail on the
   // left. The lines that span the board (the banner, + what else do you
@@ -84,8 +81,6 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   const cols = board.columns;
   const ghost = !board.keepAsIs;
   const aside = board.aside.length > 0;
-  const anyCell = Object.keys(board.cells).length > 0;
-  const hasRows = board.groups.length > 0 || board.suggestions.length > 0;
 
   const openCell = (option: string, want: string, at: Anchor) =>
     setPop({ option, want, at });
@@ -110,8 +105,9 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   if (board.needsWants)
     lines.push({
       key: "needs",
+      tone: "banner",
       span: (
-        <div className="flex flex-wrap items-center gap-2 bg-primary-soft px-3 py-2 text-[13px] text-body">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] text-body">
           This board has no list of what you want yet.
           <Btn small primary onClick={() => void act("suggest", { q })}>
             Suggest what to weigh ▸
@@ -119,20 +115,32 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
         </div>
       ),
     });
-  else if (hasRows && !anyCell) {
+  else if (board.needsFill) {
     // a Fill already on its way (from here or from Next) is not asked twice
     const filling = [ws.live.working, ...ws.live.waiting].some(
       (m) =>
         m?.nodeId === q &&
         (m.label === FILLING_LABEL || m.label === `Next: ${FILL_LABEL}`),
     );
+    // it stays while most of the board is empty: a cell you rated, or the
+    // one an added option came with, is no reason to fill the rest by hand
     lines.push({
       key: "frame",
+      tone: "banner",
       span: (
-        <div className="flex flex-wrap items-center gap-2 bg-primary-soft px-3 py-2 text-[13px] text-body">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] text-body">
           <span>
-            Claude suggested what to weigh. Keep, skip or add your own, mark the
-            musts, then press <b>Fill the board</b>.
+            {board.suggestions.length > 0 ? (
+              <>
+                Claude suggested what to weigh. Keep, skip or add your own, mark
+                the musts, then press <b>Fill the board</b>.
+              </>
+            ) : (
+              <>
+                Most of the board is empty. <b>Fill the board</b> has Claude
+                judge every empty cell; your own marks stay.
+              </>
+            )}
           </span>
           <Btn
             small
@@ -148,7 +156,10 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   }
 
   for (const g of board.groups) {
-    const folded = g.folded && !opened.has(g.weight);
+    const folded =
+      g.folded &&
+      !opened.has(g.weight) &&
+      !g.rows.some((r) => added.includes(r.id));
     const foldable = g.weight !== "must" && (g.folded || opened.has(g.weight));
     lines.push({
       key: `g-${g.weight}`,
@@ -165,7 +176,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
         ? (c) => <FoldedCounts board={board} g={g} col={c} />
         : undefined,
     });
-    for (const r of g.rows.filter((x) => !folded || added.includes(x.id)))
+    for (const r of folded ? [] : g.rows)
       lines.push({
         key: `r-${r.id}`,
         rail: (
@@ -204,9 +215,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
               // Claude's weight shows before you keep it; picking one keeps
               // it at that weight
               value={r.weight}
-              onChange={(e) =>
-                void act("want", { q, id: r.id, weight: e.target.value })
-              }
+              onChange={(e) => keep(r.id, { weight: e.target.value })}
               title="Claude suggests this weight; pick one to keep it at that weight"
               className="mr-1 cursor-pointer rounded border-0 bg-transparent py-0 pl-0.5 pr-4 text-xs text-muted hover:bg-panel"
             >
@@ -217,7 +226,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
               ))}
             </select>
             <button
-              onClick={() => void act("want", { q, id: r.id, keep: true })}
+              onClick={() => keep(r.id, { keep: true })}
               className="text-primary-strong underline-offset-2 hover:underline"
             >
               keep
@@ -289,7 +298,9 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
         ? "bg-panel border-b border-line"
         : l.tone === "foot"
           ? "bg-surface border-b border-line"
-          : "border-b border-line";
+          : l.tone === "banner"
+            ? "bg-primary-soft border-b border-line"
+            : "border-b border-line";
 
   return (
     <div
@@ -747,7 +758,7 @@ function AddWant({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!title.trim()) return;
+          if (!title.trim() || tooLong(title)) return;
           // cleared at once, so the next want you type starts empty (cleared
           // only once the server answered, what you typed meanwhile was added
           // to the old text and sent with it); a refused want (the board is
@@ -773,7 +784,6 @@ function AddWant({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="+ what else do you want?"
-          maxLength={NAME_MAX}
           className="w-56 min-w-0 rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
         />
         <select
@@ -788,8 +798,8 @@ function AddWant({
             </option>
           ))}
         </select>
-        <Left text={title} />
-        {title.trim() && (
+        <NameLeft text={title} />
+        {title.trim() && !tooLong(title) && (
           <button
             type="submit"
             className="rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-on-primary hover:bg-primary-strong"
@@ -830,7 +840,7 @@ function SomethingElse({ here, q }: { here: Here; q: string }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!title.trim()) return;
+            if (!title.trim() || tooLong(title)) return;
             void here.act("option", { q, title });
             setTitle("");
             setAdding(false);
@@ -845,10 +855,9 @@ function SomethingElse({ here, q }: { here: Here; q: string }) {
               if (e.key === "Escape") setAdding(false);
             }}
             placeholder="Your option, in a few words"
-            maxLength={NAME_MAX}
             className="w-full rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
           />
-          <Left text={title} />
+          <NameLeft text={title} />
         </form>
       ) : (
         <div className="mt-2">

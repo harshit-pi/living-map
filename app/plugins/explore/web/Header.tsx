@@ -135,6 +135,20 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
             ws.setSelection([gap.want]);
             return;
           }
+          // a choice with its own board: Next opens it, as its chip does,
+          // and that board's Next takes it from there
+          if (gap?.kind === "open") {
+            place.openBoard(gap.q);
+            ws.setSelection([]);
+            return;
+          }
+          // Claude agrees with the cause you marked likely: Next opens the
+          // question, whose panel settles it
+          if (gap?.kind === "settle") {
+            place.setTab("tree");
+            ws.setSelection([gap.q]);
+            return;
+          }
           if (!view) {
             void ws.run({ type: "next" });
             return;
@@ -158,13 +172,13 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
         }
         // one width whatever the label says, so the header never shifts;
         // narrower on a smaller window, where the header has less room
-        className="flex min-w-0 shrink-0 items-center whitespace-nowrap rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40 lg:w-[176px] xl:w-[300px]"
+        className="flex w-[150px] min-w-0 shrink-0 items-center whitespace-nowrap rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40 lg:w-[176px] xl:w-[300px]"
       >
         Next
-        {/* the label wherever the header has room, cut short on a smaller
-            window; its reason is in the title */}
+        {/* the label at every width, cut short on a smaller window: the
+            title holds the reason, and a touch screen shows no title */}
         {gap && (
-          <span className="hidden min-w-0 truncate lg:inline">
+          <span className="min-w-0 truncate">
             : {onItsWay ? "on its way…" : gap.label}
           </span>
         )}

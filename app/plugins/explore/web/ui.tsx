@@ -9,8 +9,25 @@ import {
   type ReactNode,
 } from "react";
 
-import { MARK_LOOK, markWord, type Mark } from "../shared.ts";
+import { MARK_LOOK, markWord, NAME_MAX, type Mark } from "../shared.ts";
 import type { Anchor } from "./view.ts";
+
+// A name's room, shown as it nears the limit, and past it how much to cut.
+// The inputs take no maxLength: one stopped typing silently, and a long name
+// was saved cut mid-word.
+export function NameLeft({ text }: { text: string }) {
+  const left = NAME_MAX - text.trim().length;
+  if (left > 20) return null;
+  return (
+    <span
+      className={`text-[11px] tabular-nums ${left < 0 ? "font-medium text-danger-strong" : "text-muted"}`}
+    >
+      {left < 0
+        ? `${-left} too long: keep the name short, the rest goes in its thread`
+        : `${left} left`}
+    </span>
+  );
+}
 
 export function Btn({
   children,

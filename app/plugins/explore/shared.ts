@@ -8,6 +8,8 @@ export const PLUGIN_ID = "explore";
 // the longest name an option or a want of yours may have: the inputs stop
 // there too, so nothing you type is cut without your seeing it
 export const NAME_MAX = 80;
+// past the limit a name is not sent: the screen says how much to cut
+export const tooLong = (text: string) => text.trim().length > NAME_MAX;
 
 export type Shape = "choose" | "causes" | "open";
 export type Weight = "must" | "matters" | "nice";
@@ -239,6 +241,8 @@ export type BoardView = {
   filledAt: number | null;
   // a choice with no list of what you want yet (an older map)
   needsWants: boolean;
+  // one Fill is the step: most of the board is still empty (core's needsFill)
+  needsFill: boolean;
   settled: boolean;
   // what Next does when this is the board you are on
   next: Gap;
@@ -295,9 +299,12 @@ export type OpenItem = {
   q: string;
 };
 
-// "run" and "tell" are yours, not Claude's: a check Claude picked to run
-// first, which Next opens (its thread is where you say what it found), and a
-// must Claude cannot tell without you, whose want Next opens
+// "run", "tell", "open" and "settle" are yours, not Claude's: a check
+// Claude picked to run first, which Next opens (its thread is where you say
+// what it found); a must Claude cannot tell without you, whose want Next
+// opens; a choice with its own board, which Next opens; a cause list whose
+// likely cause Claude's last word agrees with, whose question Next opens to
+// settle
 export type GapKind =
   | "fill"
   | "something"
@@ -305,17 +312,25 @@ export type GapKind =
   | "against"
   | "wrap"
   | "question"
+  | "open"
+  | "settle"
   | "run"
   | "tell"
   | "sum";
 
 // Next's gaps you act on yourself: pressing Next pays for no move
-export const YOURS: ReadonlySet<GapKind> = new Set(["run", "tell"]);
+export const YOURS: ReadonlySet<GapKind> = new Set([
+  "run",
+  "tell",
+  "open",
+  "settle",
+]);
 
 export type Gap = {
   kind: GapKind;
   q: string;
-  // the option, or for "run" the check
+  // the option; for "run" the check; for a causes question, the finding
+  // Next has Claude weigh
   option?: string;
   // the want ("ask", and for "tell" the one Next opens)
   want?: string;

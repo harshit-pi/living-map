@@ -1,6 +1,7 @@
 import {
   Background,
   BaseEdge,
+  ControlButton,
   Controls,
   Handle,
   Position,
@@ -25,11 +26,12 @@ import {
 import {
   CARD_W,
   frameOf,
+  SLOT,
   SPINE,
   treeLayout,
   type TreeEdge,
 } from "./treeLayout.ts";
-import { exploreView, tagOf } from "./view.ts";
+import { exploreView, questionState, tagOf } from "./view.ts";
 import type { MapDoc, MapNode } from "../../../shared/model.ts";
 import { lookOf } from "../../../web/components/look.ts";
 import { NodeCard } from "../../../web/components/NodeCard.tsx";
@@ -76,7 +78,8 @@ const nodeTypes = { map: TreeCard };
 
 // Square lines along the waypoints the layout gave: under the question
 // along its bus (and for a wrapped row down the trunk on the left to that
-// row's bus), then down into the card; down a column's spine, then across.
+// row's bus), then down into the card; down a column's spine, then across;
+// for a question's notes, along its bus to their spine, down, then across.
 function TreeLine({
   sourceX,
   sourceY,
@@ -87,13 +90,15 @@ function TreeLine({
 }: EdgeProps) {
   const e = data as TreeEdge | undefined;
   const path =
-    e?.kind === "row" && e.bus !== undefined
-      ? `M ${sourceX} ${sourceY} V ${e.bus}` +
-        (e.trunk !== undefined && e.rowBus !== undefined
-          ? ` H ${e.trunk} V ${e.rowBus}`
-          : "") +
-        ` H ${targetX} V ${targetY}`
-      : `M ${sourceX} ${sourceY} V ${targetY} H ${targetX}`;
+    e?.kind === "stack" && e.bus !== undefined && e.spine !== undefined
+      ? `M ${sourceX} ${sourceY} V ${e.bus} H ${e.spine} V ${targetY} H ${targetX}`
+      : e?.kind === "row" && e.bus !== undefined
+        ? `M ${sourceX} ${sourceY} V ${e.bus}` +
+          (e.trunk !== undefined && e.rowBus !== undefined
+            ? ` H ${e.trunk} V ${e.rowBus}`
+            : "") +
+          ` H ${targetX} V ${targetY}`
+        : `M ${sourceX} ${sourceY} V ${targetY} H ${targetX}`;
   return <BaseEdge path={path} style={style} />;
 }
 const edgeTypes = { tree: TreeLine };
@@ -200,25 +205,22 @@ export function Tree({
       }
     return ids;
   }, [selected, map.nodes]);
-  // as many columns across as fit at a readable zoom; then a new row
-  const perRow = Math.max(
-    3,
-    Math.floor(
-      ((width || window.innerWidth) - FRAME.left - FRAME.right) /
-        READABLE /
-        (CARD_W + 2 * 24 + 32),
-    ),
+  // as wide as the room at a readable zoom, then a new row; at least three
+  // columns, and never wider for the panel opening, which would reflow
+  const maxW = Math.max(
+    3 * SLOT + 2 * 32,
+    ((width || window.innerWidth) - FRAME.left - FRAME.right) / READABLE,
   );
   const tree = useMemo(
     () =>
       treeLayout(visible, {
-        perRow,
+        maxW,
         heightOf: (n) => sizes[n.id]?.height ?? heightOf(n),
         folds: (n) =>
           !opened.has(n.id) &&
           (settled.has(n.id) || (!!n.parent && setAside(map.nodes, n.id))),
       }),
-    [visible, perRow, sizes, opened, settled, map.nodes],
+    [visible, maxW, sizes, opened, settled, map.nodes],
   );
   const laid = useMemo(() => {
     const shown = visible.filter((n) => tree.boxes[n.id]);
@@ -235,7 +237,7 @@ export function Tree({
           id: e.id,
           source: e.source,
           target: e.target,
-          sourceHandle: e.kind === "row" ? "down" : "spine",
+          sourceHandle: e.kind === "column" ? "spine" : "down",
           targetHandle: e.kind === "row" ? "top" : "side",
           type: "tree",
           data: e,
@@ -261,8 +263,24 @@ export function Tree({
   const nodes = useMemo(
     () =>
       laid.nodes.map((n) => {
-        const node = map.nodes[n.id];
-        const tag = tagOf(view, map.nodes, node);
+        const was = map.nodes[n.id];
+        // a question's card says where it stands as the stand line does
+        const state = questionState(view, was);
+        const node =
+          state &&
+          !was.dropped &&
+          (was.status === "open" || was.status === "answered") &&
+          (state === "decided") !== (was.status === "answered")
+            ? {
+                ...was,
+                status:
+                  state === "decided"
+                    ? ("answered" as const)
+                    : ("open" as const),
+              }
+            : was;
+        const tag =
+          state === "leaning" ? "leaning" : tagOf(view, map.nodes, node);
         const folded = tree.folded[n.id];
         return {
           ...n,
@@ -270,6 +288,7 @@ export function Tree({
           selected: selected.includes(n.id),
           data: {
             ...n.data,
+            node,
             purpose: map.purpose,
             threads: threads[n.id] ?? 0,
             working: n.id === workingId,
@@ -470,13 +489,25 @@ export function Tree({
         <Background color="var(--color-line-strong)" gap={22} />
         <Controls
           showInteractive={false}
+          // its own fit runs React Flow's fitView as well, queued until after
+          // ours: that framed the whole tree at an unreadable zoom
+          showFitView={false}
           position="top-left"
-          onFitView={() => {
-            void frameWhole();
-            // you have looked at the whole tree: nothing on it is new now
-            setSeen(new Set(Object.keys(map.nodes)));
-          }}
-        />
+        >
+          <ControlButton
+            onClick={() => {
+              void frameWhole();
+              // you have looked at the whole tree: nothing on it is new now
+              setSeen(new Set(Object.keys(map.nodes)));
+            }}
+            title="Fit: the question and what is right under it"
+            aria-label="Fit"
+          >
+            <svg viewBox="0 0 32 30" aria-hidden>
+              <path d="M3.692 4.63c0-.53.4-.938.939-.938h5.215V0H4.708C2.13 0 0 2.054 0 4.63v5.216h3.692V4.631zM27.354 0h-5.2v3.692h5.17c.53 0 .984.4.984.939v5.215H32V4.631A4.624 4.624 0 0027.354 0zm.954 24.83c0 .532-.4.94-.939.94h-5.215v3.768h5.215c2.577 0 4.631-2.13 4.631-4.707v-5.139h-3.692v5.139zm-23.677.94c-.531 0-.939-.4-.939-.94v-5.138H0v5.139c0 2.577 2.13 4.707 4.708 4.707h5.138V25.77H4.631z" />
+            </svg>
+          </ControlButton>
+        </Controls>
       </ReactFlow>
       {fresh.length > 0 && (
         // beside the zoom buttons, in the corner a card is least often in

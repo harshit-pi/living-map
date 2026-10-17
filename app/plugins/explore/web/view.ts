@@ -13,6 +13,7 @@ import {
   isCheck,
   PLUGIN_ID,
   type ExploreView,
+  type RootState,
   type Weight,
 } from "../shared.ts";
 
@@ -180,6 +181,20 @@ export function tagOf(
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+// Where a question stands, as the stand line says it (worked out from the
+// map): the root's is the whole map's, one below is decided once settled.
+// Its card follows it: a root Claude had marked answered read DECIDED under
+// a stand line saying LEANING, with questions under it still open.
+export function questionState(
+  view: ExploreView | null,
+  n: MapDoc["nodes"][string],
+): RootState | undefined {
+  if (!view || n.kind !== "question") return undefined;
+  if (n.id === view.root) return view.rollup.state;
+  const p = view.questions.find((q) => q.id === n.id);
+  return p ? (p.settled ? "decided" : "open") : undefined;
 }
 
 // What the board's parts work with.

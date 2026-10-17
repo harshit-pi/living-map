@@ -5,12 +5,12 @@
 
 import { useState, type ReactNode } from "react";
 
-import { Btn, MarkText } from "./ui.tsx";
+import { Btn, MarkText, NameLeft } from "./ui.tsx";
 import { anchorOf, type Here } from "./view.ts";
 import type { MapNode, NodeAction } from "../../../shared/model.ts";
 import {
   cellKey,
-  NAME_MAX,
+  tooLong,
   WEIGHT_WORD,
   WEIGHTS,
   type BoardView,
@@ -227,11 +227,11 @@ function WantActions({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (!title.trim()) return;
+            if (!title.trim() || tooLong(title)) return;
             void act("want", { q, id: row.id, title });
             setRenaming(false);
           }}
-          className="flex basis-full gap-1.5"
+          className="flex basis-full flex-wrap gap-1.5"
         >
           <input
             autoFocus
@@ -240,15 +240,18 @@ function WantActions({
             onKeyDown={(e) => {
               if (e.key === "Escape") setRenaming(false);
             }}
-            maxLength={NAME_MAX}
             className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
           />
           <button
             type="submit"
-            className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary-strong"
+            disabled={tooLong(title)}
+            className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
           >
             Rename
           </button>
+          <span className="basis-full">
+            <NameLeft text={title} />
+          </span>
         </form>
       )}
     </>

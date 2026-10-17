@@ -228,7 +228,7 @@ function fillTurn(ctx: Ctx, q: MapNode, how: TurnHow = {}) {
     ctx.note(
       `Pressing Fill kept Claude's suggestions ${kept.map((r) => t(nodes[r.id])).join(", ")} as what you want.`,
     );
-  const { cells, left } = fillCells(s, nodes, b);
+  const { cells, left } = fillCells(nodes, b);
   if (!cells.length)
     return fail(
       "Every cell has a mark already: ask on one to have Claude check it again.",
@@ -371,6 +371,12 @@ function gapTurn(ctx: Ctx, gap: Gap) {
     return fail(
       "Claude can't tell this must without you: say what you know in the want's thread, or rate the cell yourself.",
     );
+  if (gap.kind === "settle")
+    return fail(
+      "Claude agrees with the cause you marked likely: settle the question in its panel.",
+    );
+  if (gap.kind === "open")
+    return fail("That choice has its own board: Next works on it there.");
   ctx.say("Next");
   // causes are told apart by a fact, never by a choice
   if (
@@ -378,6 +384,19 @@ function gapTurn(ctx: Ctx, gap: Gap) {
     q &&
     shapeOf(state(ctx), nodes, q.id) === "causes"
   ) {
+    // a finding you reported: Claude weighs it and says so in its stand,
+    // which still said nothing was checked
+    const found = option?.kind === "fact" ? option : undefined;
+    if (found)
+      return keepReply(
+        ctx,
+        q.id,
+        ctx.engine.turn(
+          `${how.prefix} WEIGH what came in on the causes of [${q.id}] ${t(q)}: [${found.id}] ${t(found)}${found.summary ? `: ${found.summary}` : ""}. Say in the caption which cause it points at, how strongly, and what is still unchecked. Write only a stand op for [${q.id}], leading the cause it points at, or null if it tells none apart.`,
+          ctx.settings,
+          { label: how.label, nodeId: q.id },
+        ),
+      );
     // a check that repeats one on the map is a move spent on nothing
     const checks = checksOn(nodes, q.id);
     const have = checks.length
@@ -882,7 +901,13 @@ export const explore: ServerPlugin = {
     },
     next(ctx, a) {
       const s = state(ctx);
-      return gapTurn(ctx, nextGap(s, ctx.map.nodes, idArg(a.q)));
+      const gap = nextGap(s, ctx.map.nodes, idArg(a.q));
+      // asked from elsewhere (the screen opens the board instead), Next on
+      // a choice with its own board is that board's own next step
+      return gapTurn(
+        ctx,
+        gap.kind === "open" ? nextGap(s, ctx.map.nodes, gap.q) : gap,
+      );
     },
     message(ctx, a) {
       const text = typeof a.text === "string" ? a.text.slice(0, 4000) : "";

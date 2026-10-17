@@ -8,7 +8,9 @@ import { test } from "vitest";
 import {
   applyExploreOp,
   clip,
+  fillCells,
   isStale,
+  needsFill,
   newState,
   fold,
   live,
@@ -18,6 +20,7 @@ import {
   peek,
   reconcile,
   rollup,
+  SETTLE_SURE,
   shown,
   summaryOf,
   tally,
@@ -28,6 +31,8 @@ import { parseDump, RUN1, RUN2 } from "./fixtures.ts";
 import { explore } from "./server.ts";
 import {
   isCheck,
+  tooLong,
+  YOURS,
   type ExploreState,
   type ExploreView,
   type RowView,
@@ -824,6 +829,17 @@ test("Next takes the first gap, rule by rule", () => {
     mark: "same",
     facts: ["f-pg"],
   });
+  // a cell or two of yours leaves Fill the step while most of the board is
+  // empty (QA round 6: one rating took Fill away for good)
+  assert.equal(gap().kind, "fill");
+  for (const o of ["keep", "pg", "dyn"])
+    op({
+      op: "cell",
+      option: o,
+      want: "w-speed",
+      mark: "same",
+      facts: ["f-pg"],
+    });
   // 2: no keep-as-is in the running
   nodes.keep.dropped = true;
   assert.equal(gap().kind, "something");
@@ -859,6 +875,7 @@ test("Next takes the first gap, rule by rule", () => {
   assert.equal(g.option, "dyn");
   op({ op: "against", option: "dyn", text: "lock-in" });
   // 5: an empty cell on a matters row
+  delete live(map).boards.q.cells["dyn|w-speed"];
   g = gap();
   assert.equal(g.kind, "ask");
   assert.equal(g.want, "w-speed");
@@ -877,9 +894,11 @@ test("Next takes the first gap, rule by rule", () => {
   g = gap();
   assert.equal(g.kind, "wrap");
   live(map).boards.q.commit!.premortem.claude = ["a"];
-  // 7: an open choice elsewhere
+  // 7: an open choice elsewhere, with a board of its own: Next opens it
+  // there, for no move (QA round 6: a move from here left it open)
   g = gap();
-  assert.deepEqual([g.kind, g.q], ["question", "q2"]);
+  assert.deepEqual([g.kind, g.q], ["open", "q2"]);
+  assert.ok(YOURS.has(g.kind));
   assert.match(g.label, /^Open choice: Which host\?/);
   // 8: an open question
   nodes.h1.status = "chosen";
@@ -909,7 +928,8 @@ test("on run 1 after a Choose, Next never goes deeper than a choice open above",
   );
   s.boards.root.commit!.premortem.claude = ["Snapshot lags a real need"];
   const g = nextGap(s, nodes, "root");
-  assert.equal(g.kind, "question");
+  // a choice with a board: Next opens it there
+  assert.equal(g.kind, s.boards[g.q] ? "open" : "question");
   assert.ok(["h-data-path", "t-compliance", "t-limits"].includes(g.q), g.q);
 });
 
@@ -2002,6 +2022,181 @@ test("on a cause list, a check answered after the stand makes the stand stale", 
   assert.equal(isStale(s, nodes, "root"), true);
 });
 
+// ---------------------------------------------------------------- round 6
+
+test("Fill stays the step while most of the board is empty, and fills beside your own marks", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  const b = () => s.boards.q;
+  assert.ok(needsFill(nodes, b()));
+  // you rate one cell yourself, as the banner asks
+  s.boards.q.cells["pg|w-cost"] = {
+    you: { mark: "same", note: "", facts: [], sure: "high", at: 1 },
+  };
+  assert.ok(b().cells["pg|w-cost"].you, "the mark is yours");
+  assert.ok(needsFill(nodes, b()));
+  assert.equal(nextGap(s, nodes, "q").kind, "fill");
+  assert.ok(viewOf(s, nodes, {}).boards.q.needsFill);
+  // a Fill writes Claude's side on it too: your mark stays, Claude's beside
+  const { cells } = fillCells(nodes, b());
+  assert.ok(cells.some((c) => c.option === "pg" && c.want === "w-cost"));
+  assert.equal(cells.length, 6);
+  // an option Claude adds with one cell of its own leaves Fill there too
+  nodes.yb = node("yb", "q", "option", "YugabyteDB", { order: 50 });
+  applyExploreOp(s, nodes, {
+    op: "cell",
+    option: "yb",
+    want: "w-cost",
+    mark: "same",
+    facts: ["f-pg"],
+  });
+  assert.equal(nextGap(s, nodes, "q").kind, "fill");
+  // once most cells have a mark, Next works cell by cell
+  for (const o of ["keep", "pg", "dyn"])
+    applyExploreOp(s, nodes, {
+      op: "cell",
+      option: o,
+      want: "w-speed",
+      mark: "same",
+      facts: ["f-pg"],
+    });
+  assert.ok(!needsFill(nodes, b()));
+  assert.notEqual(nextGap(s, nodes, "q").kind, "fill");
+});
+
+test("after a Choose, Next checks what is still unknown on the option chosen before it sums up", async () => {
+  const m = storedMap(boardNodes());
+  m.data = { explore: withWants(m.nodes).s };
+  const nodes = m.nodes;
+  const s = live(m);
+  for (const o of ["keep", "pg", "dyn"])
+    applyExploreOp(s, nodes, {
+      op: "cell",
+      option: o,
+      want: "w-cost",
+      mark: "same",
+      facts: ["f-pg"],
+    });
+  const { run } = stub(m);
+  await run("commit", { option: "pg" });
+  live(m).boards.q.commit!.premortem.claude = ["a"];
+  // nothing chosen is settled at q2 yet: the chosen option's empty matters
+  // cell still comes first, on this board
+  const g = nextGap(peek(m), nodes, "q");
+  assert.deepEqual([g.kind, g.option, g.want], ["ask", "pg", "w-speed"]);
+  assert.match(g.reason, /your choice/);
+  // the other columns are out: no ask on them
+  applyExploreOp(live(m), nodes, {
+    op: "cell",
+    option: "pg",
+    want: "w-speed",
+    mark: "better",
+    facts: ["f-pg"],
+  });
+  assert.notEqual(nextGap(peek(m), nodes, "q").kind, "ask");
+});
+
+test("Next on a choice with its own board opens it, and asked from elsewhere runs that board's step", async () => {
+  const m = storedMap(boardNodes());
+  m.data = { explore: withWants(m.nodes).s };
+  const { run, turns } = stub(m);
+  // q is decided, q2 is the choice still open
+  await run("commit", { option: "pg" });
+  live(m).boards.q.commit!.premortem.claude = ["a"];
+  for (const w of ["w-cost", "w-speed"])
+    applyExploreOp(live(m), m.nodes, {
+      op: "cell",
+      option: "pg",
+      want: w,
+      mark: "same",
+      facts: ["f-pg"],
+    });
+  const g = nextGap(peek(m), m.nodes);
+  assert.deepEqual([g.kind, g.q], ["open", "q2"]);
+  assert.match(g.label, /^Open choice: Which host\?/);
+  // the server, asked anyway, works on q2's own board, not the tree
+  const before = turns.length;
+  await run("next", {});
+  assert.equal(turns.length, before + 1);
+  assert.equal(turns.at(-1)!.opts.nodeId, "q2");
+  assert.doesNotMatch(turns.at(-1)!.action, /clearer or decidable/);
+});
+
+test("a check's result reported in its thread is weighed, then settling is yours", async () => {
+  const m = storedMap(parseDump(RUN2));
+  const { run, turns } = stub(m);
+  await run("commit", { option: "opt-resp-bofu" });
+  await run("settle", { q: "root", answer: "Traffic fell" });
+  await run("settle", { q: "q-confirm-serp", answer: "two checks" });
+  const t0 = Date.now();
+  const s = live(m);
+  applyExploreOp(
+    s,
+    m.nodes,
+    {
+      op: "stand",
+      q: "q-organic-cause",
+      lead: null,
+      line: "nothing checked yet",
+    },
+    { now: t0 },
+  );
+  applyExploreOp(
+    s,
+    m.nodes,
+    {
+      op: "takeaway",
+      node: "fact-query-split",
+      text: "Run first: brand CTR flat means AI overviews",
+    },
+    { now: t0 + 1 },
+  );
+  assert.equal(nextGap(peek(m), m.nodes).kind, "run");
+  // you ran it; Claude's thread answer wrote the result into the card
+  m.nodes["fact-query-split"] = {
+    ...m.nodes["fact-query-split"],
+    title: "Where CTR fell",
+    summary: "Brand CTR flat; 'what is' queries down 60%",
+    updatedAt: t0 + 1000,
+  };
+  let g = nextGap(peek(m), m.nodes);
+  assert.deepEqual(
+    [g.kind, g.q, g.option],
+    ["question", "q-organic-cause", "fact-query-split"],
+  );
+  assert.match(g.label, /^Weigh what came in/);
+  await run("next", {});
+  assert.match(turns.at(-1)!.action, /WEIGH what came in/);
+  assert.match(turns.at(-1)!.action, /Write only a stand op/);
+  // Claude's stand leads the cause it points at; you mark it likely
+  applyExploreOp(
+    live(m),
+    m.nodes,
+    {
+      op: "stand",
+      q: "q-organic-cause",
+      lead: "opt-org-serp",
+      line: "the split points at AI overviews",
+      sure: SETTLE_SURE + 10,
+    },
+    { now: t0 + 2000 },
+  );
+  await run("commit", { option: "opt-org-serp" });
+  g = nextGap(peek(m), m.nodes);
+  assert.deepEqual([g.kind, g.q], ["settle", "q-organic-cause"]);
+  assert.ok(YOURS.has(g.kind));
+  const before = turns.length;
+  const r = await run("next", {});
+  assert.ok("error" in r);
+  assert.equal(turns.length, before);
+});
+
+test("a name past the limit is said to be too long, never cut as you type", () => {
+  assert.ok(!tooLong("Runs locally in Docker"));
+  assert.ok(tooLong("x".repeat(81)));
+  assert.ok(!tooLong(`${"x".repeat(80)}   `));
+});
+
 // ---------------------------------------------------------------- the Tree
 
 // A cause list as QA's AWS run had it: the question, five causes with three
@@ -2020,8 +2215,26 @@ function awsTree(): MapNode[] {
 }
 const H = 100;
 
+// the room at 1440×900, as Tree.tsx sizes rows: wide enough for a row at
+// the readable zoom
+const WIDE = 1392 / 0.7;
+const overlapFree = (
+  b: Record<string, { x: number; y: number; w: number; h: number }>,
+) => {
+  const all = Object.values(b);
+  for (const a of all)
+    for (const c of all)
+      if (a !== c)
+        assert.ok(
+          a.x + a.w <= c.x ||
+            c.x + c.w <= a.x ||
+            a.y + a.h <= c.y ||
+            c.y + c.h <= a.y,
+        );
+};
+
 test("the Tree lays the causes across under the question, and each one's checks down its column", () => {
-  const t = treeLayout(awsTree(), { perRow: 6, heightOf: () => H });
+  const t = treeLayout(awsTree(), { maxW: WIDE, heightOf: () => H });
   const b = t.boxes;
   assert.equal(t.root, "root");
   assert.deepEqual(t.heads, ["c0", "c1", "c2", "c3", "c4"]);
@@ -2037,43 +2250,79 @@ test("the Tree lays the causes across under the question, and each one's checks 
     (Math.min(...rest.map(([, x]) => x.x)) +
       Math.max(...rest.map(([, x]) => x.x + x.w))) /
     2;
-  assert.ok(Math.abs(b.root.x + 124 - mid) < 1);
+  assert.ok(Math.abs(b.root.x + 124 - mid) < 30);
   // checks stack under their cause, indented, in order
   assert.ok(b["c0-k0"].y > b.c0.y && b["c0-k1"].y > b["c0-k0"].y);
   assert.ok(b["c0-k0"].x > b.c0.x);
-  // the sub-choice's options are indented under it
-  assert.ok(b.fix0.x > b["q-fix"].x && b.fix0.y > b["q-fix"].y);
   // the question's lines run along a bus; a column's down its spine
   const row = t.edges.find((e) => e.target === "c2");
   assert.equal(row?.kind, "row");
   assert.equal(t.edges.find((e) => e.target === "c2-k0")?.kind, "column");
-  // nothing overlaps
-  const all = Object.values(b);
-  for (const a of all)
-    for (const c of all)
-      if (a !== c)
-        assert.ok(
-          a.x + a.w <= c.x ||
-            c.x + c.w <= a.x ||
-            a.y + a.h <= c.y ||
-            c.y + c.h <= a.y,
-        );
+  overlapFree(b);
 });
 
-test("the first row leads with what is in play; what was set aside goes last", () => {
+test("a sub-choice under a cause lays its options across, two to a row, not one tall column", () => {
   const list = awsTree();
-  list.push(
-    node("q-open", "root", "question", "What changed on Oct 3?", { order: 90 }),
-    node("k-root", "root", "fact", "Cost Explorer by service", { order: 91 }),
-  );
-  list.find((n) => n.id === "c0")!.dropped = true;
-  const t = treeLayout(list, { perRow: 6, heightOf: () => H });
-  assert.deepEqual(t.heads, ["c1", "c2", "c3", "c4", "q-open", "k-root", "c0"]);
+  list.push(node("fix4", "q-fix", "option", "Fix 4", { order: 99 }));
+  const t = treeLayout(list, { maxW: WIDE, heightOf: () => H });
+  const b = t.boxes;
+  // its options below it, side by side, then the next row
+  assert.ok(b.fix0.y > b["q-fix"].y + H);
+  assert.equal(b.fix1.y, b.fix0.y);
+  assert.ok(b.fix1.x >= b.fix0.x + 248);
+  assert.ok(b.fix2.y > b.fix0.y && b.fix2.x === b.fix0.x);
+  assert.equal(t.edges.find((e) => e.target === "fix1")?.kind, "row");
+  // the causes beside it stay on the first row, so fit can frame them
+  assert.equal(b.c4.y, b.c0.y);
+  overlapFree(b);
 });
 
-test("past perRow the Tree wraps into another row, with a trunk to it", () => {
-  const t = treeLayout(awsTree(), { perRow: 3, heightOf: () => H });
+test("a check on the question itself stacks beside the causes, and stays put as a cause grows", () => {
+  const list = awsTree().filter(
+    (n) => !n.id.startsWith("fix") && n.id !== "q-fix",
+  );
+  list.push(
+    node("k-root", "root", "fact", "To check: Cost Explorer by service", {
+      order: 1,
+    }),
+    node("k-root2", "root", "fact", "To check: NAT bytes", { order: 2 }),
+  );
+  const before = treeLayout(list, { maxW: WIDE, heightOf: () => H });
+  // first row, after the causes, one stacked under the other
+  assert.equal(before.boxes["k-root"].y, before.boxes.c0.y);
+  assert.ok(before.boxes["k-root"].x > before.boxes.c4.x);
+  assert.equal(before.boxes["k-root2"].x, before.boxes["k-root"].x);
+  assert.ok(before.boxes["k-root2"].y > before.boxes["k-root"].y);
+  assert.equal(before.edges.find((e) => e.target === "k-root2")?.kind, "stack");
+  assert.deepEqual(before.heads.slice(-2), ["k-root", "k-root2"]);
+  // Go deeper on a cause: its column grows, two levels down, and nothing
+  // else moves
+  list.push(
+    node("deep", "c0-k0", "fact", "Deeper", { order: 200 }),
+    node("deeper", "deep", "fact", "Deeper still", { order: 201 }),
+  );
+  const after = treeLayout(list, { maxW: WIDE, heightOf: () => H });
+  for (const id of ["root", "c1", "c4", "k-root", "k-root2", "c4-k2"])
+    assert.deepEqual(after.boxes[id], before.boxes[id], id);
+  overlapFree(after.boxes);
+});
+
+test("setting a cause aside moves no card", () => {
+  const list = awsTree();
+  const before = treeLayout(list, { maxW: WIDE, heightOf: () => H });
+  list.find((n) => n.id === "c0")!.dropped = true;
+  const after = treeLayout(list, { maxW: WIDE, heightOf: () => H });
+  assert.deepEqual(after.boxes, before.boxes);
+  assert.deepEqual(after.heads, ["c0", "c1", "c2", "c3", "c4"]);
+});
+
+test("past maxW the Tree wraps into another row, with a trunk to it", () => {
+  const list = awsTree().filter(
+    (n) => !n.id.startsWith("fix") && n.id !== "q-fix",
+  );
+  const t = treeLayout(list, { maxW: 960, heightOf: () => H });
   assert.equal(t.boxes.c3.y, t.boxes.c4.y);
+  assert.equal(t.boxes.c2.y, t.boxes.c0.y);
   assert.ok(t.boxes.c3.y > t.boxes["c1-k2"].y, "below the first row's columns");
   const e = t.edges.find((x) => x.target === "c3");
   assert.ok(e?.trunk !== undefined && e.rowBus !== undefined);
@@ -2082,7 +2331,7 @@ test("past perRow the Tree wraps into another row, with a trunk to it", () => {
 
 test("a folded branch is one card, with how many are under it", () => {
   const t = treeLayout(awsTree(), {
-    perRow: 6,
+    maxW: WIDE,
     heightOf: () => H,
     folds: (n) => n.id === "c1",
   });
@@ -2093,7 +2342,7 @@ test("a folded branch is one card, with how many are under it", () => {
 
 test("Fit frames the tree whole when it reads whole, else the question and every cause from the top", () => {
   const room = { left: 24, top: 24, w: 1392, h: 676 };
-  const tall = treeLayout(awsTree(), { perRow: 6, heightOf: () => H });
+  const tall = treeLayout(awsTree(), { maxW: WIDE, heightOf: () => H });
   const v = frameOf(tall, room);
   assert.ok(v.zoom >= 0.7 && v.zoom <= 1);
   const onScreen = (id: string) => {
@@ -2113,9 +2362,36 @@ test("Fit frames the tree whole when it reads whole, else the question and every
   assert.ok(Math.abs(tall.boxes.root.y * v.zoom + v.y - room.top) < 1);
   // a small tree is framed whole, centred
   const small = treeLayout(awsTree().slice(0, 4), {
-    perRow: 6,
+    maxW: WIDE,
     heightOf: () => H,
   });
   const w = frameOf(small, room);
   assert.equal(w.zoom, 1);
+});
+
+test("a cause holding a sub-choice lays it narrower rather than wrap below the frame", () => {
+  // QA round 6's support tickets: four causes, a stack of checks on the
+  // question, and the likely cause with a five-option fix under it
+  const list = awsTree().filter(
+    (n) => !n.id.startsWith("fix") && n.id !== "q-fix",
+  );
+  list.push(
+    node("k-root", "root", "fact", "To check: where the time goes", {
+      order: 1,
+    }),
+    node("q-fix", "c4", "question", "How to cut the wait?", { order: 300 }),
+  );
+  for (let o = 0; o < 5; o++)
+    list.push(
+      node(`fix${o}`, "q-fix", "option", `Fix ${o}`, { order: 301 + o }),
+    );
+  const t = treeLayout(list, { maxW: WIDE, heightOf: () => H });
+  for (const id of ["c0", "c4", "k-root"])
+    assert.equal(t.boxes[id].y, t.boxes.c0.y, `${id} on the first row`);
+  const right = Math.max(...Object.values(t.boxes).map((b) => b.x + b.w));
+  const left = Math.min(...Object.values(t.boxes).map((b) => b.x));
+  assert.ok(right - left <= WIDE + 1, "within the room at a readable zoom");
+  assert.ok(t.boxes.fix1.y > t.boxes.fix0.y, "one to a row, as it fits");
+  const v = frameOf(t, { left: 24, top: 24, w: 1392, h: 676 });
+  assert.ok(v.zoom >= 0.7);
 });

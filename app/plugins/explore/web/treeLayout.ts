@@ -1,23 +1,38 @@
 // Explore's Tree, laid out to use the screen's width: the question on top,
 // its options (or causes, or sub-questions) side by side under it, wrapped
-// into rows past `perRow`, and everything under each one stacked down its
-// own column, indented by depth. Laid left to right, as it was, a cause list
+// into rows past `maxW`, and everything under each one stacked down its own
+// column, indented by depth. A question anywhere below lays its own options
+// across under it the same way, so a sub-choice's options no longer made one
+// tall column under its cause. The facts and checks on a question itself
+// stack in one column at the end of its first row, where a cause growing
+// longer never moves them. Laid left to right, as it first was, a cause list
 // with its checks made one tall column: at a readable zoom the root and half
 // the causes were off the screen. A set-aside or settled branch folds to its
-// own card unless you open it. Pure: no React, no browser, so it is tested
-// (explore.test.ts), and Learn's layout is not touched.
+// own card unless you open it. Every card keeps its place when one is set
+// aside (it used to move to the end, and the camera, following it, threw the
+// rest of the tree off the screen). Pure: no React, no browser, so it is
+// tested (explore.test.ts), and Learn's layout is not touched.
 
 import type { MapNode } from "../../../shared/model.ts";
 import { NODE_W } from "../../../web/lib/layout.ts";
 
 export const CARD_W = NODE_W;
 const INDENT = 24; // per level down a column
-const INDENT_LEVELS = 3; // deeper still is drawn at the last indent
+const INDENT_LEVELS = 2; // deeper still is drawn at the last indent
+// a column's width whatever is in it: a column growing deeper used to widen
+// and push every column to its right
+export const SLOT = CARD_W + INDENT * INDENT_LEVELS;
 const GAP_X = 32; // between columns
 const GAP_Y = 10; // between cards down a column
-const RANK = 56; // from the question to the row under it
+const RANK = 56; // from a question to the row under it
 const ROW_GAP = 48; // between wrapped rows
 const BLOCK_GAP = 80; // between separate trees (a node whose parent is gone)
+// a question below the root wraps its options two to a row: laid all
+// across, a sub-choice's column was as wide as the screen, and the causes
+// beside it wrapped into a row below, out of the frame
+const NESTED_W = 2 * SLOT + GAP_X;
+// a column under such a question: a card and one level of checks
+const NARROW = CARD_W + INDENT;
 // where the spine down a column leaves a card: near its left edge, so the
 // line runs beside the cards under it, not through them
 export const SPINE = 12;
@@ -28,14 +43,16 @@ export type TreeEdge = {
   id: string;
   source: string;
   target: string;
-  // "row": from the question down to an option's top; "column": down the
-  // spine and into a card's left side
-  kind: "row" | "column";
-  // a row edge: the bus line under the question, and for a wrapped row the
-  // trunk on the left down to that row's own bus
+  // "row": from a question down to an option's top; "column": down the
+  // spine and into a card's left side; "stack": from a question along its
+  // bus, then down its notes' spine into a card's left side
+  kind: "row" | "column" | "stack";
+  // the bus line under the question; for a wrapped row the trunk on the
+  // left down to that row's own bus; for a stack, its spine
   bus?: number;
   trunk?: number;
   rowBus?: number;
+  spine?: number;
 };
 
 export type TreeLayout = {
@@ -48,14 +65,21 @@ export type TreeLayout = {
   heads: string[];
 };
 
+// what a question's first row leads with: what is in play (options, or
+// causes), then the questions under it; anything else is a note on the
+// question, stacked beside the row
+const rank = (n: MapNode) =>
+  n.kind === "option" ? 0 : n.kind === "question" ? 1 : 2;
+
 export function treeLayout(
   nodes: MapNode[],
   {
-    perRow,
+    maxW,
     heightOf,
     folds = () => false,
   }: {
-    perRow: number;
+    // how wide a row may run before it wraps, in layout units
+    maxW: number;
     heightOf: (n: MapNode) => number;
     // whether what is under this card folds into it
     folds?: (n: MapNode) => boolean;
@@ -78,7 +102,6 @@ export function treeLayout(
     );
 
   const boxes: Record<string, Box> = {};
-  const edges: TreeEdge[] = [];
   const folded: Record<string, number> = {};
   const open = (n: MapNode) => {
     if (!childrenOf(n.id).length) return [];
@@ -87,93 +110,190 @@ export function treeLayout(
     return [];
   };
 
-  // One column: a card and all under it, stacked, at (0, 0); returns its
-  // size. Positions are moved into place once the row is known.
-  type Col = { ids: string[]; w: number; h: number };
-  const column = (head: MapNode): Col => {
-    const ids: string[] = [];
-    let y = 0;
-    let deepest = 0;
-    const walk = (n: MapNode, level: number) => {
-      const x = INDENT * Math.min(level, INDENT_LEVELS);
-      deepest = Math.max(deepest, Math.min(level, INDENT_LEVELS));
-      const h = heightOf(n);
-      boxes[n.id] = { x, y, w: CARD_W, h };
-      ids.push(n.id);
-      y += h + GAP_Y;
-      for (const c of open(n)) {
-        edges.push({
-          id: `${n.id}-${c.id}`,
-          source: n.id,
-          target: c.id,
-          kind: "column",
-        });
-        walk(c, level + 1);
-      }
-    };
-    walk(head, 0);
-    return { ids, w: CARD_W + INDENT * deepest, h: y - GAP_Y };
-  };
-  const shift = (ids: string[], dx: number, dy: number) => {
-    for (const id of ids) {
+  // A card and what is under it, laid out at (0, 0): its cards and its
+  // lines, moved into place as a whole once its parent knows where.
+  type Block = { ids: string[]; edges: TreeEdge[]; w: number; h: number };
+  const shift = (b: Block, dx: number, dy: number) => {
+    for (const id of b.ids) {
       boxes[id].x += dx;
       boxes[id].y += dy;
     }
+    for (const e of b.edges) {
+      if (e.bus !== undefined) e.bus += dy;
+      if (e.rowBus !== undefined) e.rowBus += dy;
+      if (e.trunk !== undefined) e.trunk += dx;
+      if (e.spine !== undefined) e.spine += dx;
+    }
+  };
+  const put = (into: Block, b: Block, dx: number, dy: number) => {
+    shift(b, dx, dy);
+    into.ids.push(...b.ids);
+    into.edges.push(...b.edges);
+  };
+  const card = (n: MapNode, x: number): Block => {
+    const h = heightOf(n);
+    boxes[n.id] = { x, y: 0, w: CARD_W, h };
+    return { ids: [n.id], edges: [], w: x + CARD_W, h };
+  };
+  const indent = (level: number) => INDENT * Math.min(level, INDENT_LEVELS);
+  // `budget`: how wide a question in it may lay its row; `slot`: the least
+  // width of a column in a row (see question)
+  const blockOf = (
+    n: MapNode,
+    level: number,
+    budget: number,
+    slot: number,
+  ): Block =>
+    n.kind === "question" && open(n).length
+      ? question(n, false, budget)
+      : column(n, level, budget, slot);
+
+  // A card with what is under it stacked below, indented a level; a
+  // question under it lays its own row.
+  const column = (
+    n: MapNode,
+    level: number,
+    budget: number,
+    slot: number,
+  ): Block => {
+    const b = card(n, indent(level));
+    let y = b.h + GAP_Y;
+    for (const c of open(n)) {
+      b.edges.push({
+        id: `${n.id}-${c.id}`,
+        source: n.id,
+        target: c.id,
+        kind: "column",
+      });
+      const dx =
+        c.kind === "question" && open(c).length ? indent(level + 1) : 0;
+      const sub = blockOf(c, level + 1, budget - dx, slot);
+      put(b, sub, dx, y);
+      b.w = Math.max(b.w, dx + sub.w);
+      y += sub.h + GAP_Y;
+    }
+    b.h = y - GAP_Y;
+    if (level === 0) b.w = Math.max(b.w, slot);
+    return b;
   };
 
-  let left = 0;
-  let root: string | null = null;
-  let heads: string[] = [];
-  for (const top of tops) {
-    const th = heightOf(top);
-    // what is in play leads the first row (the options, or causes), then
-    // the questions under it, then facts and checks, and what was set aside
-    // last: when the row wraps, the work still open is what stays on top
-    const rank = (n: MapNode) =>
-      n.dropped || n.status === "dropped"
-        ? 3
-        : n.kind === "option"
-          ? 0
-          : n.kind === "question"
-            ? 1
-            : 2;
-    const cols = open(top)
-      .map((h, i) => ({ h, i }))
-      .sort((a, b) => rank(a.h) - rank(b.h) || a.i - b.i)
-      .map(({ h }) => ({ head: h, ...column(h) }));
-    const rows: (typeof cols)[] = [];
-    for (let i = 0; i < cols.length; i += Math.max(1, perRow))
-      rows.push(cols.slice(i, i + Math.max(1, perRow)));
-    const rowW = (r: typeof cols) =>
-      r.reduce((a, c) => a + c.w, 0) + GAP_X * (r.length - 1);
-    const width = Math.max(CARD_W, ...rows.map(rowW));
-    // the question centred over the widest row
-    boxes[top.id] = { x: left + (width - CARD_W) / 2, y: 0, w: CARD_W, h: th };
+  // A question with its options side by side under it, wrapped into rows
+  // past `budget`, and its notes stacked at the end of the first row. The root
+  // is centred over them; a question below sits at its block's left, where
+  // the column it is in comes down to it. The root's columns take a full
+  // slot each, so one growing deeper moves no other; a question below takes
+  // its columns narrower, and when the one it is in would wrap onto a row
+  // below the frame, it lays its row narrower still to stay on the first.
+  const question = (q: MapNode, centred: boolean, budget: number): Block => {
+    const b = card(q, 0);
+    const th = b.h;
+    const all = open(q);
+    const inRow = all
+      .map((n, i) => ({ n, i }))
+      .filter(({ n }) => rank(n) < 2)
+      .sort((a, c) => rank(a.n) - rank(c.n) || a.i - c.i)
+      .map(({ n }) => n);
+    const slot = centred ? SLOT : NARROW;
+    const notes = all.filter((n) => rank(n) === 2);
+    let stack: (Block & { heads: string[] }) | null = null;
+    if (notes.length) {
+      stack = { ids: [], edges: [], w: SLOT, h: 0, heads: [] };
+      let y = 0;
+      for (const n of notes) {
+        const sub = column(n, 1, NESTED_W, SLOT);
+        put(stack, sub, 0, y);
+        stack.w = Math.max(stack.w, sub.w);
+        stack.heads.push(n.id);
+        y += sub.h + GAP_Y;
+      }
+      stack.h = y - GAP_Y;
+    }
+    // the first row keeps room for the notes, so they never wrap below
+    type Item = { head: MapNode; block: Block };
+    const rows: Item[][] = [];
+    let row: Item[] = [];
+    let rowW = 0;
+    for (const head of inRow) {
+      const room = budget - (rows.length === 0 && stack ? stack.w + GAP_X : 0);
+      const free = room - rowW - (row.length ? GAP_X : 0);
+      let block = blockOf(head, 0, NESTED_W, slot);
+      // too wide for what is left of the row only for a question laid in
+      // it: laid narrower, it may still fit (laying it again sets its
+      // cards anew)
+      if (row.length && block.w > free) {
+        const narrow = blockOf(head, 0, free, slot);
+        block = narrow.w <= free ? narrow : blockOf(head, 0, NESTED_W, slot);
+      }
+      const c = { head, block };
+      const w = rowW + (row.length ? GAP_X : 0) + c.block.w;
+      if (row.length && w > room) {
+        rows.push(row);
+        row = [];
+        rowW = 0;
+      }
+      rowW += (row.length ? GAP_X : 0) + c.block.w;
+      row.push(c);
+    }
+    if (row.length || stack) rows.push(row);
     const bus = th + RANK / 2;
-    const trunk = left - GAP_X / 2;
     let y = th + RANK;
+    let width = CARD_W;
     rows.forEach((r, k) => {
-      let x = left + (width - rowW(r)) / 2;
+      let x = 0;
+      let tallest = 0;
+      const wrapped =
+        k > 0 ? { trunk: -GAP_X / 2, rowBus: y - ROW_GAP / 2 } : {};
       for (const c of r) {
-        shift(c.ids, x, y);
-        edges.push({
-          id: `${top.id}-${c.head.id}`,
-          source: top.id,
+        put(b, c.block, x, y);
+        b.edges.push({
+          id: `${q.id}-${c.head.id}`,
+          source: q.id,
           target: c.head.id,
           kind: "row",
           bus,
-          ...(k > 0 ? { trunk, rowBus: y - ROW_GAP / 2 } : {}),
+          ...wrapped,
         });
-        x += c.w + GAP_X;
+        x += c.block.w + GAP_X;
+        tallest = Math.max(tallest, c.block.h);
       }
-      y += Math.max(...r.map((c) => c.h)) + ROW_GAP;
+      if (k === 0 && stack) {
+        for (const id of stack.heads)
+          b.edges.push({
+            id: `${q.id}-${id}`,
+            source: q.id,
+            target: id,
+            kind: "stack",
+            bus,
+            spine: x + SPINE,
+          });
+        put(b, stack, x, y);
+        x += stack.w + GAP_X;
+        tallest = Math.max(tallest, stack.h);
+      }
+      width = Math.max(width, x - GAP_X);
+      y += tallest + ROW_GAP;
     });
-    if (root === null) {
-      root = top.id;
-      heads = cols.map((c) => c.head.id);
-    }
-    left += width + BLOCK_GAP;
+    b.w = width;
+    b.h = rows.length ? y - ROW_GAP : th;
+    if (centred) boxes[q.id].x = (width - CARD_W) / 2;
+    return b;
+  };
+
+  const edges: TreeEdge[] = [];
+  let left = 0;
+  const root = tops[0]?.id ?? null;
+  for (const top of tops) {
+    const b =
+      top.kind === "question"
+        ? question(top, true, maxW)
+        : column(top, 0, NESTED_W, SLOT);
+    shift(b, left, 0);
+    edges.push(...b.edges);
+    left += b.w + BLOCK_GAP;
   }
+  const heads = edges
+    .filter((e) => e.source === root && e.kind !== "column")
+    .map((e) => e.target);
   return { boxes, edges, folded, root, heads };
 }
 

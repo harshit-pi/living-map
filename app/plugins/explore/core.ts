@@ -48,6 +48,9 @@ export const AGAINST_KEPT = 5;
 export const WRAP_MAX = 5; // Claude's assumptions, and its steps, per board
 export const FACTS_PER_CELL = 4;
 export const OPEN_MAX = 4;
+// how sure Claude's stand must be on the cause you marked likely before Next
+// hands you the settling
+export const SETTLE_SURE = 70;
 export const DAY = 24 * 60 * 60 * 1000;
 
 export const newState = (): ExploreState => ({
@@ -460,22 +463,41 @@ function holes(
   return out.sort((a, c) => rank(a) - rank(c));
 }
 
-// The cells a Fill asks for, in the order to write them: every empty cell on
-// a must, then on what matters, then nice, each want across the options, at
-// most FILL_MAX. The server lists them: told only "musts first", Claude
-// filled what matters on some options while musts stayed empty on others.
+// The cells a Fill asks for, in the order to write them: every cell Claude
+// has not judged on a must, then on what matters, then nice, each want
+// across the options, at most FILL_MAX. A cell you rated is one of them:
+// your mark stays and Claude's shows beside it. The server lists them: told
+// only "musts first", Claude filled what matters on some options while
+// musts stayed empty on others.
 export const FILL_MAX = 24;
-export function fillCells(s: ExploreState, nodes: Nodes, b: Board) {
-  const row = new Map(b.rows.map((r, i) => [r.id, i]));
-  const col = new Map(columnsOf(nodes, b).map((o, i) => [o.id, i]));
-  const all = WEIGHTS.flatMap((w) =>
-    holes(s, nodes, b, w, { guesses: false }).sort(
-      (a, c) =>
-        row.get(a.want)! - row.get(c.want)! ||
-        col.get(a.option)! - col.get(c.option)!,
-    ),
-  );
+export function fillCells(nodes: Nodes, b: Board) {
+  const cols = liveColumns(nodes, b);
+  const all: Hole[] = [];
+  for (const w of WEIGHTS)
+    for (const r of keptRows(b).filter((x) => x.weight === w))
+      for (const o of cols)
+        if (!own(b.cells, cellKey(o.id, r.id))?.claude)
+          all.push({ option: o.id, want: r.id, guess: false });
   return { cells: all.slice(0, FILL_MAX), left: all.length - FILL_MAX };
+}
+
+// Whether one Fill is the board's next step: before a choice, with wants on
+// it, and more than half the cells on the wants you kept (on Claude's
+// suggestions, before you keep any) still empty over the options in play.
+// It used to be "no cell at all", so the one cell you rated, or the one an
+// added option came with, took Fill away for good and left a paid Ask per
+// cell. A suggestion you have not decided on counts no cells: it is no
+// reason to fill a board you have judged.
+export function needsFill(nodes: Nodes, b: Board): boolean {
+  if (b.shape !== "choose" || !b.rows.length || chosenHere(nodes, b.question))
+    return false;
+  const cols = liveColumns(nodes, b);
+  const rows = keptRows(b).length ? keptRows(b) : b.rows;
+  let empty = 0;
+  for (const o of cols)
+    for (const r of rows)
+      if (!shown(own(b.cells, cellKey(o.id, r.id)))) empty++;
+  return empty * 2 > cols.length * rows.length;
 }
 
 // ---------------------------------------------------------------- fold, tally
@@ -841,6 +863,36 @@ export function runFirst(
   return { id: pick.id, why: s.takeaways[pick.id].text };
 }
 
+// The newest finding under a question written after `t`, no longer a check:
+// a check Claude picked to run first, its result now written in, or a fact
+// of yours whose nearest question is this one. Claude's
+// own facts are left out: a move that wrote its stand before them would
+// have Next sell their weighing straight back.
+function resultSince(
+  s: ExploreState,
+  nodes: Nodes,
+  q: string,
+  t: number,
+): MapNode | undefined {
+  const rows = new Set(own(s.boards, q)?.rows.map((r) => r.id) ?? []);
+  let best: MapNode | undefined;
+  for (const id of subtree(nodes, q)) {
+    const n = own(nodes, id);
+    if (!n || n.kind !== "fact" || n.dropped || isCheck(n) || rows.has(n.id))
+      continue;
+    const picked = !!own(s.takeaways, n.id);
+    if (n.by !== "you" && !picked) continue;
+    if (n.updatedAt <= t || (best && best.updatedAt >= n.updatedAt)) continue;
+    // a pick is the question's wherever it sits (runFirst looks as deep);
+    // a fact of yours under a question below is that one's news
+    let up = n.parent ? own(nodes, n.parent) : undefined;
+    for (let i = 0; !picked && up && up.kind !== "question" && i < 100; i++)
+      up = up.parent ? own(nodes, up.parent) : undefined;
+    if (picked || up?.id === q) best = n;
+  }
+  return best;
+}
+
 // Under a cause no one has marked likely: a choice there (how to fix it)
 // waits until a check confirms the cause, so Next does not steer you into
 // weighing fixes for something still untested.
@@ -866,8 +918,7 @@ export function nextGap(
   const b = own(s.boards, q);
   if (b && b.shape === "choose" && !chosenHere(nodes, q)) {
     const cols = columnsOf(nodes, b).filter(inPlay);
-    const anyCell = Object.values(b.cells).some((c) => c.you || c.claude);
-    if (b.rows.length && !anyCell)
+    if (needsFill(nodes, b))
       return {
         kind: "fill",
         q,
@@ -929,6 +980,46 @@ export function nextGap(
         reason: "it matters, still empty",
       };
   }
+  // After a Choose the other columns are out, but what is unknown about the
+  // option chosen is the risk you now carry (the open list counts its
+  // unsure musts): its musts, then what matters, before Next says nothing
+  // is open.
+  const chosen =
+    b?.shape === "choose" && chosenHere(nodes, q)
+      ? optionsOf(nodes, q).find((o) => o.status === "chosen")
+      : undefined;
+  if (b && chosen) {
+    const on = (w: Weight, guesses: boolean) =>
+      holes(s, nodes, b, w, { guesses, rechecks: false }).find(
+        (h) => h.option === chosen.id,
+      );
+    const must = on("must", true);
+    const tell = waitsOnYou(nodes, b, "must").find(
+      (x) => x.option === chosen.id,
+    );
+    const matters = !must && !tell ? on("matters", false) : undefined;
+    const cell = must ?? matters;
+    if (cell)
+      return {
+        kind: "ask",
+        q,
+        option: cell.option,
+        want: cell.want,
+        label: checkLabel(nodes, cell.option, cell.want),
+        reason: must
+          ? `a must on your choice, ${must.guess ? "only a guess" : "still empty"}`
+          : "it matters to your choice, still empty",
+      };
+    if (tell)
+      return {
+        kind: "tell",
+        q,
+        option: tell.option,
+        want: tell.want,
+        label: `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
+        reason: "a must on your choice Claude can't tell without you",
+      };
+  }
   if (b?.commit && !b.commit.premortem.claude.length)
     return {
       kind: "wrap",
@@ -947,9 +1038,12 @@ export function nextGap(
       p.id !== q &&
       !underUntestedCause(s, nodes, p.id),
   );
+  // a choice with a board of its own is worked on there: Next opens it, as
+  // its chip does, and pays for nothing. A move asked from here only added
+  // to the tree and left the same choice open, for Next to sell again.
   if (choice)
     return {
-      kind: "question",
+      kind: own(s.boards, choice.id) ? "open" : "question",
       q: choice.id,
       label: `Open choice: ${choice.title}`,
       reason: "the highest choice still open",
@@ -969,6 +1063,36 @@ export function nextGap(
     // with checks on the map, the deciding step is to run one of them, not
     // to add another that repeats it
     const checks = checksOn(nodes, question.id).length;
+    const st = own(s.stand, question.id);
+    // a result you reported (a check run, its finding written in) is newer
+    // than Claude's last word: weighing it is the step, or the stand line
+    // keeps saying nothing was checked and Next asks for another check
+    const result =
+      question.shape === "causes" && st
+        ? resultSince(s, nodes, question.id, st.at)
+        : undefined;
+    if (result)
+      return {
+        kind: "question",
+        q: question.id,
+        option: result.id,
+        label: `Weigh what came in: ${question.title}`,
+        reason: `${named(nodes, result.id)} came in after Claude's last word on it`,
+      };
+    // the cause you marked likely is the one Claude's last word leads, and
+    // surely: what confirms it is on the map, so settling is yours (asked
+    // to confirm it again, Claude looked for a fact it had already weighed)
+    if (
+      question.shape === "causes" &&
+      likely.some((o) => o.id === st?.lead) &&
+      (st?.sure ?? 0) >= SETTLE_SURE
+    )
+      return {
+        kind: "settle",
+        q: question.id,
+        label: `Settle it: ${question.title}`,
+        reason: `you marked ${named(nodes, st!.lead!)} likely and Claude's last word agrees`,
+      };
     if (question.shape === "causes")
       return {
         kind: "question",
@@ -1662,6 +1786,7 @@ export function viewOf(
       criteriaTouched: b.criteriaTouched,
       filledAt: b.filledAt ?? null,
       needsWants: b.shape === "choose" && !b.rows.length,
+      needsFill: needsFill(nodes, b),
       settled: point(q)?.settled ?? false,
       next: nextGap(s, nodes, q),
       looseFacts: looseFacts(s, nodes, q),
