@@ -49,6 +49,31 @@ const carriesOf = (v: unknown): Carries =>
 // ---------------------------------------------------------------- load
 
 const HIT = 1 - KINDS.cache.passRead; // share of reads a cache answers
+const NO_CACHE = { fronted: new Set<string>(), aside: false };
+
+// The percent of the brief's reads and writes each client makes. Shares set
+// on a client count as given (scaled down if they add up to more than all of
+// it); clients without one split the rest evenly. When every client has one,
+// they are taken as proportions of the whole.
+export function clientShares(
+  comps: Comp[],
+): Record<string, { reads: number; writes: number }> {
+  const clients = comps.filter((c) => KINDS[c.kind].source);
+  const split = (key: "readShare" | "writeShare") => {
+    const sum = clients.reduce((a, c) => a + (c[key] ?? 0), 0);
+    const rest = clients.filter((c) => c[key] === undefined).length;
+    return (c: Comp): number => {
+      if (!rest) return sum > 0 ? (c[key]! * 100) / sum : 100 / clients.length;
+      if (c[key] === undefined) return Math.max(0, 100 - sum) / rest;
+      return sum > 100 ? (c[key] * 100) / sum : c[key];
+    };
+  };
+  const reads = split("readShare");
+  const writes = split("writeShare");
+  return Object.fromEntries(
+    clients.map((c) => [c.id, { reads: reads(c), writes: writes(c) }]),
+  );
+}
 
 export function capacity(c: Comp): { read: number; write: number } {
   const k = KINDS[c.kind];
@@ -75,10 +100,11 @@ export function loadCheck(s: {
   const r = new Map<string, number>();
   const w = new Map<string, number>();
   const asyncFrom = new Set<string>();
-  const clients = s.comps.filter((c) => KINDS[c.kind].source);
-  for (const c of clients) {
-    r.set(c.id, (s.brief?.reads ?? 0) / clients.length);
-    w.set(c.id, (s.brief?.writes ?? 0) / clients.length);
+  // each client makes its own share of the brief's traffic, wherever it is wired
+  const shares = clientShares(s.comps);
+  for (const [id, sh] of Object.entries(shares)) {
+    r.set(id, ((s.brief?.reads ?? 0) * sh.reads) / 100);
+    w.set(id, ((s.brief?.writes ?? 0) * sh.writes) / 100);
   }
 
   // topological order. A cycle is broken where traffic enters it: the part
@@ -108,6 +134,27 @@ export function loadCheck(s: {
       }
   }
 
+  // The caches among a part's outgoing wires, and what they front: the stores
+  // each one is wired to (with the same kind of traffic). A cache wired to no
+  // store sits beside the part's stores instead (cache-aside).
+  const cachedBy = (out: Wire[], kind: "read" | "write") => {
+    const fronted = new Set<string>();
+    let aside = false;
+    for (const x of out) {
+      if (byId.get(x.to)!.kind !== "cache") continue;
+      const behind = wires.filter(
+        (y) =>
+          y.from === x.to &&
+          y.carries !== (kind === "read" ? "write" : "read") &&
+          byId.get(y.to)!.kind !== "cache" &&
+          KINDS[byId.get(y.to)!.kind].store,
+      );
+      for (const y of behind) fronted.add(y.to);
+      if (!behind.length) aside = true;
+    }
+    return { fronted, aside };
+  };
+
   const done = new Set<string>();
   for (const id of order) {
     done.add(id);
@@ -118,16 +165,22 @@ export function loadCheck(s: {
     const out = wires.filter((x) => x.from === id && !done.has(x.to));
     const reads = out.filter((x) => x.carries !== "write");
     const writes = out.filter((x) => x.carries !== "read");
-    const toCache = reads.some((x) => byId.get(x.to)!.kind === "cache");
+    const rc = k.router ? NO_CACHE : cachedBy(reads, "read");
+    const wc = k.router ? NO_CACHE : cachedBy(writes, "write");
     for (const x of reads) {
       const t = byId.get(x.to)!;
+      // the cache in front of this store already sends it the misses
+      if (rc.fronted.has(t.id)) continue;
       let amount = k.router ? outR / reads.length : outR;
-      // cache-aside: a store read next to a cache sees only the misses
-      if (!k.router && toCache && t.kind !== "cache" && KINDS[t.kind].store)
+      // cache-aside: a store read next to a cache that fronts no store of
+      // its own sees only the misses
+      if (rc.aside && t.kind !== "cache" && KINDS[t.kind].store)
         amount *= 1 - HIT;
       r.set(x.to, (r.get(x.to) ?? 0) + amount * x.times);
     }
     for (const x of writes) {
+      // written through the cache in front of it: not a second time directly
+      if (wc.fronted.has(x.to)) continue;
       const amount = k.router ? outW / writes.length : outW;
       w.set(x.to, (w.get(x.to) ?? 0) + amount * x.times);
     }
@@ -236,6 +289,9 @@ export function updateComp(s: DesignState, id: unknown, a: Raw): Comp | null {
   if (a.count !== undefined) c.count = num(a.count, 1, 10_000, c.count);
   if (a.shards !== undefined && KINDS[c.kind].shards)
     c.shards = num(a.shards, 1, 10_000, c.shards);
+  if (KINDS[c.kind].source)
+    for (const key of ["readShare", "writeShare"] as const)
+      if (a[key] !== undefined) c[key] = num(a[key], 0, 100, c[key] ?? 0);
   if (a.x !== undefined) c.x = num(a.x, -5000, 5000, c.x);
   if (a.y !== undefined) c.y = num(a.y, -5000, 5000, c.y);
   return c;
@@ -419,6 +475,11 @@ export function applyDesignOp(s: DesignState, op: Raw): number | null {
         "claude",
         str(op.id, 60),
       );
+      if (c)
+        updateComp(s, c.id, {
+          readShare: op.readShare,
+          writeShare: op.writeShare,
+        });
       return c ? 1 : 0;
     }
     case "wire":
@@ -449,6 +510,7 @@ const fmt = (n: number) =>
 
 export function outlineOf(s: DesignState): string {
   const load = loadCheck(s);
+  const shares = clientShares(s.comps);
   const lines: string[] = [];
   if (s.brief)
     lines.push(
@@ -470,7 +532,11 @@ export function outlineOf(s: DesignState): string {
                 ? `, capacity ${fmt(l.capRead)} requests/s in all`
                 : `, capacity ${fmt(l.capRead)} reads/s or ${fmt(l.capWrite)} writes/s in all`
               : "";
-            return `[${c.id}] ${k.label} "${c.label}"${scale} — ${fmt(l.reads)} reads/s, ${fmt(l.writes)} writes/s${cap}, ${Math.round(l.util * 100)}% of capacity (${l.status})${l.async ? ", async" : ""}`;
+            const sh = shares[c.id];
+            const makes = sh
+              ? `, makes ${Math.round(sh.reads)}% of the brief's reads and ${Math.round(sh.writes)}% of its writes (set on the client, not by its wires)`
+              : "";
+            return `[${c.id}] ${k.label} "${c.label}"${scale}${makes} — ${fmt(l.reads)} reads/s, ${fmt(l.writes)} writes/s${cap}, ${Math.round(l.util * 100)}% of capacity (${l.status})${l.async ? ", async" : ""}`;
           })
           .join("\n")}`
       : "THE LEARNER'S DESIGN: empty so far.",

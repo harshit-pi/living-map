@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import type { Action, Purpose, Settings } from "../shared/model.ts";
 import { Mark } from "./components/Logo.tsx";
@@ -19,13 +19,20 @@ import { StartScreen } from "./screens/StartScreen.tsx";
 
 const DEFAULTS: Settings = { model: "", effort: "" };
 
-// on a narrow window the side panel floats over the work instead of pushing it aside
+// on a narrow window the side panel floats over the work instead of pushing
+// it aside; followed as the window is resized, not only when the page loads
 const isRoomy = () =>
   typeof window !== "undefined" && window.innerWidth >= 1200;
+const onResize = (f: () => void) => {
+  window.addEventListener("resize", f);
+  return () => window.removeEventListener("resize", f);
+};
+const useRoomy = () => useSyncExternalStore(onResize, isRoomy, () => false);
 
 export default function App() {
   const live = useLiveMap();
   const { map } = live;
+  const roomy = useRoomy();
   const [selection, setSelection] = useState<string[]>([]);
   const [showDropped, setShowDropped] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -122,10 +129,11 @@ export default function App() {
     settings,
     onSettings,
     run,
+    showError: setError,
     stop,
     selection,
     setSelection,
-    roomy: isRoomy(),
+    roomy,
   };
   const learn = map.purpose === "learn";
   // a plugin's map has its own screen and a fixed mode

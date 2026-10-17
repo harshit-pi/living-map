@@ -16,6 +16,9 @@ const FRAME = {
 
 const nodeTypes = { map: NodeCard };
 
+// the whole tree, above the message box: on first load and from the fit button
+const WHOLE = { padding: FRAME, maxZoom: 1, minZoom: 0.2 };
+
 // The app owns the selection: a click selects one node, Shift-click adds or
 // removes, a click on empty canvas clears.
 export function Canvas({
@@ -62,23 +65,24 @@ export function Canvas({
     [laid, selected, map.purpose, threads, workingId],
   );
   const { fitView } = useReactFlow();
+  // every node the map has had while this canvas was open: one shown again
+  // (set-aside nodes back on) is not new work to follow
   const seen = useRef<Set<string> | null>(null);
 
   // Follow the work: when nodes appear, frame the new ones with their parent at
-  // a readable zoom; on first load, frame the whole tree. Otherwise leave the
-  // view where the user put it.
+  // a readable zoom; on first load, frame the whole tree, however far out that
+  // takes. Otherwise leave the view where the user put it.
   useEffect(() => {
     const ids = new Set(laid.nodes.map((n) => n.id));
     const before = seen.current;
-    seen.current = ids;
+    seen.current = new Set([
+      ...(before ?? []),
+      ...ids,
+      ...Object.keys(map.nodes),
+    ]);
     if (!before) {
       requestAnimationFrame(() => {
-        void fitView({
-          padding: FRAME,
-          duration: 300,
-          maxZoom: 1,
-          minZoom: 0.45,
-        });
+        void fitView({ ...WHOLE, duration: 300 });
       });
       return;
     }
@@ -155,7 +159,11 @@ export function Canvas({
       fitViewOptions={{ maxZoom: 1, minZoom: 0.7, padding: FRAME }}
     >
       <Background color="var(--color-line-strong)" gap={22} />
-      <Controls showInteractive={false} position="top-left" />
+      <Controls
+        showInteractive={false}
+        position="top-left"
+        fitViewOptions={WHOLE}
+      />
     </ReactFlow>
   );
 }

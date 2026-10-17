@@ -17,6 +17,8 @@ export type Workspace = {
   onSettings: (s: Partial<Settings>) => void;
   // sends an action and shows its error, if any, in the banner
   run: (a: Action) => Promise<ActionResult>;
+  // shows a message in the same banner, for a move refused before it is sent
+  showError: (error: string) => void;
   stop: () => void;
   selection: string[];
   setSelection: Dispatch<SetStateAction<string[]>>;

@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import {
+  COMPOSER_H,
   DesignCanvas,
   NODE_W,
   PALETTE_W,
@@ -74,11 +75,53 @@ function Design({ ws }: { ws: Workspace }) {
       window.removeEventListener("keydown", onKey);
     };
   }, [undo, run]);
+  // the answer to what you asked in the box lands in the left column, far
+  // from where you typed: a note by the box points there until you look
+  const answeredAt = lastWord(map.chat).asked?.i ?? -1;
+  const [seenAnswer, setSeenAnswer] = useState(answeredAt);
+  const freshAnswer = answeredAt > seenAnswer && !live.busy;
+  const showAnswer = () => {
+    document
+      .getElementById(ASKED_ID)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setSeenAnswer(answeredAt);
+  };
+  useEffect(() => {
+    if (!freshAnswer) return;
+    document
+      .getElementById(ASKED_ID)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [freshAnswer]);
   const open = selection.length === 1 ? map.nodes[selection[0]] : undefined;
   // the review steps aside while a deep dive's panel is open
   const reviewOpen =
     !!view?.review && folded !== view.review.at && !showReference && !open;
+  // Escape closes the part's inspector, as it closes a deep dive's panel
+  useEffect(() => {
+    if (!picked) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPicked(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picked]);
   const act = (name: string, args: Record<string, unknown> = {}) => {
+    // a wire the server would refuse is told here, without asking it
+    if (name === "connect") {
+      const why =
+        args.from === args.to
+          ? "A part cannot be wired to itself."
+          : view?.wires.some((w) => w.from === args.from && w.to === args.to)
+            ? "Those two are already wired that way."
+            : "";
+      if (why) {
+        ws.showError(why);
+        return Promise.resolve({ error: why });
+      }
+    }
+    // what you remove stays closed, and does not reopen when Undo brings it back
+    if ((name === "remove" || name === "unwire") && picked?.id === args.id)
+      setPicked(null);
     if (name === "remove") {
       const c = view?.comps.find((x) => x.id === args.id);
       if (c) setUndo({ what: `"${c.label}"`, at: Date.now() });
@@ -130,7 +173,7 @@ function Design({ ws }: { ws: Workspace }) {
     <div className="flex h-full">
       <aside className="flex w-[240px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface xl:w-[300px]">
         <Brief view={view} />
-        <LastWord chat={map.chat} view={view} />
+        <LastWord chat={map.chat} view={view} fresh={freshAnswer} />
         <div className="border-t border-line px-4 py-3">
           <div className="mb-1.5 text-[11px] font-semibold tracking-wide text-faint uppercase">
             Then go deeper
@@ -300,6 +343,15 @@ function Design({ ws }: { ws: Workspace }) {
           </div>
         )}
 
+        {freshAnswer && !undo && !open && (
+          <button
+            onClick={showAnswer}
+            className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-lg bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary-strong shadow-md ring-1 ring-primary-line hover:ring-primary"
+          >
+            ← Claude answered you on the left, under "You asked"
+          </button>
+        )}
+
         {picked && !showReference && (
           <Inspector
             view={view}
@@ -426,7 +478,7 @@ const ABOUT_A_NODE = /^(Hint|Go deeper|Challenge): |^Next$/;
 // The design's next step, kept on screen: the first thing to build, or the
 // last review's next step. Below it, the answer to what you last asked in the
 // box, when that came after. Hints and a deep dive's replies stay with it.
-function LastWord({ chat, view }: { chat: ChatLine[]; view: DesignView }) {
+function lastWord(chat: ChatLine[]) {
   let next = -1;
   let asked: { q: string; i: number } | null = null;
   for (let i = chat.length - 1; i >= 0 && next < 0; i--) {
@@ -440,8 +492,27 @@ function LastWord({ chat, view }: { chat: ChatLine[]; view: DesignView }) {
     if (!q || q === CHECK) next = i;
     else asked ??= { q, i };
   }
+  return { next, asked: asked && asked.i > next ? asked : null };
+}
+
+const ASKED_ID = "design-you-asked";
+
+function LastWord({
+  chat,
+  view,
+  fresh,
+}: {
+  chat: ChatLine[];
+  view: DesignView;
+  // the answer has just come in: marked until you have seen it
+  fresh: boolean;
+}) {
+  const { next, asked } = lastWord(chat);
   const block = (title: string, text: string, q?: string) => (
-    <div className="border-t border-line px-4 py-3">
+    <div
+      id={q ? ASKED_ID : undefined}
+      className={`border-t border-line px-4 py-3 transition-colors ${q && fresh ? "bg-primary-soft" : ""}`}
+    >
       <div className="mb-1 text-[11px] font-semibold tracking-wide text-faint uppercase">
         {title}
       </div>
@@ -456,9 +527,7 @@ function LastWord({ chat, view }: { chat: ChatLine[]; view: DesignView }) {
   return (
     <>
       {next >= 0 && block("Next step", chat[next].text)}
-      {asked &&
-        asked.i > next &&
-        block("You asked", chat[asked.i].text, asked.q)}
+      {asked && block("You asked", chat[asked.i].text, asked.q)}
     </>
   );
 }
@@ -545,7 +614,17 @@ function Inspector({
 }) {
   const box =
     "absolute z-20 w-[300px] rounded-xl bg-surface p-3 shadow-lg ring-1 ring-line";
-  const beside = useBeside(view, picked);
+  const picks = view.comps.find((x) => x.id === picked.id);
+  // its rough height, so it can open clear of the message box
+  const tall =
+    picked.type === "wire"
+      ? 190
+      : picks
+        ? 300 +
+          (KINDS[picks.kind].shards ? 34 : 0) +
+          (KINDS[picks.kind].source ? 68 : 0)
+        : 300;
+  const beside = useBeside(view, picked, tall);
   if (picked.type === "wire") {
     const w = view.wires.find((x) => x.id === picked.id);
     if (!w) return null;
@@ -633,6 +712,38 @@ function Inspector({
           />
         </label>
       )}
+      {k.source && view.brief && (
+        // which client makes which traffic: viewers the plays, creators the uploads
+        <>
+          {(
+            [
+              ["readShare", "reads", view.brief.reads],
+              ["writeShare", "writes", view.brief.writes],
+            ] as const
+          ).map(([key, what, total]) => (
+            <label
+              key={key}
+              className="mt-1.5 flex items-center justify-between text-[12.5px] text-body"
+              title={`The share of the brief's ${what} this client makes, whatever it is wired to`}
+            >
+              % of the {what}
+              <NumberField
+                value={
+                  c[key] ??
+                  (total > 0 && l
+                    ? Math.round(
+                        ((what === "reads" ? l.reads : l.writes) / total) * 100,
+                      )
+                    : 0)
+                }
+                min={0}
+                max={100}
+                onCommit={(n) => act("update", { id: c.id, [key]: n })}
+              />
+            </label>
+          ))}
+        </>
+      )}
       {l && (
         // reads and writes share one capacity, so it is shown once, with
         // what the two together use of it
@@ -683,7 +794,11 @@ function Inspector({
 // The inspector opens beside what you picked (right of it, or left when there
 // is no room), inside the canvas, and follows it when the canvas moves.
 const PANEL_W = 300;
-function useBeside(view: DesignView, picked: NonNullable<Picked>) {
+function useBeside(
+  view: DesignView,
+  picked: NonNullable<Picked>,
+  tall: number,
+) {
   const { x, y, zoom } = useViewport();
   const paneW = useStore((s) => s.width);
   const paneH = useStore((s) => s.height);
@@ -709,7 +824,10 @@ function useBeside(view: DesignView, picked: NonNullable<Picked>) {
         ? right + 12
         : Math.max(PALETTE_W + 8, Math.min(maxLeft, left - PANEL_W - 12)),
     ),
-    top: Math.round(Math.max(56, Math.min(at.y * zoom + y, paneH - 340))),
+    // below the buttons and above the message box
+    top: Math.round(
+      Math.max(56, Math.min(at.y * zoom + y, paneH - COMPOSER_H - tall - 8)),
+    ),
   };
 }
 
@@ -733,9 +851,13 @@ const Head = ({ title, onClose }: { title: string; onClose: () => void }) => (
 function NumberField({
   value,
   onCommit,
+  min = 1,
+  max = 10_000,
 }: {
   value: number;
   onCommit: (n: number) => Promise<unknown>;
+  min?: number;
+  max?: number;
 }) {
   const [text, setText] = useState(String(value));
   const [synced, setSynced] = useState(value);
@@ -745,7 +867,8 @@ function NumberField({
     setText(String(value));
   }
   const typed = Math.round(Number(text));
-  const current = Number.isFinite(typed) && typed >= 1 ? typed : value;
+  const current =
+    Number.isFinite(typed) && typed >= min && typed <= max ? typed : value;
   const send = (n: number) => {
     setText(String(n));
     if (n === value && sending === 0) return;
@@ -759,7 +882,7 @@ function NumberField({
   return (
     <span className="flex items-center gap-1">
       <button
-        onClick={() => send(Math.max(1, current - 1))}
+        onClick={() => send(Math.max(min, current - 1))}
         className="h-6 w-6 rounded-md bg-panel text-body hover:bg-line"
       >
         −
@@ -769,7 +892,7 @@ function NumberField({
         inputMode="numeric"
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {
-          // anything that is not a count of at least 1 snaps back
+          // anything that is not a count in range snaps back
           if (String(current) === text.trim()) send(current);
           else setText(String(value));
         }}
@@ -779,7 +902,7 @@ function NumberField({
         className="w-14 rounded-md border border-line-strong px-1.5 py-0.5 text-center text-[13px] tabular-nums outline-hidden focus:border-primary"
       />
       <button
-        onClick={() => send(current + 1)}
+        onClick={() => send(Math.min(max, current + 1))}
         className="h-6 w-6 rounded-md bg-panel text-body hover:bg-line"
       >
         +

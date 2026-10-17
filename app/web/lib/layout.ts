@@ -44,7 +44,9 @@ export function layout(nodes: MapNode[]): { nodes: Node[]; edges: Edge[] } {
     g.setNode(n.id, { width: NODE_W, height: heightOf(n) });
   for (const n of ordered)
     if (n.parent && ids.has(n.parent)) g.setEdge(n.parent, n.id);
-  dagre.layout(g);
+  // siblings keep their order top to bottom (step 1 above step 2): a tree has
+  // no crossings for the reordering heuristic to remove
+  dagre.layout(g, { disableOptimalOrderHeuristic: true });
   return {
     nodes: ordered.map((n) => {
       const p = g.node(n.id);

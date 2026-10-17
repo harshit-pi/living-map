@@ -123,6 +123,77 @@ test("reads and writes share a part's capacity", () => {
   );
 });
 
+test("each client makes its own share of the brief, whatever it is wired to", () => {
+  // YouTube: viewers make the plays, creators the uploads
+  const s = build(
+    [
+      ["viewer", "client"],
+      ["creator", "client"],
+      ["cdn", "cdn"],
+      ["api", "service"],
+      ["videos", "blob"],
+    ],
+    [
+      ["viewer", "cdn"],
+      ["cdn", "videos"],
+      ["creator", "api"],
+      ["api", "videos"],
+    ],
+  );
+  let load = loadCheck(s);
+  assert.equal(load.creator.reads, 150_000, "no shares set: an even split");
+  applyDesignOp(s, {
+    op: "place",
+    id: "viewer2",
+    kind: "client",
+    label: "TV app",
+    readShare: 250,
+    writeShare: "0",
+  });
+  assert.equal(s.comps.at(-1)?.readShare, 100, "a share is a percent");
+  removeComp(s, "viewer2");
+  updateComp(s, "viewer", { readShare: 100, writeShare: 0 });
+  updateComp(s, "creator", { readShare: 0, writeShare: 100 });
+  load = loadCheck(s);
+  assert.deepEqual([load.viewer.reads, load.viewer.writes], [300_000, 0]);
+  assert.deepEqual([load.creator.reads, load.creator.writes], [0, 6_000]);
+  assert.equal(load.api.reads, 0, "the upload path carries no plays");
+  assert.equal(load.videos.reads, 30_000, "the CDN's misses");
+  assert.equal(load.videos.writes, 6_000);
+  // wiring the creator straight to storage moves no plays with it
+  connect(s, "creator", "videos");
+  assert.equal(loadCheck(s).videos.reads, 30_000);
+  // a client left unset takes what the others leave
+  updateComp(s, "viewer", { readShare: 80 });
+  delete s.comps.find((c) => c.id === "creator")!.readShare;
+  assert.equal(loadCheck(s).creator.reads, 60_000);
+  assert.match(outlineOf(s), /"creator", makes 20% of the brief.s reads/);
+});
+
+test("a cache fronts only the store it is wired to, and writes are not counted twice", () => {
+  const s = build(
+    [
+      ["app", "client"],
+      ["api", "service"],
+      ["videos", "blob"],
+      ["cache", "cache"],
+      ["meta", "sql"],
+    ],
+    [
+      ["app", "api"],
+      ["api", "videos"],
+      ["api", "meta"],
+      ["api", "cache"],
+      ["cache", "meta"],
+    ],
+  );
+  const load = loadCheck(s);
+  assert.equal(load.videos.reads, 300_000, "the video bytes keep their load");
+  assert.equal(load.meta.reads, 30_000, "only the misses reach the database");
+  assert.equal(load.meta.writes, 6_000, "written once, through the cache");
+  assert.equal(load.videos.writes, 6_000);
+});
+
 test("replicas add reads but only shards add writes", () => {
   const s = build(
     [

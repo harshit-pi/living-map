@@ -78,6 +78,17 @@ function setup(initial: StoredMap | null = null) {
   return { engine, calls, events };
 }
 
+// a topic diagram with one blank on it, to fill
+const withBlank = (m: StoredMap, id: string) => {
+  m.diagram = {
+    form: "structure",
+    title: "T",
+    boxes: [{ id, blank: true, prompt: "What goes here?", label: "" }],
+    arrows: [],
+  };
+  return m;
+};
+
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const settled = async (calls: unknown[], n: number) => {
   for (let i = 0; i < 50 && calls.length < n; i++) await tick();
@@ -232,8 +243,13 @@ test('maps saved as "decide" open as "explore"', () => {
 });
 
 test("a blank's verdict is tagged so it shows on the blank, not as a caption", async () => {
-  const m = newMap("DBs", "learn");
+  const m = withBlank(newMap("DBs", "learn"), "c2");
   const { engine, calls } = setup(m);
+  assert.deepEqual(
+    await act(engine, { type: "fill", blankId: "c9", text: "rigid" }),
+    { error: "No such blank." },
+    "a blank that is not on the diagram costs no model call",
+  );
   const done = act(engine, { type: "fill", blankId: "c2", text: "rigid" });
   await settled(calls, 1);
   assert.equal(engine.state.working?.blankId, "c2");
@@ -468,6 +484,7 @@ test("each move sends only the instructions it needs", async () => {
     updatedAt: 0,
     order: 1,
   };
+  withBlank(m, "b1");
   const { engine, calls } = setup(m);
   const sent: Record<string, string> = {};
   const run = async (
@@ -718,9 +735,21 @@ test("a second Check my design while one runs asks for no second review", async 
 test("a Design map refuses the core actions its screen has no use for", async () => {
   const { engine, calls } = setup(designMap());
   const m = engine.state.map!;
+  m.nodes.root = {
+    id: "root",
+    parent: null,
+    kind: "question",
+    title: "Design WhatsApp",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
   m.nodes.dd = {
     id: "dd",
-    parent: null,
+    parent: "root",
     kind: "question",
     title: "How is no message lost?",
     summary: "",
@@ -742,6 +771,17 @@ test("a Design map refuses the core actions its screen has no use for", async ()
       await act(engine, req as Parameters<typeof act>[1]),
       { error: "That action is not available on this map." },
       req.type,
+    );
+  // a hint or going deeper needs a deep dive that is there
+  for (const req of [
+    { type: "hint", nodeId: "nope" },
+    { type: "hint", nodeId: "root" },
+    { type: "deeper", nodeId: "nope" },
+  ])
+    assert.match(
+      (await act(engine, req as Parameters<typeof act>[1])).error ?? "",
+      /^No such/,
+      `${req.type} ${req.nodeId}`,
     );
   await tick();
   assert.equal(calls.length, 0, "no model call");

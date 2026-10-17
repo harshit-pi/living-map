@@ -36,13 +36,14 @@ DESIGN OPS (in the same map block as node ops):
     goals and constraints at most 5 each, a few words each; scale at most 5 lines; reads and writes are PEAK requests per second that read and that write, following from the scale lines so the learner can check them. readIs and writeIs say in a few words what ONE read and ONE write are; pick them so the numbers agree with the scale lines (if each message goes to 20 people, deliveries are 20x the sends).
   {"op":"reference","comps":[{"id":"lb","kind":"lb","label":"Load balancer"}],"wires":[{"from":"app","to":"lb","carries":"both","times":1}],"notes":["one line per key decision"]}
     Your own complete high-level design for the brief, as a strong answer would draw it (8-16 components). Use the client's id from your place op. carries: read | write | both; times: fan-out (e.g. 200 when one tweet is written into each follower's feed).
-  {"op":"place","id":"app","kind":"client","label":"Mobile app","x":40,"y":220}
+  {"op":"place","id":"app","kind":"client","label":"Mobile app","x":40,"y":220,"readShare":100,"writeShare":100}
+    readShare and writeShare (clients only) are the percent of the brief's reads and writes this client makes: with a "Viewer app" and a "Creator app", the viewer makes 100 and 0, the creator 0 and 100. The load check starts each client's traffic from its shares, whatever it is wired to: wiring never moves traffic from one client to another.
   {"op":"review","summary":"one sentence","points":[{"level":"good|fix|think","text":"at most 40 words","on":["component ids"]}]}
 COMPONENT KINDS: ${Object.entries(KINDS)
   .map(([id, k]) => `${id} (${k.hint})`)
   .join("; ")}.`;
 
-const START = `START: write, in one map block: the root question (a node with parent null); the brief; your reference design; 3-5 deep dives as questions under the root; and place the client component(s) only, at x 40. The caption is one sentence telling the learner what to build first (the path from the client to the data, on the main read).`;
+const START = `START: write, in one map block: the root question (a node with parent null); the brief; your reference design; 3-5 deep dives as questions under the root; and place the client component(s) only, at x 40, each with its readShare and writeShare (together 100 for reads and 100 for writes), and several clients at least 160 apart in y. The caption is one sentence telling the learner what to build first (the path from the client to the data, on the main read).`;
 
 const REVIEW = `CHECK MY DESIGN: review the learner's design against the brief, the load check and your reference. Write one review op: 3-6 points, the most important first.
 - good: something that works at this scale, said in a few words.
@@ -117,6 +118,8 @@ export const design: ServerPlugin = {
         label: before.label,
         count: before.count,
         shards: before.shards,
+        readShare: before.readShare,
+        writeShare: before.writeShare,
       };
       const c = updateComp(s, a.id, a);
       if (!c || !was) return { error: "That component is gone." };
@@ -125,6 +128,10 @@ export const design: ServerPlugin = {
         c.count !== was.count &&
           `set "${c.label}" to ${c.count} ${KINDS[c.kind].store ? "replicas" : "instances"}`,
         c.shards !== was.shards && `split "${c.label}" into ${c.shards} shards`,
+        c.readShare !== was.readShare &&
+          `"${c.label}" now makes ${c.readShare}% of the brief's reads`,
+        c.writeShare !== was.writeShare &&
+          `"${c.label}" now makes ${c.writeShare}% of the brief's writes`,
       ].filter(Boolean);
       if (changes.length) note(ctx, `${changes.join("; ")}.`);
       else ctx.engine.push(); // a move: saved, not worth telling Claude

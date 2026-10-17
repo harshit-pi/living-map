@@ -24,7 +24,8 @@ export function ExploreScreen({
       : undefined;
   return (
     <>
-      <ReactFlowProvider>
+      {/* a canvas per map, so another map opens framed whole */}
+      <ReactFlowProvider key={map.id}>
         <Canvas
           map={map}
           showDropped={showDropped}

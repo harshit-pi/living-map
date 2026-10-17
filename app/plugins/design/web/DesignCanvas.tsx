@@ -2,6 +2,7 @@ import dagre from "@dagrejs/dagre";
 import {
   Background,
   Controls,
+  getViewportForBounds,
   Handle,
   MarkerType,
   Position,
@@ -34,30 +35,84 @@ const NODE_H = 84;
 const DRAG_TYPE = "application/x-living-map-kind";
 const FIT = { padding: 0.25, maxZoom: 1 };
 // the message box covers the bottom of the canvas: new parts land above it
-const COMPOSER_H = 96;
+export const COMPOSER_H = 96;
 
 type Side = "top" | "right" | "bottom" | "left";
 type At = { x: number; y: number };
 
 // A wire runs between the facing sides of its two parts: side to side when
-// they sit next to each other, top to bottom when one is above the other. The
-// second of two opposite wires between the same parts loops round instead, so
-// the two can be told apart.
-function sides(a: At, b: At, back: boolean): [Side, Side] {
+// they sit next to each other, top to bottom when one is above the other.
+// When that would draw it over another part (a second client stacked under
+// the first), it leaves by the sides that cross the fewest cards. The second of two
+// opposite wires between the same parts loops round instead, so the two can
+// be told apart.
+function sides(a: At, b: At, back: boolean, others: At[]): [Side, Side] {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const across = Math.abs(dx) - NODE_W > Math.abs(dy) - NODE_H;
-  if (across)
-    return back
-      ? ["bottom", "bottom"]
-      : dx > 0
-        ? ["right", "left"]
-        : ["left", "right"];
-  return back
-    ? ["right", "right"]
-    : dy > 0
-      ? ["bottom", "top"]
-      : ["top", "bottom"];
+  if (back) return across ? ["bottom", "bottom"] : ["right", "right"];
+  const sideways: [Side, Side] = dx > 0 ? ["right", "left"] : ["left", "right"];
+  const upright: [Side, Side] = dy > 0 ? ["bottom", "top"] : ["top", "bottom"];
+  const [first, second] = across ? [sideways, upright] : [upright, sideways];
+  const options: [Side, Side][] = [
+    first,
+    second,
+    [first[0], second[1]],
+    [second[0], first[1]],
+  ];
+  let best = first;
+  let least = Infinity;
+  for (const o of options) {
+    const n = overlap(a, b, o, others);
+    if (n < least) [best, least] = [o, n];
+    if (n === 0) break;
+  }
+  return best;
+}
+
+const dot = (p: At, side: Side): At =>
+  side === "top"
+    ? { x: p.x + NODE_W / 2, y: p.y }
+    : side === "bottom"
+      ? { x: p.x + NODE_W / 2, y: p.y + NODE_H }
+      : side === "left"
+        ? { x: p.x, y: p.y + NODE_H / 2 }
+        : { x: p.x + NODE_W, y: p.y + NODE_H / 2 };
+
+// where React Flow puts a bezier's control point for a dot on this side
+function control(side: Side, from: At, to: At): At {
+  const off = (d: number) => (d >= 0 ? 0.5 * d : 0.25 * 25 * Math.sqrt(-d));
+  if (side === "left") return { x: from.x - off(from.x - to.x), y: from.y };
+  if (side === "right") return { x: from.x + off(to.x - from.x), y: from.y };
+  if (side === "top") return { x: from.x, y: from.y - off(from.y - to.y) };
+  return { x: from.x, y: from.y + off(to.y - from.y) };
+}
+
+// how much of the wire's curve passes over (or brushes) other parts' cards
+function overlap(a: At, b: At, [sa, sb]: [Side, Side], others: At[]) {
+  const p0 = dot(a, sa);
+  const p3 = dot(b, sb);
+  const p1 = control(sa, p0, p3);
+  const p2 = control(sb, p3, p0);
+  let n = 0;
+  for (let i = 1; i < 24; i++) {
+    const t = i / 24;
+    const u = 1 - t;
+    const k = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+    const x = k[0] * p0.x + k[1] * p1.x + k[2] * p2.x + k[3] * p3.x;
+    const y = k[0] * p0.y + k[1] * p1.y + k[2] * p2.y + k[3] * p3.y;
+    if (
+      others.some(
+        (o) =>
+          x > o.x - 8 &&
+          x < o.x + NODE_W + 8 &&
+          y > o.y - 8 &&
+          y < o.y + NODE_H + 8,
+      )
+    )
+      n++;
+  }
+  return n;
 }
 
 type CompData = { comp: Comp; load?: Load; flagged: boolean; ghost: boolean };
@@ -245,6 +300,9 @@ export function DesignCanvas({
         at.get(w.from) ?? { x: 0, y: 0 },
         at.get(w.to) ?? { x: 0, y: 0 },
         back,
+        nodes
+          .filter((n) => n.id !== w.from && n.id !== w.to)
+          .map((n) => n.position),
       );
       return {
         id: w.id,
@@ -252,6 +310,12 @@ export function DesignCanvas({
         target: w.to,
         sourceHandle,
         targetHandle,
+        // a loop from one side back to the same side: a curve would run
+        // along the cards' edge, out of sight, so it steps out round them
+        ...(sourceHandle === targetHandle && {
+          type: "smoothstep",
+          pathOptions: { offset: 28 },
+        }),
         label: wireLabel(w) || undefined,
         animated: !!to?.async,
         selected: !ref && picked?.type === "wire" && picked.id === w.id,
@@ -270,15 +334,19 @@ export function DesignCanvas({
 
   // When the canvas narrows (the review opens, a panel slides in, the window
   // shrinks), bring back into view any part that the change left out of sight.
+  // When it widens again, zoom back in if the design was shrunk to fit.
   useEffect(() => {
     const el = box.current;
     if (!el) return;
     let t = 0;
+    // the size the view was last framed for
+    let framed = { w: el.clientWidth, h: el.clientHeight };
     const ro = new ResizeObserver(() => {
       clearTimeout(t);
       t = window.setTimeout(() => {
         const { x, y, zoom } = rf.getViewport();
-        const out = rf.getNodes().some((n) => {
+        const all = rf.getNodes();
+        const out = all.some((n) => {
           const sx = n.position.x * zoom + x;
           const sy = n.position.y * zoom + y;
           return (
@@ -288,7 +356,23 @@ export function DesignCanvas({
             sy + NODE_H * zoom > el.clientHeight
           );
         });
-        if (out) void rf.fitView({ ...FIT, duration: 250 });
+        const grew =
+          el.clientWidth > framed.w + 40 || el.clientHeight > framed.h + 40;
+        const fits =
+          all.length > 0 &&
+          getViewportForBounds(
+            rf.getNodesBounds(all),
+            el.clientWidth,
+            el.clientHeight,
+            0.3,
+            FIT.maxZoom,
+            FIT.padding,
+          ).zoom;
+        if (out || (grew && fits && fits > zoom * 1.15)) {
+          framed = { w: el.clientWidth, h: el.clientHeight };
+          // at once: a fit still animating would be judged again mid-way
+          void rf.fitView(FIT);
+        }
       }, 220);
     });
     ro.observe(el);

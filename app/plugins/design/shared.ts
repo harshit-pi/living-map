@@ -262,6 +262,11 @@ export type Comp = {
   count: number; // instances, or replicas for a store
   shards: number; // stores only
   by: "you" | "claude";
+  // clients only: the percent of the brief's reads and writes this client
+  // makes (a viewer app all the plays, a creator app all the uploads); a
+  // client without one splits what the others leave evenly
+  readShare?: number;
+  writeShare?: number;
 };
 
 export type Wire = {
