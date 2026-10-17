@@ -80,12 +80,14 @@ export type Frame =
   | { kind: "sort"; columns: string[] };
 
 // Each frame allows only the verbs its shape can mean: a timeline links by
-// cause and order, a box diagram by what holds what.
+// cause and order, a box diagram by what holds what (and what one part
+// makes of another: a hash function makes a hash code, and a model that said
+// so lost the link and with it its predict).
 export const FRAME_FAMILIES: Record<FrameKind, readonly Family[]> = {
   free: ["cause", "change", "structure", "flow", "contrast"],
   lanes: ["flow", "cause", "change"],
   axis: ["cause", "flow", "change"],
-  boxes: ["structure", "flow", "cause"],
+  boxes: ["structure", "flow", "cause", "change"],
   sort: ["cause", "contrast", "structure"],
 };
 
@@ -108,6 +110,11 @@ export function slotsOf(frame: Frame): string[] {
   }
 }
 
+// The order is what an axis frame is about (a play step's subgoals): a pair
+// out of order, or a part not on a tick, stops a pass. Where a part sits in
+// lanes, boxes or sort columns is marked and does not.
+export const orderStops = (f: Frame): boolean => f.kind === "axis";
+
 export type Layer = "parts" | "behaviour" | "function" | "failure";
 export const LAYERS: readonly Layer[] = [
   "parts",
@@ -127,7 +134,7 @@ export const HELP: Record<Help, { name: string; says: string }> = {
   },
   1: { name: "Link it", says: "All parts placed, no links" },
   2: { name: "Place and link", says: "The frame, the parts in the tray" },
-  3: { name: "From the frame", says: "The frame only: you type the parts" },
+  3: { name: "From the frame", says: "You type each part into the frame" },
 };
 
 // the level chooser, once per map: where the first visit's help starts
@@ -201,9 +208,14 @@ export type CheckResult = {
   // right + half of family, over total
   score: number;
   marks: LinkMark[];
-  // lanes, boxes and sort: each placed part's slot; axis: pairs out of order
+  // lanes, boxes and sort: each part placed in a slot, and whether it is
+  // one of its slots; axis: pairs out of order. On an axis the order is
+  // what you build, so a pair out of order stops a pass.
   slots: { part: string; ok: boolean }[];
   outOfOrder: number;
+  // parts placed outside the frame ("Not in a column yet"): not placed yet,
+  // rather than in the wrong slot (absent on a check saved before)
+  loose?: number;
   // refutations brought back for an item you got wrong while sure last time
   refutes: string[];
   pass: boolean;
@@ -241,8 +253,6 @@ export type StepView = {
   depth: number;
   parent: string | null;
   model: "none" | "writing" | "ready" | "broken";
-  // what went wrong when Claude's model did not hold together
-  problems: string[];
   stage: Stage;
   help: Help;
   mode: "build" | "play";
@@ -270,6 +280,9 @@ export type StepView = {
   sure: Sure | null;
   hints: HintView[];
   canHint: boolean;
+  // key links a reply of Claude's named while you built (Explain, the thread,
+  // the message box): they count as hinted
+  told: number;
   // a typed part that matched nothing: "did you mean" from Claude's labels
   typed: { text: string; suggest: string[] } | null;
   predict: {

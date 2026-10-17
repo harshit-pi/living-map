@@ -2,7 +2,14 @@ import { useState } from "react";
 
 import { ArgueBox, SmallBtn } from "./BuildCanvas.tsx";
 import { MARK, WAIT_TITLE, type Here } from "./view.ts";
-import { SURES, type Mark, type StepView, type Sure } from "../shared.ts";
+import {
+  orderStops,
+  SURES,
+  type LinkView,
+  type Mark,
+  type StepView,
+  type Sure,
+} from "../shared.ts";
 
 const SURE_WORD: Record<Sure, string> = {
   guess: "guess",
@@ -43,36 +50,15 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
   const { act, busy } = here;
   const step = st.step;
   const c = st.check;
-  const [arguing, setArguing] = useState<string | null>(null);
-  const [text, setText] = useState("");
   const [asking, setAsking] = useState(false);
-  const labelOf = (id: string) =>
-    st.placed.find((p) => p.id === id)?.label ?? "";
-  const words = (id: string) => {
-    const l = st.links.find((x) => x.id === id);
-    return l ? `“${labelOf(l.from)}” ${l.rel} “${labelOf(l.to)}”` : "";
-  };
-  // the last check's marks on links still on the canvas: one you deleted
-  // since has nothing left to name
-  const of = (m: Mark) =>
-    c?.marks.filter(
-      (x) => x.mark === m && st.links.some((l) => l.id === x.link),
-    ) ?? [];
-  const argued = c?.argued ?? 0;
-  const slotWord =
-    st.frame.kind === "lanes"
-      ? "lane"
-      : st.frame.kind === "boxes"
-        ? "box"
-        : "column";
-  const wrongSlots = c?.slots.filter((s) => !s.ok).length ?? 0;
   const shownKeys = st.links.filter((l) => l.given).length;
 
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between">
         <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-          Check{st.checks ? ` · try ${st.checks + 1}` : ""}
+          {/* the try the card shows: the first check is try 1 */}
+          Check{st.checks ? ` · try ${st.checks}` : ""}
         </div>
         {c?.keyOnly && (
           <span className="text-[11px] text-muted">key links only</span>
@@ -85,184 +71,10 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           hints open after your first check.
         </p>
       ) : (
-        <div className="space-y-1 text-[12.5px] leading-snug text-body">
-          <div className="text-[14px] font-semibold text-ink">
-            {c.right + c.given + argued} of {c.total + argued} links ✓
-            {c.given > 0 && (
-              <span className="ml-1 text-[11.5px] font-normal text-muted">
-                ({c.given} given)
-              </span>
-            )}
-          </div>
-          <div>
-            {c.keyRight} of {c.keys} key links
-            {c.keyMissing > 0 &&
-              ` · ${plural(c.keyMissing, "key link")} still missing`}
-          </div>
-          {c.missing > c.keyMissing && (
-            <div>
-              {plural(c.missing - c.keyMissing, "other link")} not drawn yet
-            </div>
-          )}
-          {c.reversed > 0 && (
-            <div>
-              {plural(c.reversed, "link points", "links point")} the wrong way ↔
-            </div>
-          )}
-          {c.family > 0 && (
-            <div>
-              {plural(c.family, "link has", "links have")} the right pair with a
-              near verb ~
-            </div>
-          )}
-          {wrongSlots > 0 && (
-            <div>
-              {plural(wrongSlots, "part is", "parts are")} not in {slotWord}{" "}
-              {wrongSlots === 1 ? "it belongs in" : "they belong in"} ⚠
-            </div>
-          )}
-          {c.outOfOrder > 0 && (
-            <div>
-              {plural(c.outOfOrder, "pair")} out of order along the axis
-            </div>
-          )}
-          {/* what a pass needs, so a card full of ✓ that has not passed
-              says why (with 3 other links, 70% is all 3) */}
-          {!c.pass && (
-            <div className="mt-1 rounded-lg bg-panel px-2 py-1 text-[12px] text-muted">
-              Not passed yet. A pass needs every key link
-              {c.restNeed > 0
-                ? `, and ${c.restNeed} of the ${c.rest} other links (you have ${c.restGot})`
-                : ""}
-              .
-              {(wrongSlots > 0 || c.outOfOrder > 0) &&
-                " Where the parts sit is marked, but does not stop a pass."}
-            </div>
-          )}
-        </div>
+        <Counts st={st} />
       )}
 
-      {/* what the server found, with the reason only once you drew it */}
-      {c && (of("miscon").length > 0 || of("reversed").some((m) => m.note)) && (
-        <div className="space-y-1.5 border-t border-line pt-2">
-          {of("miscon").map((m) => {
-            const l = st.links.find((x) => x.id === m.link)!;
-            return (
-              <div key={m.link} className="text-[12px] leading-snug">
-                <span className="font-medium text-danger-strong">
-                  {MARK.miscon.sym} {words(m.link)}:
-                </span>{" "}
-                <span className="text-body">{m.refute}</span>
-                {/* the pattern can be wider than the mix-up: say why it holds */}
-                {arguing !== m.link ? (
-                  <button
-                    onClick={() => {
-                      setArguing(m.link);
-                      setText("");
-                    }}
-                    className="ml-1 text-[11.5px] text-primary-strong hover:underline"
-                  >
-                    I think it holds
-                  </button>
-                ) : (
-                  <ArgueBox
-                    here={here}
-                    mixup
-                    link={l}
-                    text={text}
-                    setText={setText}
-                    onSend={() => {
-                      void act("argue", { step, link: l.id, text }).then(
-                        (r) => {
-                          if (!r.error) setArguing(null);
-                        },
-                      );
-                    }}
-                  />
-                )}
-              </div>
-            );
-          })}
-          {of("reversed")
-            .filter((m) => m.note)
-            .map((m) => (
-              <div key={m.link} className="text-[12px] leading-snug">
-                <span className="font-medium text-warning-strong">
-                  {MARK.reversed.sym} {words(m.link)}:
-                </span>{" "}
-                <span className="text-body">{m.note}</span>
-              </div>
-            ))}
-        </div>
-      )}
-      {c && c.refutes.length > 0 && (
-        <div className="rounded-lg bg-hint-soft px-2.5 py-1.5 text-[12px] leading-snug text-hint-strong">
-          Last time you were sure of a link that did not hold.{" "}
-          {c.refutes.join(" ")}
-        </div>
-      )}
-
-      {c && of("extra").length > 0 && (
-        <div className="space-y-1.5 border-t border-line pt-2">
-          <div className="text-[11.5px] text-muted">
-            Not in Claude's model ({MARK.extra.sym}). That is not wrong.
-          </div>
-          {of("extra").map((m) => {
-            const l = st.links.find((x) => x.id === m.link);
-            if (!l) return null;
-            return (
-              <div key={m.link} className="text-[12px]">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-body">{words(m.link)}</span>
-                  {arguing !== m.link && (
-                    <button
-                      onClick={() => {
-                        setArguing(m.link);
-                        setText("");
-                      }}
-                      className="shrink-0 text-[11.5px] text-primary-strong hover:underline"
-                    >
-                      Argue for it
-                    </button>
-                  )}
-                </div>
-                {arguing === m.link && (
-                  <ArgueBox
-                    here={here}
-                    link={l}
-                    text={text}
-                    setText={setText}
-                    onSend={() => {
-                      void act("argue", { step, link: l.id, text }).then(
-                        (r) => {
-                          if (!r.error) setArguing(null);
-                        },
-                      );
-                    }}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {st.argued.length > 0 && (
-        <div className="space-y-1 border-t border-line pt-2">
-          {st.argued.map((a, i) => (
-            <div key={i} className="text-[12px] leading-snug">
-              <span
-                className={
-                  a.holds ? "text-success-strong" : "text-warning-strong"
-                }
-              >
-                {a.holds ? "✓ It holds:" : "Not here:"}
-              </span>{" "}
-              “{labelOf(a.from)}” {a.rel} “{labelOf(a.to)}”.{" "}
-              <span className="text-muted">{a.say}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <CheckFindings here={here} st={st} />
 
       {st.hints.length > 0 && (
         <div className="space-y-1 border-t border-line pt-2">
@@ -289,7 +101,7 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           </SmallBtn>
           <SmallBtn
             disabled={!st.canHint}
-            title="Draws one key link for you; it counts as shown"
+            title="Draws one link for you; it counts as shown"
             onClick={() => void act("showLink", { step })}
           >
             Show one link
@@ -352,6 +164,264 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           Checking and hints never wait on Claude.
         </div>
       )}
+    </div>
+  );
+}
+
+// the frame's word for a slot
+const slotWord = (st: StepView) =>
+  st.frame.kind === "lanes"
+    ? "lane"
+    : st.frame.kind === "boxes"
+      ? "box"
+      : st.frame.kind === "axis"
+        ? "tick"
+        : "column";
+
+// What the last check counted: links right, key links, what is missing or
+// the wrong way, where the parts sit, and what a pass still needs.
+function Counts({ st }: { st: StepView }) {
+  const c = st.check!;
+  const argued = c.argued ?? 0;
+  const word = slotWord(st);
+  const wrongSlots = c.slots.filter((s) => !s.ok).length;
+  const loose = c.loose ?? 0;
+  const order = orderStops(st.frame);
+  return (
+    <div className="space-y-1 text-[12.5px] leading-snug text-body">
+      <div className="text-[14px] font-semibold text-ink">
+        {c.right + c.given + argued} of {c.total + argued} links ✓
+        {c.given > 0 && (
+          <span className="ml-1 text-[11.5px] font-normal text-muted">
+            ({c.given} given)
+          </span>
+        )}
+      </div>
+      <div>
+        {c.keyRight} of {c.keys} key links
+        {c.keyMissing > 0 &&
+          ` · ${plural(c.keyMissing, "key link")} still missing`}
+      </div>
+      {c.missing > c.keyMissing && (
+        <div>
+          {plural(c.missing - c.keyMissing, "other link")} not drawn yet
+        </div>
+      )}
+      {c.reversed > 0 && (
+        <div>
+          {plural(c.reversed, "link points", "links point")} the wrong way ↔
+        </div>
+      )}
+      {c.family > 0 && (
+        <div>
+          {plural(c.family, "link has", "links have")} the right pair with a
+          near verb ~
+        </div>
+      )}
+      {wrongSlots > 0 && (
+        <div>
+          {st.frame.kind === "sort"
+            ? `${plural(wrongSlots, "part is", "parts are")} not in the column Claude's model puts ${wrongSlots === 1 ? "it" : "them"} in ⚠`
+            : `${plural(wrongSlots, "part is", "parts are")} not in the ${word} ${wrongSlots === 1 ? "it belongs" : "they belong"} in ⚠`}
+        </div>
+      )}
+      {loose > 0 && (
+        <div>
+          {plural(loose, "part is", "parts are")} not in a {word} yet
+        </div>
+      )}
+      {c.outOfOrder > 0 && (
+        <div>{plural(c.outOfOrder, "pair")} out of order along the axis</div>
+      )}
+      {/* what a pass needs, so a card full of ✓ that has not passed
+          says why (with 3 other links, 70% is all 3) */}
+      {!c.pass && (
+        <div className="mt-1 rounded-lg bg-panel px-2 py-1 text-[12px] text-muted">
+          Not passed yet. A pass needs every key link
+          {c.restNeed > 0
+            ? `, and ${c.restNeed} of the ${c.rest} other links (you have ${c.restGot})`
+            : ""}
+          {order ? ", with every part on a tick, in order" : ""}.
+          {!order &&
+            (wrongSlots > 0 || loose > 0) &&
+            " Where the parts sit is marked, but does not stop a pass."}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// What the check found beyond the counts: a mix-up's refutation (and I
+// think it holds), the reason a link points the other way, links not in
+// Claude's model (Argue for it), the verdicts on what you argued, and a
+// reply of Claude's that named a key link. `passed`: shown once the build
+// passed, beside the Why, with the counts: a passing check went straight to
+// the Why, and none of this was ever seen.
+export function CheckFindings({
+  here,
+  st,
+  passed = false,
+}: {
+  here: Here;
+  st: StepView;
+  passed?: boolean;
+}) {
+  const { act } = here;
+  const step = st.step;
+  const c = st.check;
+  const [arguing, setArguing] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const labelOf = (id: string) =>
+    st.placed.find((p) => p.id === id)?.label ?? "";
+  const words = (id: string) => {
+    const l = st.links.find((x) => x.id === id);
+    return l ? `“${labelOf(l.from)}” ${l.rel} “${labelOf(l.to)}”` : "";
+  };
+  // the last check's marks on links still on the canvas: one you deleted
+  // since has nothing left to name
+  const of = (m: Mark) =>
+    c?.marks.filter(
+      (x) => x.mark === m && st.links.some((l) => l.id === x.link),
+    ) ?? [];
+  const argueFor = (link: LinkView, mixup: boolean) => (
+    <ArgueBox
+      here={here}
+      mixup={mixup}
+      link={link}
+      text={text}
+      setText={setText}
+      onSend={() => {
+        void act("argue", { step, link: link.id, text }).then((r) => {
+          if (!r.error) setArguing(null);
+        });
+      }}
+    />
+  );
+  const notable =
+    !!c &&
+    (of("miscon").length > 0 ||
+      of("reversed").some((m) => m.note) ||
+      of("extra").length > 0 ||
+      c.refutes.length > 0 ||
+      c.outOfOrder > 0 ||
+      (c.loose ?? 0) > 0 ||
+      c.slots.some((s) => !s.ok));
+  const told = st.told > 0 && (
+    <div className="text-[11.5px] leading-snug text-muted">
+      A reply of Claude's named{" "}
+      {st.told === 1 ? "a key link" : `${st.told} key links`} of this step:{" "}
+      {st.told === 1 ? "it counts" : "they count"} as hinted.
+    </div>
+  );
+  if (!c) return told || null;
+  if (passed && !notable && !st.argued.length && !st.told) return null;
+
+  return (
+    <div className="space-y-3">
+      {passed && (
+        <>
+          <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
+            Check · try {st.checks} · passed
+          </div>
+          <Counts st={st} />
+        </>
+      )}
+
+      {/* what the server found, with the reason only once you drew it */}
+      {(of("miscon").length > 0 || of("reversed").some((m) => m.note)) && (
+        <div className="space-y-1.5 border-t border-line pt-2">
+          {of("miscon").map((m) => {
+            const l = st.links.find((x) => x.id === m.link)!;
+            return (
+              <div key={m.link} className="text-[12px] leading-snug">
+                <span className="font-medium text-danger-strong">
+                  {MARK.miscon.sym} {words(m.link)}:
+                </span>{" "}
+                <span className="text-body">{m.refute}</span>
+                {/* the pattern can be wider than the mix-up: say why it holds */}
+                {arguing !== m.link ? (
+                  <button
+                    onClick={() => {
+                      setArguing(m.link);
+                      setText("");
+                    }}
+                    className="ml-1 text-[11.5px] text-primary-strong hover:underline"
+                  >
+                    I think it holds
+                  </button>
+                ) : (
+                  argueFor(l, true)
+                )}
+              </div>
+            );
+          })}
+          {of("reversed")
+            .filter((m) => m.note)
+            .map((m) => (
+              <div key={m.link} className="text-[12px] leading-snug">
+                <span className="font-medium text-warning-strong">
+                  {MARK.reversed.sym} {words(m.link)}:
+                </span>{" "}
+                <span className="text-body">{m.note}</span>
+              </div>
+            ))}
+        </div>
+      )}
+      {c.refutes.length > 0 && (
+        <div className="rounded-lg bg-hint-soft px-2.5 py-1.5 text-[12px] leading-snug text-hint-strong">
+          Last time you were sure of a link that did not hold.{" "}
+          {c.refutes.join(" ")}
+        </div>
+      )}
+
+      {of("extra").length > 0 && (
+        <div className="space-y-1.5 border-t border-line pt-2">
+          <div className="text-[11.5px] text-muted">
+            Not in Claude's model ({MARK.extra.sym}). That is not wrong.
+          </div>
+          {of("extra").map((m) => {
+            const l = st.links.find((x) => x.id === m.link);
+            if (!l) return null;
+            return (
+              <div key={m.link} className="text-[12px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-body">{words(m.link)}</span>
+                  {arguing !== m.link && (
+                    <button
+                      onClick={() => {
+                        setArguing(m.link);
+                        setText("");
+                      }}
+                      className="shrink-0 text-[11.5px] text-primary-strong hover:underline"
+                    >
+                      Argue for it
+                    </button>
+                  )}
+                </div>
+                {arguing === m.link && argueFor(l, false)}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {st.argued.length > 0 && (
+        <div className="space-y-1 border-t border-line pt-2">
+          {st.argued.map((a, i) => (
+            <div key={i} className="text-[12px] leading-snug">
+              <span
+                className={
+                  a.holds ? "text-success-strong" : "text-warning-strong"
+                }
+              >
+                {a.holds ? "✓ It holds:" : "Not here:"}
+              </span>{" "}
+              “{labelOf(a.from)}” {a.rel} “{labelOf(a.to)}”.{" "}
+              <span className="text-muted">{a.say}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {told}
     </div>
   );
 }

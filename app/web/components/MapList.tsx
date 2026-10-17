@@ -45,10 +45,10 @@ export function MapRows({
             </span>
             {!!m.due?.now && (
               <span
-                title="Review items due now"
+                title="Steps due for review now"
                 className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[10.5px] font-semibold text-primary-strong"
               >
-                {m.due.now} due
+                ↻ {m.due.now}
               </span>
             )}
             <span className="shrink-0 text-[11px] text-faint">

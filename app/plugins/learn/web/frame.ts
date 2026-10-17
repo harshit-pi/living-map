@@ -147,7 +147,8 @@ const boxSpot = (r: Region, k: number): At => ({
 
 // Where each placed part is drawn. On a free map, where it is. On a frame,
 // where it is when that is inside its slot, pulled into its slot when not,
-// and in the waiting zone when it has no slot.
+// and in the waiting zone when it has no slot. In a box, always under the
+// box's label (a part at the box's corner sat on "CONGRESS").
 export function drawn(
   frame: Frame,
   placed: (At & { id: string; slot?: string })[],
@@ -167,7 +168,8 @@ export function drawn(
   for (const p of placed) {
     const r = p.slot ? rs.find((x) => x.slot === p.slot) : undefined;
     if (!r) out[p.id] = looseSpot(frame, z, loose++);
-    else if (inside(r, frame, p)) out[p.id] = { x: p.x, y: p.y };
+    else if (inside(r, frame, p) && frame.kind !== "boxes")
+      out[p.id] = { x: p.x, y: p.y };
     else if (across(frame))
       out[p.id] = { x: Math.max(p.x, 8), y: r.y + (r.h - NODE_H) / 2 };
     else if (down(frame))
@@ -251,6 +253,7 @@ export function nextSpot(
 type Laid = { id: string; slot?: string };
 
 const PER_ROW = 4;
+const RANK = 96;
 
 // A long chain laid left to right runs off a wide screen at a size nobody
 // can read: past four columns it folds into rows of four, each row running
@@ -269,7 +272,7 @@ function fold(at: Record<string, At>): Record<string, At> {
     const row = Math.floor(col / PER_ROW);
     const at = row % 2 ? PER_ROW - 1 - (col % PER_ROW) : col % PER_ROW;
     out[id] = {
-      x: at * (NODE_W + 70),
+      x: at * (NODE_W + RANK),
       y: p.y - top + row * tall,
     };
   }
@@ -286,7 +289,8 @@ export function tidy(
   links: { from: string; to: string }[],
 ): Record<string, At> {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "LR", nodesep: 26, ranksep: 70 });
+  // room between ranks for a verb's label: at 70 it lay on both cards
+  g.setGraph({ rankdir: "LR", nodesep: 26, ranksep: RANK });
   g.setDefaultEdgeLabel(() => ({}));
   for (const p of parts) g.setNode(p.id, { width: NODE_W, height: NODE_H });
   for (const l of links)
@@ -325,4 +329,139 @@ export function tidy(
       out[p.id] = looseSpot(frame, z, i);
     });
   return out;
+}
+
+// ---------------------------------------------------------------- links
+
+export type Side = "top" | "right" | "bottom" | "left";
+// how a link is drawn: straight between two sides, or as an arc that
+// leaves and enters on one side, that far out
+export type Route =
+  | { type: "straight"; source: Side; target: Side }
+  | { type: "arc"; side: Side; offset: number };
+
+const LABEL_H = 18;
+// a label's width at the canvas's own scale (11px type)
+export const labelWidth = (text: string) => text.length * 6.3 + 14;
+
+const handleAt = (p: At, side: Side): At =>
+  side === "top"
+    ? { x: p.x + NODE_W / 2, y: p.y }
+    : side === "bottom"
+      ? { x: p.x + NODE_W / 2, y: p.y + NODE_H }
+      : side === "left"
+        ? { x: p.x, y: p.y + NODE_H / 2 }
+        : { x: p.x + NODE_W, y: p.y + NODE_H / 2 };
+
+// the sides a straight link leaves and enters by: across when the parts sit
+// side by side, down when one is above the other
+export function facing(a: At, b: At): [Side, Side] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  if (Math.abs(dx) >= Math.abs(dy) * 1.4)
+    return dx >= 0 ? ["right", "left"] : ["left", "right"];
+  return dy >= 0 ? ["bottom", "top"] : ["top", "bottom"];
+}
+
+// The line a route draws (as React Flow draws it: an arc runs out from the
+// farther of its two ends), and where its label sits.
+function pathOf(a: At, b: At, r: Route): { pts: At[]; label: At } {
+  if (r.type === "straight") {
+    const s = handleAt(a, r.source);
+    const t = handleAt(b, r.target);
+    return { pts: [s, t], label: { x: (s.x + t.x) / 2, y: (s.y + t.y) / 2 } };
+  }
+  const s = handleAt(a, r.side);
+  const t = handleAt(b, r.side);
+  const o = r.offset;
+  if (r.side === "top" || r.side === "bottom") {
+    const y =
+      r.side === "bottom" ? Math.max(s.y, t.y) + o : Math.min(s.y, t.y) - o;
+    return {
+      pts: [s, { x: s.x, y }, { x: t.x, y }, t],
+      label: { x: (s.x + t.x) / 2, y },
+    };
+  }
+  const x =
+    r.side === "right" ? Math.max(s.x, t.x) + o : Math.min(s.x, t.x) - o;
+  return {
+    pts: [s, { x, y: s.y }, { x, y: t.y }, t],
+    label: { x, y: (s.y + t.y) / 2 },
+  };
+}
+
+const hits = (p: At, q: At, pad: number) =>
+  p.x > q.x - pad &&
+  p.x < q.x + NODE_W + pad &&
+  p.y > q.y - pad &&
+  p.y < q.y + NODE_H + pad;
+
+// Whether a route runs through a part other than its ends, or its label
+// sits on any part, its own two included (on a short link the label lay on
+// both cards; between neighbouring ticks the link could not be seen).
+export function blocked(
+  from: string,
+  to: string,
+  at: Record<string, At>,
+  r: Route,
+  label: string,
+): boolean {
+  const a = at[from];
+  const b = at[to];
+  const { pts, label: c } = pathOf(a, b, r);
+  const others = Object.entries(at).filter(([id]) => id !== from && id !== to);
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1];
+    const q = pts[i];
+    const n = Math.max(1, Math.ceil(Math.hypot(q.x - p.x, q.y - p.y) / 4));
+    for (let k = 0; k <= n; k++) {
+      const x = {
+        x: p.x + ((q.x - p.x) * k) / n,
+        y: p.y + ((q.y - p.y) * k) / n,
+      };
+      if (others.some(([, o]) => hits(x, o, -2))) return true;
+    }
+  }
+  if (!label) return false;
+  const w = labelWidth(label) / 2;
+  const box = { x: c.x - w, y: c.y - LABEL_H / 2 };
+  return Object.values(at).some(
+    (o) =>
+      box.x < o.x + NODE_W &&
+      box.x + 2 * w > o.x &&
+      box.y < o.y + NODE_H &&
+      box.y + LABEL_H > o.y,
+  );
+}
+
+// How to draw a link so it reads as linking its own two parts: straight
+// when that runs clear of every other part with its label off the cards,
+// else the nearest arc that does, above or below a row, beside a column.
+// `nth`: a second link on the same two parts arcs out further, so each
+// label is its own.
+export function route(
+  from: string,
+  to: string,
+  at: Record<string, At>,
+  label: string,
+  nth = 0,
+): Route {
+  const a = at[from];
+  const b = at[to];
+  if (!a || !b) return { type: "straight", source: "right", target: "left" };
+  const [source, target] = facing(a, b);
+  const flat = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
+  const sides: Side[] = flat
+    ? ["top", "bottom", "left", "right"]
+    : ["right", "left", "top", "bottom"];
+  const tries: Route[] = [
+    ...(nth ? [] : [{ type: "straight", source, target } as Route]),
+    ...[30, 54, 84, 120, 170].flatMap((o) =>
+      sides.map((side): Route => ({ type: "arc", side, offset: o + 24 * nth })),
+    ),
+  ];
+  return (
+    tries.find((r) => !blocked(from, to, at, r, label)) ??
+    tries.find((r) => r.type === "arc")!
+  );
 }

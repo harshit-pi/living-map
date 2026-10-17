@@ -40,9 +40,11 @@ export function FloatingComposer({
       style={{ paddingRight: one && roomy && beside ? 450 : undefined, left }}
     >
       {caption.text && !inPanel && (
+        // a reply that stays (Learn) is kept short on the canvas: a long
+        // one covered the bottom of what you were building; it scrolls
         <div
           onClick={caption.clear}
-          className="pointer-events-auto max-w-2xl cursor-pointer rounded-2xl bg-surface/95 px-4 py-2.5 shadow-lg ring-1 ring-line backdrop-blur-sm"
+          className={`pointer-events-auto max-w-2xl cursor-pointer rounded-2xl bg-surface/95 px-4 py-2.5 shadow-lg ring-1 ring-line backdrop-blur-sm ${sticky ? "max-h-28 overflow-y-auto" : ""}`}
         >
           <div className="answer answer-sm">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>

@@ -7,6 +7,7 @@ import type { Action, ActionResult, MapDoc } from "../../../shared/model.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
   HELP,
+  orderStops,
   PLUGIN_ID,
   type Credit,
   type LearnView,
@@ -105,13 +106,17 @@ export type Here = {
 // ---------------------------------------------------------------- words
 
 export const helpLine = (st: StepView): string => {
+  // on an axis the order is what you build: at L1 its parts wait beside it
+  const order = orderStops(st.frame) && st.help === 1;
   if (st.recall)
-    return `Quick rebuild · L1 · ${HELP[1].name}: only the key links are checked`;
+    return `Quick rebuild · L1 · ${HELP[1].name}: ${order ? "put the parts in order; " : ""}only the key links are checked`;
   // a new case is always built at L2 (build.ts), whatever the step's help
   if (st.onCase) return `New case · L2 · ${HELP[2].name}: ${st.caseTitle}`;
   const pre = st.reviewing ? "Review · " : "";
   if (st.help === 0)
     return `${pre}L0 · ${HELP[0].name}: draw the key links that are missing`;
+  if (order)
+    return `${pre}L1 · ${HELP[1].name}: put the parts in order along the axis, then link them`;
   return `${pre}L${st.help} · ${HELP[st.help].name}: ${HELP[st.help].says.toLowerCase()}`;
 };
 

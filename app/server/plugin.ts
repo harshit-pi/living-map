@@ -39,6 +39,10 @@ export type ServerPlugin = {
     op: Raw,
     opts: { scope: string | null },
   ) => number | null;
+  // a node op (add, update) from the model's reply, before core applies it:
+  // the plugin may clean its text in place (Learn leaves out what would say
+  // the links of a step you are building)
+  cleanOp?: (map: StoredMap, op: Raw) => void;
   // the model may not change or remove a node you made, chose or settled
   // (by: "you"), whatever its reply says
   keepUserNodes?: boolean;
@@ -59,7 +63,7 @@ export type ServerPlugin = {
   view?: (map: StoredMap) => unknown;
   // one line for the maps list, e.g. "7 parts · 6 wires"
   summary?: (map: StoredMap) => string;
-  // how much of the map waits for review now, and when the next falls due
+  // how many steps wait for review now, and when the next falls due
   // (Learn's spaced rebuilds), for the start screen and the maps list
   due?: (map: StoredMap, now: number) => { now: number; next: number | null };
 };

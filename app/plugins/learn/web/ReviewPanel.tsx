@@ -30,6 +30,7 @@ export function ReviewStart({
 }) {
   const { view } = here;
   const steps = view.steps.filter((s) => s.itemsDue > 0);
+  const links = steps.reduce((n, s) => n + s.itemsDue, 0);
   return (
     <div className="flex h-full items-center justify-center p-6">
       <div className="w-full max-w-md rounded-2xl bg-surface p-5 shadow-xs ring-1 ring-line">
@@ -40,10 +41,10 @@ export function ReviewStart({
           {steps.length} {steps.length === 1 ? "step is" : "steps are"} due
         </div>
         <div className="mt-1 text-[13px] text-muted">
-          {view.due.now} key {view.due.now === 1 ? "link" : "links"} to rebuild
-          from memory, about {minutesFor(view.due.now)}{" "}
-          {minutesFor(view.due.now) === 1 ? "minute" : "minutes"}. Each step
-          comes back with a little less help than last time
+          {links} key {links === 1 ? "link" : "links"} to rebuild from memory,
+          about {minutesFor(links)}{" "}
+          {minutesFor(links) === 1 ? "minute" : "minutes"}. Each step comes back
+          with a little less help than last time
           {steps.length > 1 ? ", in a mixed order" : ""}.
         </div>
         {view.last && (
@@ -80,6 +81,9 @@ export function ReviewStrip({
   current: string | null;
   onPick: (step: string) => void;
 }) {
+  const pathOrder = view.steps
+    .map((s) => s.step)
+    .filter((id) => review.order.includes(id));
   return (
     <div className="space-y-1">
       <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
@@ -105,9 +109,11 @@ export function ReviewStrip({
             </span>
           );
         })}
-        {review.order.length > 1 && (
-          <span className="text-[11.5px] text-faint">(mixed order)</span>
-        )}
+        {/* only when it is: two steps can come back in path order */}
+        {review.order.length > 1 &&
+          review.order.some((id, i) => id !== pathOrder[i]) && (
+            <span className="text-[11.5px] text-faint">(mixed order)</span>
+          )}
       </div>
     </div>
   );

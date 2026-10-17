@@ -57,6 +57,13 @@ export default function App() {
     },
     [settings],
   );
+  // a refusal is read once and goes: kept on screen, "Those two are already
+  // linked that way" stayed over everything you did after it
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(""), 6000);
+    return () => clearTimeout(t);
+  }, [error]);
   const stop = useCallback(() => {
     void act({ type: "stop" }, settings);
   }, [settings]);

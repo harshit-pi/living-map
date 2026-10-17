@@ -16,9 +16,11 @@ import {
   BUILD_ACTIONS,
   BUILD_PROMPT,
   BUILD_SECTIONS,
+  cleanBuildOp,
   enterBuild,
   isBuildMap,
   startBuildMap,
+  watched,
 } from "./build.ts";
 import {
   dueOf,
@@ -168,9 +170,12 @@ function buildScene(
 }
 
 // A finished scene counts as worked out by you unless most of it was shown.
+// On a build map a step is built by its build and Why (build.ts): a scene
+// played to the end set it answered, and the path read "2 of 4 built" with
+// the subgoal order not built.
 function finishScene(ctx: Ctx, node: MapNode, p: Play) {
   const total = ctx.map.scenes[node.id].moves.length;
-  if (node.kind === "question" && !node.revealed) {
+  if (node.kind === "question" && !node.revealed && !isBuildMap(ctx.map)) {
     if (p.shown * 2 > total) node.revealed = true;
     else node.status = "answered";
   }
@@ -259,6 +264,7 @@ export const learn: ServerPlugin = {
     return map.diagram ? `${text}\n\n${classicOutline(map)}` : text;
   },
   applyOp: (map, op, { scope }) => applyBuildOp(map, op, scope),
+  cleanOp: (map, op) => cleanBuildOp(map, op),
 
   start(ctx) {
     return startBuildMap(ctx);
@@ -300,18 +306,32 @@ export const learn: ServerPlugin = {
     play: (ctx, a: Raw) => play(ctx, id(a.nodeId), a.key),
     playshow: (ctx, a: Raw) => show(ctx, id(a.nodeId)),
     replay: (ctx, a: Raw) => replay(ctx, id(a.nodeId)),
+    // what Claude says while you build is watched (build.ts): a key link it
+    // names counts as hinted
     thread: (ctx, a: Raw) =>
-      canvas.thread(
-        ctx,
-        id(a.nodeId),
-        id(a.threadId) || undefined,
-        a.text,
-        ({ node, named }) =>
-          node.kind !== "question"
-            ? null
-            : isBuildMap(ctx.map)
-              ? `the learner wrote in the thread on step ${named}. Answer their question about this step without naming the links of its model: they build it back from memory, and the server checks it.`
-              : `the learner wrote in the thread on step ${named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`,
+      watched(ctx, id(a.nodeId), () =>
+        canvas.thread(
+          ctx,
+          id(a.nodeId),
+          id(a.threadId) || undefined,
+          a.text,
+          ({ node, named }) =>
+            node.kind !== "question"
+              ? null
+              : isBuildMap(ctx.map)
+                ? `the learner wrote in the thread on step ${named}. Answer their question about this step without naming the links of its model: they build it back from memory, and the server checks it.`
+                : `the learner wrote in the thread on step ${named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`,
+        ),
+      ),
+    explain: (ctx, a: Raw) =>
+      watched(ctx, id(a.nodeId), () => canvas.explain(ctx, id(a.nodeId))),
+    message: (ctx, a: Raw) =>
+      watched(ctx, null, () =>
+        canvas.message(
+          ctx,
+          a.text,
+          Array.isArray(a.selection) ? a.selection : [],
+        ),
       ),
     hint: either((ctx, a) => coreHint(ctx, id(a.nodeId)))(BUILD_ACTIONS.hint),
     // a build map goes deeper on a part of a step's model; without a part
@@ -324,11 +344,13 @@ export const learn: ServerPlugin = {
         : canvas.deeper(ctx, id(a.nodeId ?? a.step), "Going deeper"),
     ),
     next: (ctx) =>
-      canvas.next(
-        ctx,
-        isBuildMap(ctx.map)
-          ? "next: point the learner at the next step to build, without giving away its model."
-          : "next: point the learner at the next open step and make its first move clear, without solving it.",
+      watched(ctx, null, () =>
+        canvas.next(
+          ctx,
+          isBuildMap(ctx.map)
+            ? "next: point the learner at the next step to build, without giving away its model."
+            : "next: point the learner at the next open step and make its first move clear, without solving it.",
+        ),
       ),
   },
 
@@ -356,7 +378,7 @@ export const learn: ServerPlugin = {
       // the headline of the last review: today, unaided
       const s = peek(map.data);
       const last = s ? lastVisit(s) : null;
-      return `${built} of ${steps.length} built${due ? ` · ${due} due` : ""}${last ? ` · last review ${last.unaided} of ${last.of} unaided` : ""}`;
+      return `${built} of ${steps.length} built${due ? ` · ${due} ${due === 1 ? "step" : "steps"} due` : ""}${last ? ` · last review ${last.unaided} of ${last.of} unaided` : ""}`;
     }
     const done = steps.filter(
       (n) => n.status === "answered" && !n.revealed,

@@ -9,6 +9,7 @@ import {
   acceptArgued,
   addLinks,
   addMiscon,
+  bareSay,
   caseShape,
   cleanModel,
   creditOf,
@@ -18,6 +19,9 @@ import {
   helpFor,
   ideaCards,
   itemsOf,
+  keepVisit,
+  keyOnlyFor,
+  keysIn,
   linkParts,
   linkWords,
   localDay,
@@ -34,6 +38,7 @@ import {
   placePart,
   rebuilt,
   record,
+  redactLinks,
   relinkParts,
   sameLink,
   scrub,
@@ -108,7 +113,7 @@ const MODEL = `MODEL OPS (in the same map block as node ops; write the model op 
 FRAMES: {"kind":"free"} | {"kind":"lanes","lanes":["…"]} (each part has a "slot": its lane) | {"kind":"axis","ticks":["…"]} (order matters; each part's "slot" is its tick) | {"kind":"boxes","boxes":[{"id":"…","label":"…"}]} (each part's "slot" is the box it sits in) | {"kind":"sort","columns":["strong evidence","weak","against"]} (a part's "slot" may be a list when more than one column is fair).
 VERBS ("rel"), by family: ${verbList}. Each frame takes only some families: ${frameVerbs}.
 LAYERS ("layer"): parts · behaviour · function · failure. For a system, the first step is its parts and what each is for, the next how they interact; the why questions are its function and the what-if is its failure.
-RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. At most 3 misconceptions, real ones learners hold, never made up; give one a "link" only when that link, drawn on its own, is false in this case (not when the misconception is that it is the only cause: a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it).`;
+RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it).`;
 
 const WHY = `WHY on a key link: judge the learner's answer against that link's rubric (in the outline). The words do not have to match; the idea does. Write one op: {"op":"why","model":"<model id>","link":"<link id>","state":"right|partial|wrong","say":"at most 30 words"}. If partial or wrong, "say" asks ONE question that leads them on, never the fix. The caption is one short sentence.`;
 
@@ -202,7 +207,7 @@ function applyWhy(s: LearnState, op: Raw): number {
   if (link && link !== st.whyLink) return 0;
   if (!["right", "partial", "wrong"].includes(op.state)) return 0;
   st.why.state = op.state;
-  st.why.say = str(op.say, 240).trim();
+  st.why.say = bareSay(str(op.say, 240).trim());
   return 1;
 }
 
@@ -539,6 +544,8 @@ function passed(x: At, b: Build) {
       st.whyLink = whyLinkOf(x.main, s.visits.length + 1) ?? st.whyLink;
       st.why = { state: st.why.state, tries: 0 };
     } else st.stage = "built";
+    // every due step rebuilt: today's score is kept now
+    if (!Object.values(s.steps).some((y) => y.reviewing)) keepVisit(s);
     return;
   }
   st.rungs.built = creditOf(b, st.viaModel);
@@ -554,6 +561,19 @@ type Act = (ctx: Ctx, a: Raw) => Promise<ActionResult> | ActionResult;
 const fail = (x: At | string): x is string => typeof x === "string";
 const err = (error: string): ActionResult => ({ error });
 
+// What the first move says, written here rather than by Claude: that move
+// writes step 1's model, and its streamed caption said the case outright
+// ("'cat' and 'dog' both hash to bucket 3") before the predict asked it.
+function pathCaption(ctx: Ctx, entered = false) {
+  const path = topPath(ctx.map);
+  if (!path.length) return;
+  ctx.map.chat.push({
+    role: "claude",
+    text: `${entered ? "What you explored is now a path" : "Your path"}: ${path.length} ${path.length === 1 ? "step" : "steps"}, in the order to learn them. Step 1 is “${ctx.map.nodes[path[0]].title}”.`,
+    ts: Date.now(),
+  });
+}
+
 export async function startBuildMap(ctx: Ctx): Promise<ActionResult> {
   const m = ctx.map;
   m.data = { ...m.data, learn: newState("build") };
@@ -563,6 +583,7 @@ export async function startBuildMap(ctx: Ctx): Promise<ActionResult> {
     action: buildStartAction(m.title),
     label: "Drawing your path and step 1",
     sections: ["model"],
+    quiet: true,
     target: () => (first() ? modelOf(s, first()!) : undefined),
     step: first,
   });
@@ -571,6 +592,7 @@ export async function startBuildMap(ctx: Ctx): Promise<ActionResult> {
       error:
         "Claude did not lay anything out. Try again, or rephrase the question.",
     };
+  if (!r.error && !r.stopped) pathCaption(ctx);
   return r;
 }
 
@@ -589,8 +611,13 @@ export function enterBuild(ctx: Ctx): Promise<ActionResult> | ActionResult {
     sections: ["model"],
     // what you explored stays, with its threads, for when you switch back
     keep: true,
+    // its caption could say what step 1's model holds (pathCaption)
+    quiet: true,
     target: () => (first() ? modelOf(s, first()!) : undefined),
     step: first,
+  }).then((r) => {
+    if (!r.error && !r.stopped) pathCaption(ctx, true);
+    return r;
   });
 }
 
@@ -728,7 +755,7 @@ const check: Act = (ctx, a) => {
       delete i.refute;
     }
   const result = grade(x.m, b, {
-    keyOnly: b.help === 0 || !!x.st.recall,
+    keyOnly: keyOnlyFor(b, x.st),
     now: clock(),
     refutes,
   });
@@ -754,7 +781,7 @@ const hintBuild: Act = (ctx, a) => {
   const x = at(ctx, a, ["build"]);
   if (fail(x)) return err(x);
   const b = buildOf(x);
-  const h = nextHint(x.m, b);
+  const h = nextHint(x.m, b, keyOnlyFor(b, x.st));
   if (typeof h === "string") return err(h);
   b.hints.push(h);
   return ok(ctx);
@@ -765,7 +792,7 @@ const showLink: Act = (ctx, a) => {
   if (fail(x)) return err(x);
   const b = buildOf(x);
   if (!b.checks) return err("Check once first.");
-  const l = showOneLink(x.m, b);
+  const l = showOneLink(x.m, b, keyOnlyFor(b, x.st));
   if (typeof l === "string") return err(l);
   ctx.note(`Was shown the link ${linkWords(x.m, l)}.`);
   return ok(ctx);
@@ -777,7 +804,11 @@ const type: Act = (ctx, a) => {
   const b = buildOf(x);
   const text = str(a?.text, 60).trim();
   if (!text) return err("Type a part's name.");
-  const r = matchPart(x.m, text);
+  const r = matchPart(
+    x.m,
+    text,
+    b.placed.map((p) => p.part),
+  );
   if ("part" in r) {
     const problem = placePart(x.m, b, r.part, a);
     if (problem) return err(problem);
@@ -867,8 +898,10 @@ const whatif: Act = (ctx, a) => {
   return ok(ctx, perfect);
 };
 
+// On your build, and once it passed: a passing check went straight to the
+// Why, and a link it marked "?" could no longer be argued for.
 const argue: Act = async (ctx, a) => {
-  const x = at(ctx, a, ["build"]);
+  const x = at(ctx, a, ["build", "why", "built"]);
   if (fail(x)) return err(x);
   const b = buildOf(x);
   const l = b.links.find((y) => y.id === id(a?.link));
@@ -1021,6 +1054,11 @@ const review: Act = (ctx) => {
   for (const step of order) {
     const st = s.steps[step];
     const m = modelOf(s, step)!;
+    // the review rebuilds it: a quick rebuild still waiting is done with
+    if (st.recallDue) {
+      st.recallDue = false;
+      st.recallDone = true;
+    }
     st.reviewing = true;
     st.onCase = false;
     st.stage = "build";
@@ -1112,3 +1150,97 @@ export const BUILD_ACTIONS: Record<string, Act> = {
 // the actions only a build-mode map takes (hint and deeper are shared with
 // the classic screen, which sends them as core actions)
 export const isBuildMap = (map: StoredMap) => !!state(map);
+
+// ---------------------------------------------------------------- what Claude says while you build
+
+// The step you are building, and the model you are building it on: the
+// node a move is about (or the step above it), else the step you work on.
+function building(
+  map: StoredMap,
+  nodeId?: string | null,
+): { s: LearnState; m: RefModel; b: Build | undefined } | null {
+  const s = state(map);
+  if (!s) return null;
+  const path = new Set(pathSteps(map.nodes).map((p) => p.id));
+  let step: string | undefined;
+  for (let n = nodeId ? own(map.nodes, nodeId) : undefined; n;) {
+    if (path.has(n.id)) {
+      step = n.id;
+      break;
+    }
+    n = n.parent ? own(map.nodes, n.parent) : undefined;
+  }
+  const at = [step, s.at].find(
+    (x): x is string => !!x && own(s.steps, x)?.stage === "build",
+  );
+  if (!at) return null;
+  const st = s.steps[at];
+  const main = modelOf(s, at);
+  const c = st.caseModel ? own(s.models, st.caseModel) : undefined;
+  const m = st.onCase && c?.status === "ready" ? c : main;
+  if (m?.status !== "ready") return null;
+  return { s, m, b: own(s.builds, m.id) };
+}
+
+// Text Claude writes onto a node while you build (an Explain, a fact it
+// adds): a line that names a key link of the step is left out before it
+// reaches the map. The outline already asks for that; this holds when the
+// reply does not.
+export function cleanBuildOp(map: StoredMap, op: Raw): void {
+  const at = building(map, typeof op?.id === "string" ? op.id : null);
+  if (!at) return;
+  for (const k of ["summary", "detail"] as const)
+    if (typeof op[k] === "string") op[k] = redactLinks(at.m, op[k]);
+}
+
+// A move that is not about the model (Explain, a thread, the message box,
+// Next) while you build: a key link its reply names counts as hinted on
+// your build, unless you had already drawn it. Its words have been on
+// screen as they streamed, so naming it is help you were given.
+export async function watched(
+  ctx: Ctx,
+  nodeId: string | null | undefined,
+  run: () => Promise<ActionResult> | ActionResult,
+): Promise<ActionResult> {
+  if (!building(ctx.map, nodeId)) return run();
+  const map = ctx.map;
+  const chat = map.chat.length;
+  const threads = new Map(
+    Object.values(map.threads).map((t) => [t.id, t.messages.length]),
+  );
+  const text = (n: { summary: string; detail: string }) =>
+    `${n.summary}\n${n.detail}`;
+  const nodes = new Map(Object.values(map.nodes).map((n) => [n.id, text(n)]));
+  const r = await run();
+  const at = building(map, nodeId);
+  if (!at) return r;
+  const said = [
+    ...map.chat.slice(chat),
+    ...Object.values(map.threads).flatMap((t) =>
+      t.messages.slice(threads.get(t.id) ?? 0),
+    ),
+  ]
+    .filter((c) => c.role === "claude")
+    .map((c) => c.text);
+  for (const n of Object.values(map.nodes))
+    if (nodes.get(n.id) !== text(n)) said.push(text(n));
+  const b = (at.s.builds[at.m.id] ??= startBuild(
+    at.m,
+    at.s.steps[at.m.step]?.help ?? 0,
+  ));
+  const drawn = (id: string) => {
+    const ref = at.m.links.find((l) => l.id === id);
+    return !!ref && b.links.some((l) => !l.given && sameLink(l, ref));
+  };
+  const told = keysIn(at.m, said.join("\n")).filter(
+    (id) => !drawn(id) && !b.told?.includes(id),
+  );
+  if (told.length) {
+    b.told = [...(b.told ?? []), ...told];
+    ctx.note(
+      `Your reply named ${told.length} key link(s) of the step the learner is building; they count as hinted.`,
+    );
+    ctx.engine.push();
+  }
+  return r;
+}

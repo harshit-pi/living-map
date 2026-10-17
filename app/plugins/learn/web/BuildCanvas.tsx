@@ -26,6 +26,7 @@ import {
   NODE_H,
   NODE_W,
   regions,
+  route,
   slotAt,
   spanOf,
   tidy,
@@ -46,13 +47,15 @@ import {
 
 // a part dragged from the tray onto the canvas
 export const PART_DRAG = "application/x-living-map-part";
-// the message box covers the bottom of the canvas. Your build: below 0.6 a
-// card's words are too small to read, so a big frame is panned rather than
-// shrunk. The worked case is seen once, whole, so it may shrink further.
+// the message box covers the bottom of the canvas. Your build: below 0.5 a
+// card's words are too small to read, so a bigger frame is panned rather
+// than shrunk when it opens. The worked case is seen once, whole, so it may
+// shrink further; and the fit button always fits the whole frame (at 0.6 a
+// six-tick axis was cut off at both ends at 1440 wide, and fit could not help).
 const FIT = {
-  padding: { top: "40px", bottom: "120px", x: "6%" },
+  padding: { top: "40px", bottom: "140px", x: "6%" },
   maxZoom: 1,
-  minZoom: 0.6,
+  minZoom: 0.5,
 } as const;
 const FIT_WHOLE = { ...FIT, minZoom: 0.3 } as const;
 
@@ -118,7 +121,7 @@ function PartNode({ data }: NodeProps<Node<PartData>>) {
       )}
       {data.fails && (
         <div className="mt-0.5 text-[10.5px] font-medium text-danger-strong">
-          ✕ wiped out
+          ✕ the one that fails
         </div>
       )}
       {data.badge && (
@@ -169,53 +172,6 @@ const TONE: Record<Mark | "plain" | "given" | "ghost", string> = {
   ghost: "var(--color-hint)",
 };
 
-// the sides a link leaves and enters by: across when the parts sit side by
-// side, down when one is above the other
-function sides(a?: At, b?: At): [string, string] {
-  if (!a || !b) return ["right", "left"];
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  if (Math.abs(dx) >= Math.abs(dy) * 1.4)
-    return dx >= 0 ? ["right", "left"] : ["left", "right"];
-  return dy >= 0 ? ["bottom", "top"] : ["top", "bottom"];
-}
-
-// whether the straight line between two parts' centres crosses a third part
-function through(from: string, to: string, at: Record<string, At>): boolean {
-  const a = at[from];
-  const b = at[to];
-  if (!a || !b) return false;
-  for (const [id, p] of Object.entries(at)) {
-    if (id === from || id === to) continue;
-    for (let k = 1; k < 12; k++) {
-      const x = a.x + ((b.x - a.x) * k) / 12 + NODE_W / 2;
-      const y = a.y + ((b.y - a.y) * k) / 12 + NODE_H / 2;
-      if (x > p.x && x < p.x + NODE_W && y > p.y && y < p.y + NODE_H)
-        return true;
-    }
-  }
-  return false;
-}
-
-// A link that leaves and enters on the same side, as an arc that far out:
-// above or below a row, beside a column. Its label sits on the arc, clear
-// of the straight links and of the parts between.
-const arc = (
-  a: At | undefined,
-  b: At | undefined,
-  out: number,
-  up: boolean,
-) => {
-  const across = !a || !b || Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
-  const side = across ? (up ? "top" : "bottom") : up ? "left" : "right";
-  return {
-    type: "smoothstep",
-    pathOptions: { offset: out },
-    sourceHandle: side,
-    targetHandle: side,
-  } as const;
-};
-
 // a given link is dashed; a ghost from the hint ladder is dotted, in the
 // hint colour; a link not in Claude's model is plain grey with its "?"
 const DASH: Partial<Record<keyof typeof TONE, string>> = {
@@ -223,6 +179,11 @@ const DASH: Partial<Record<keyof typeof TONE, string>> = {
   ghost: "1.5 3.5",
 };
 
+// A link drawn the way route (frame.ts) finds clear: straight, or an arc
+// round the parts in between, its label off every card. A run through
+// another part read as linked to it ("Length mod 4 sends to Bucket 3").
+// `nth`: the how-many-th link on the same two parts. `aria`: what a screen
+// reader says, in the cards' own labels (by default it read out the ids).
 function edgeOf(
   id: string,
   from: string,
@@ -230,20 +191,25 @@ function edgeOf(
   label: string,
   tone: keyof typeof TONE,
   at: Record<string, At>,
+  nth: number,
+  aria: string,
 ): Edge {
-  const [sourceHandle, targetHandle] = sides(at[from], at[to]);
+  const r = route(from, to, at, label, nth);
   const color = TONE[tone];
-  // a straight run through another part would read as linked to it (a line
-  // along a row read as A to B to C): the link arcs round the row instead
-  const round = through(from, to, at);
   return {
-    sourceHandle,
-    targetHandle,
-    ...(round && arc(at[from], at[to], 34, false)),
+    ...(r.type === "straight"
+      ? { type: "straight", sourceHandle: r.source, targetHandle: r.target }
+      : {
+          type: "smoothstep",
+          pathOptions: { offset: r.offset },
+          sourceHandle: r.side,
+          targetHandle: r.side,
+        }),
     id,
     source: from,
     target: to,
     label,
+    ariaLabel: aria,
     style: {
       stroke: color,
       strokeWidth: tone === "given" ? 1.4 : tone === "ghost" ? 2.2 : 1.8,
@@ -311,6 +277,10 @@ export function BuildCanvas({
   >({});
   // a new step, or a new stage of it: nothing half-picked carries over
   const key = `${st.step}:${mode}:${st.onCase}`;
+  // the canvas itself is new for a new step or the worked case, and stays
+  // as it is when your build passes (remade then, its links were gone until
+  // a reload)
+  const canvas = `${st.step}:${mode === "worked" ? "worked" : "own"}:${st.onCase}`;
   const [keyFor, setKeyFor] = useState(key);
   if (keyFor !== key) {
     setKeyFor(key);
@@ -361,10 +331,13 @@ export function BuildCanvas({
     return z ? [...rs, z] : rs;
   }, [frame, span, waiting, hiddenOut]);
 
-  // a part placed out of sight brings the view round to show it. It waits
-  // until the cards are measured: fitView skips a card with no size, so a
-  // fit run on fresh cards (the build opening from See) frames nothing.
+  // a part placed out of sight brings the view round to show it, and so
+  // does a layout that moved (the predict answered, the worked case redrawn
+  // whole: its revealed part sat behind the side card). It waits until the
+  // cards are measured: fitView skips a card with no size, so a fit run on
+  // fresh cards (the build opening from See) frames nothing.
   const count = parts.length;
+  const shape = parts.map((p) => `${p.id}@${p.x},${p.y}`).join(";");
   const ready = useNodesInitialized();
   useEffect(() => {
     const el = box.current;
@@ -396,7 +369,7 @@ export function BuildCanvas({
     });
     seen.observe(el);
     return () => seen.disconnect();
-  }, [key, count, ready, rf, fit]);
+  }, [canvas, count, shape, ready, rf, fit]);
 
   const rawKey = (p: { x: number; y: number; slot?: string }) =>
     `${p.x},${p.y},${p.slot ?? ""}`;
@@ -411,12 +384,16 @@ export function BuildCanvas({
   const wrongSlot = new Set(
     st.check?.slots.filter((s) => !s.ok).map((s) => s.part) ?? [],
   );
+  // a sort column is Claude's reading of contested evidence: the mark says
+  // whose it is, as a link not in its model is never called wrong
   const word =
     frame.kind === "lanes"
       ? "not in its lane"
       : frame.kind === "boxes"
         ? "not in its box"
-        : "not in its column";
+        : frame.kind === "sort"
+          ? "Claude has it in another column"
+          : "not in its column";
 
   const nodes: Node[] = [
     ...zones.map((r, i): Node<RegionData> => ({
@@ -459,7 +436,7 @@ export function BuildCanvas({
         id: p.id,
         type: "part",
         position: at[p.id],
-        measured: sizes[`${key}:${p.id}`],
+        measured: sizes[`${canvas}:${p.id}`],
         draggable: mode === "build",
         data: {
           label: p.label,
@@ -486,40 +463,52 @@ export function BuildCanvas({
 
   const edges: Edge[] = [];
   // a second link between the same two parts (yours the wrong way, a ghost
-  // hint beside it) arcs out, above then below, so each label is its own:
-  // a smoothstep on the same sides lay on the first, label on label
+  // hint beside it) arcs out further, so each label is its own
   const pairs = new Map<string, number>();
-  const spread = (e: Edge): Edge => {
-    const k = [e.source, e.target].sort().join("|");
+  const nthOf = (a: string, b: string) => {
+    const k = [a, b].sort().join("|");
     const n = pairs.get(k) ?? 0;
     pairs.set(k, n + 1);
-    return n
-      ? ({
-          ...e,
-          ...arc(at[e.source], at[e.target], 30 + 22 * (n >> 1), n % 2 === 1),
-        } as Edge)
-      : e;
+    return n;
   };
+  const named = (id: string) =>
+    parts.find((p) => p.id === id)?.label ?? "a part";
+  const link = (
+    id: string,
+    from: string,
+    to: string,
+    label: string,
+    tone: keyof typeof TONE,
+    rel: string,
+  ) =>
+    edges.push(
+      edgeOf(
+        id,
+        from,
+        to,
+        label,
+        tone,
+        at,
+        nthOf(from, to),
+        `${named(from)} ${rel} ${named(to)}`,
+      ),
+    );
   if (worked)
     for (const l of worked.links)
-      edges.push(spread(edgeOf(l.id, l.from, l.to, l.rel, "plain", at)));
+      link(l.id, l.from, l.to, l.rel, "plain", l.rel);
   else {
     for (const l of st.links) {
       const m = marks.get(l.id);
-      edges.push(
-        spread(
-          l.given
-            ? edgeOf(l.id, l.from, l.to, l.rel, "given", at)
-            : edgeOf(
-                l.id,
-                l.from,
-                l.to,
-                m ? `${l.rel} ${MARK[m.mark].sym}` : l.rel,
-                m ? m.mark : "plain",
-                at,
-              ),
-        ),
-      );
+      if (l.given) link(l.id, l.from, l.to, l.rel, "given", l.rel);
+      else
+        link(
+          l.id,
+          l.from,
+          l.to,
+          m ? `${l.rel} ${MARK[m.mark].sym}` : l.rel,
+          m ? m.mark : "plain",
+          l.rel,
+        );
     }
     // a ghost from the hint ladder: the link drawn dashed, its verb for you
     if (mode === "build")
@@ -532,17 +521,13 @@ export function BuildCanvas({
           at[h.to] &&
           !st.links.some((l) => l.from === h.from && l.to === h.to)
         )
-          edges.push(
-            spread(
-              edgeOf(
-                `ghost:${h.from}:${h.to}`,
-                h.from,
-                h.to,
-                "hint: which verb?",
-                "ghost",
-                at,
-              ),
-            ),
+          link(
+            `ghost:${h.from}:${h.to}`,
+            h.from,
+            h.to,
+            "hint: which verb?",
+            "ghost",
+            "a hinted link to",
           );
   }
 
@@ -610,8 +595,9 @@ export function BuildCanvas({
       onDrop={onDrop}
     >
       <ReactFlow
-        // a fresh canvas per step and stage, so each opens framed to fit
-        key={key}
+        // a fresh canvas per step and for the worked case, so each opens
+        // framed to fit
+        key={canvas}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -632,7 +618,7 @@ export function BuildCanvas({
                 }));
             }
             if (ch.type === "dimensions" && ch.dimensions) {
-              const k = `${key}:${ch.id}`;
+              const k = `${canvas}:${ch.id}`;
               const { width, height } = ch.dimensions;
               setSizes((s) =>
                 s[k]?.width === width && s[k]?.height === height
@@ -662,6 +648,14 @@ export function BuildCanvas({
           setPop({ kind: "verb", from: pick, to: n.id, at: where(e) });
         }}
         onEdgeClick={(e, ed) => {
+          // once it passed, a link the check marked "?" or ✗ can still be
+          // argued for; nothing else on it changes
+          if (mode === "done") {
+            const mk = marks.get(ed.id);
+            if (mk && ARGUABLE.includes(mk.mark) && !whatif)
+              setPop({ kind: "link", id: ed.id, at: where(e) });
+            return;
+          }
           if (mode !== "build") return;
           setPick(null);
           if (ed.id.startsWith("ghost:")) {
@@ -678,11 +672,13 @@ export function BuildCanvas({
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color="var(--color-line)" />
+        {/* top right, under Tidy: at the bottom they sat on the "Not in a
+            box yet" strip, next to the message box */}
         <Controls
           showInteractive={false}
-          fitViewOptions={fit}
-          position="bottom-left"
-          style={{ marginBottom: 96 }}
+          fitViewOptions={FIT_WHOLE}
+          position="top-right"
+          style={{ marginTop: 44 }}
         />
       </ReactFlow>
 
@@ -734,35 +730,43 @@ export function BuildCanvas({
               Last check: {MARK[popMark.mark].sym} {MARK[popMark.mark].word}
             </div>
           )}
-          <div className="mb-1.5 flex gap-1.5">
-            <SmallBtn
-              onClick={() => {
-                setPop(null);
-                void act("relink", { step, link: popLink.id, reverse: true });
-              }}
-            >
-              ↔ Reverse
-            </SmallBtn>
-            <SmallBtn
-              onClick={() => {
-                setPop(null);
-                void act("unlink", { step, link: popLink.id });
-              }}
-            >
-              Delete
-            </SmallBtn>
-          </div>
-          <div className="mb-0.5 text-[10.5px] font-semibold tracking-wide text-faint uppercase">
-            Change the verb
-          </div>
-          <VerbList
-            verbs={st.verbs}
-            current={popLink.rel}
-            onPick={(rel) => {
-              setPop(null);
-              void act("relink", { step, link: popLink.id, rel });
-            }}
-          />
+          {mode === "build" && (
+            <>
+              <div className="mb-1.5 flex gap-1.5">
+                <SmallBtn
+                  onClick={() => {
+                    setPop(null);
+                    void act("relink", {
+                      step,
+                      link: popLink.id,
+                      reverse: true,
+                    });
+                  }}
+                >
+                  ↔ Reverse
+                </SmallBtn>
+                <SmallBtn
+                  onClick={() => {
+                    setPop(null);
+                    void act("unlink", { step, link: popLink.id });
+                  }}
+                >
+                  Delete
+                </SmallBtn>
+              </div>
+              <div className="mb-0.5 text-[10.5px] font-semibold tracking-wide text-faint uppercase">
+                Change the verb
+              </div>
+              <VerbList
+                verbs={st.verbs}
+                current={popLink.rel}
+                onPick={(rel) => {
+                  setPop(null);
+                  void act("relink", { step, link: popLink.id, rel });
+                }}
+              />
+            </>
+          )}
           {popMark && ARGUABLE.includes(popMark.mark) && (
             <ArgueBox
               here={here}

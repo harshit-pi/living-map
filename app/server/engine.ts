@@ -247,6 +247,9 @@ export function createEngine({
           return n;
         }
       : undefined;
+    const opClean = plugin.cleanOp
+      ? (op: Raw) => plugin.cleanOp!(m, op)
+      : undefined;
     state.busy = true;
     stopped = false;
     state.working = {
@@ -309,6 +312,7 @@ export function createEngine({
                 scope,
                 judge: opts.judge,
                 extra: opExtra,
+                clean: opClean,
                 keep: opts.keep,
                 keepYours: plugin.keepUserNodes,
               });
@@ -356,6 +360,7 @@ export function createEngine({
           scope,
           judge: opts.judge,
           extra: opExtra,
+          clean: opClean,
           keep: opts.keep,
           keepYours: plugin.keepUserNodes,
         });

@@ -2,7 +2,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useState } from "react";
 
 import { BuildCanvas, SmallBtn, type WhatIfMode } from "./BuildCanvas.tsx";
-import { CheckCard } from "./CheckCard.tsx";
+import { CheckCard, CheckFindings } from "./CheckCard.tsx";
 import { DiagramView } from "./DiagramView.tsx";
 import { PathRail, type RailMark } from "./PathRail.tsx";
 import { ReviewPanel, ReviewStart, ReviewStrip } from "./ReviewPanel.tsx";
@@ -152,6 +152,10 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   const [centre, setCentre] = useState<"step" | "topic" | "play">("step");
   const [thread, setThread] = useState(false);
   const [whatifOn, setWhatifOn] = useState(false);
+  // the what-if's marks are drawn on the build you clicked them on, right
+  // after its check: drawn again on a later rebuild, they marked parts of a
+  // build that never had them
+  const [wiShown, setWiShown] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [wiSure, setWiSure] = useState<Sure | null>(null);
 
@@ -182,7 +186,15 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
       current?.mode === "play" && current.stage === "see" ? "play" : "step",
     );
     setThread(false);
+  }
+  // a new stage of the step (a rebuild started or done) starts the what-if
+  // afresh too
+  const wiKey = `${key}:${current?.stage}:${current?.recall}:${current?.reviewing}`;
+  const [wiFor, setWiFor] = useState(wiKey);
+  if (wiFor !== wiKey) {
+    setWiFor(wiKey);
     setWhatifOn(false);
+    setWiShown(false);
     setPicked([]);
     setWiSure(null);
   }
@@ -239,7 +251,7 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
           }}
           className="font-medium text-primary-strong hover:underline"
         >
-          Due: {view.due.now} now
+          Due: {view.due.now} {view.due.now === 1 ? "step" : "steps"} now
         </button>
       ) : (
         <span>Due: nothing</span>
@@ -302,8 +314,9 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
         footer={footer}
       />
       {/* a narrow window stacks the parts, the canvas and the side card,
-          so the canvas keeps its width */}
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-visible">
+          so the canvas keeps its width (at 1024 side by side, the canvas
+          was 394 wide and the worked case shrank to 4px words) */}
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-visible">
         {landing ? (
           <div className="relative min-w-0 flex-1">
             <ReviewStart here={here} onPath={() => setOnPath(true)} />
@@ -329,6 +342,8 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
             judging={judging}
             writingCase={writingCase}
             whatifOn={whatifOn}
+            wiShown={wiShown}
+            setWiShown={setWiShown}
             picked={picked}
             setPicked={setPicked}
             wiSure={wiSure}
@@ -376,6 +391,8 @@ function StepArea({
   judging,
   writingCase,
   whatifOn,
+  wiShown,
+  setWiShown,
   picked,
   setPicked,
   wiSure,
@@ -394,6 +411,8 @@ function StepArea({
   judging: boolean;
   writingCase: boolean;
   whatifOn: boolean;
+  wiShown: boolean;
+  setWiShown: (on: boolean) => void;
   picked: string[];
   setPicked: (f: (p: string[]) => string[]) => void;
   wiSure: Sure | null;
@@ -424,7 +443,7 @@ function StepArea({
   // the what-if: on while you click parts; its result marks them after
   const wiResult = st.stage === "built" ? st.whatif?.result : null;
   const whatif: WhatIfMode | null =
-    st.stage === "built" && st.whatif && (whatifOn || wiResult)
+    st.stage === "built" && st.whatif && (whatifOn || (wiResult && wiShown))
       ? {
           picked: wiResult ? [] : picked,
           toggle: (part) =>
@@ -460,12 +479,17 @@ function StepArea({
   for (const c of map.chat) if (c.blankId) verdicts[c.blankId] = c.text;
 
   const side = (
-    <aside className="flex max-h-[40%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 lg:max-h-none lg:w-[260px] lg:border-t-0 lg:border-l xl:w-[300px]">
+    <aside className="flex max-h-[45%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 xl:max-h-none xl:w-[280px] xl:border-t-0 xl:border-l 2xl:w-[300px]">
       <div className="space-y-4">
         {ready && st.stage === "see" && (
           <PredictCard key={st.step} here={here} st={st} />
         )}
         {ready && st.stage === "build" && <CheckCard here={here} st={st} />}
+        {/* a check that passed goes on to the Why: what it found (a
+            mix-up's refutation, a "?" to argue for, the order) stays here */}
+        {ready && (st.stage === "why" || st.stage === "built") && st.check && (
+          <CheckFindings key={`${st.step}:check`} here={here} st={st} passed />
+        )}
         {ready && (st.stage === "why" || st.stage === "built") && (
           <WhyCard key={st.step} here={here} st={st} judging={judging} />
         )}
@@ -483,6 +507,7 @@ function StepArea({
                 setWhatifOn(false);
                 setPicked(() => []);
               },
+              checked: () => setWiShown(true),
             }}
             onWhatIf={() => setWhatifOn(true)}
             onNext={onNext}
@@ -555,11 +580,10 @@ function StepArea({
             <div className="text-[15px] font-medium text-ink">
               Claude's model did not hold together
             </div>
-            {st.problems.length > 0 && (
-              <div className="mt-1 text-[12px] text-muted">
-                {st.problems.slice(0, 3).join("; ")}
-              </div>
-            )}
+            <div className="mt-1 text-[12px] text-muted">
+              It was asked once more and still did not. Try again draws it
+              afresh.
+            </div>
             <div className="mt-3">
               <SmallBtn
                 primary
@@ -606,7 +630,9 @@ function StepArea({
     );
   else
     body = (
-      <ReactFlowProvider key={`${st.step}:${mode}`}>
+      <ReactFlowProvider
+        key={`${st.step}:${mode === "worked" ? "worked" : "own"}`}
+      >
         <BuildCanvas
           here={here}
           st={st}
@@ -622,7 +648,10 @@ function StepArea({
       {ready && mode === "build" && centre === "step" && (
         <Tray here={here} st={st} />
       )}
-      <div className="relative flex min-h-[360px] min-w-0 flex-1 flex-col">
+      {/* stacked (under 1280 wide), the canvas keeps a height of its own
+          and the side card follows below it: squeezed to fit, the build had
+          about 170px between its header and the message box */}
+      <div className="relative flex min-h-[540px] min-w-0 flex-1 flex-col xl:min-h-[360px]">
         <div className="space-y-2 border-b border-line px-4 pt-3 pb-2">
           {review && (
             <ReviewStrip
@@ -688,15 +717,17 @@ function StepArea({
               }
             />
           )}
-          {ready && st.worked && centre === "step" && (
-            <div className="text-[11.5px] text-muted">
-              <span className="font-semibold tracking-wide text-faint uppercase">
-                Worked case
-              </span>{" "}
-              · {st.caseTitle}
-              {st.case && `, ${st.case}`}
-            </div>
-          )}
+          {ready &&
+            st.worked &&
+            centre === "step" &&
+            (st.caseTitle || st.case) && (
+              <div className="text-[11.5px] text-muted">
+                <span className="font-semibold tracking-wide text-faint uppercase">
+                  Worked case
+                </span>{" "}
+                · {[st.caseTitle, st.case].filter(Boolean).join(", ")}
+              </div>
+            )}
           {ready &&
             mode === "build" &&
             centre === "step" &&

@@ -3,7 +3,12 @@ import { useState } from "react";
 import { SmallBtn, WaitNote } from "./BuildCanvas.tsx";
 import { HowSure } from "./CheckCard.tsx";
 import { WAIT_TITLE, type Here } from "./view.ts";
-import type { StepView, Sure, WhyState } from "../shared.ts";
+import {
+  orderStops,
+  type StepView,
+  type Sure,
+  type WhyState,
+} from "../shared.ts";
 
 const VERDICT: Record<WhyState, { sym: string; word: string; cls: string }> = {
   right: { sym: "✓", word: "Right.", cls: "text-success-strong" },
@@ -136,6 +141,8 @@ export function BuiltCard({
     sure: Sure | null;
     setSure: (s: Sure) => void;
     stop: () => void;
+    // its result is in: mark the parts on this build
+    checked: () => void;
   };
   onWhatIf: () => void;
   onNext: (() => void) | null;
@@ -164,7 +171,9 @@ export function BuiltCard({
             ↻ Quick rebuild
           </div>
           <div className="mt-0.5 text-[12px] text-body">
-            About a minute: the parts are placed, you draw the key links again.
+            {orderStops(st.frame)
+              ? "About a minute: the parts wait beside the axis; you put them in order and draw the key links again."
+              : "About a minute: the parts are placed, you draw the key links again."}
           </div>
           <div className="mt-1.5">
             <SmallBtn primary onClick={() => void act("recall", { step })}>
@@ -213,7 +222,9 @@ export function BuiltCard({
                       parts: whatif.picked,
                       ...(whatif.sure ? { sure: whatif.sure } : {}),
                     }).then((r) => {
-                      if (!r.error) whatif.stop();
+                      if (r.error) return;
+                      whatif.stop();
+                      whatif.checked();
                     });
                   }}
                 >
