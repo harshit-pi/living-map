@@ -164,6 +164,8 @@ export type MapSummary = {
   done: number;
   form: DiagramForm | null;
   current: boolean;
+  // a plugin's own one-line summary, e.g. "7 parts · 6 wires"
+  summary?: string;
 };
 
 // What Claude is doing now, and what waits its turn.

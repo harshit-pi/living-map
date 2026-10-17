@@ -11,6 +11,7 @@ import {
   outlineOf,
   removeComp,
   removeWire,
+  restoreComp,
   updateComp,
   updateWire,
   type DesignState,
@@ -48,6 +49,8 @@ const REVIEW = `CHECK MY DESIGN: review the learner's design against the brief, 
 - fix: what breaks or is missing. Name the SYMPTOM with numbers from the load check (e.g. "Tweet store takes 300k reads/s, about 30x what one SQL node handles"), not the component that fixes it. If YOUR LAST REVIEW already raised the same problem and it is still there, you may now name the fix.
 - think: one question that leads to the next idea in your reference.
 Point "on" at the learner's component ids. If the design already settles a deep dive, set that question answered with a summary of what they chose. The caption is one sentence: the single most important thing to do next.`;
+
+const REVIEWING = "Reviewing your design";
 
 const note = (ctx: Ctx, text: string) => {
   ctx.note(text);
@@ -148,12 +151,21 @@ export const design: ServerPlugin = {
       note(ctx, `Removed the wire ${name(s, w.from)} → ${name(s, w.to)}.`);
       return { ok: true };
     },
+    undo(ctx): ActionResult {
+      const s = state(ctx.map);
+      const c = restoreComp(s);
+      if (!c) return { error: "Nothing to undo." };
+      note(ctx, `Put back ${name(s, c.id)}, which was removed by mistake.`);
+      return { ok: true, nodeId: c.id };
+    },
     check(ctx) {
       if (!state(ctx.map).comps.length)
         return { error: "Place a few components first, then check." };
+      // a second click while a review runs or waits asks for the same review
+      if (ctx.engine.isQueuedOrRunning(null, REVIEWING)) return {};
       ctx.say("Check my design.");
       return ctx.engine.turn(`CHECK MY DESIGN.`, ctx.settings, {
-        label: "Reviewing your design",
+        label: REVIEWING,
         sections: ["review"],
       });
     },
@@ -175,6 +187,12 @@ export const design: ServerPlugin = {
         { text, label: "Replying", sections: [] },
       );
     },
+  },
+
+  summary(map) {
+    const s = state(map);
+    const n = (k: number, one: string) => `${k} ${one}${k === 1 ? "" : "s"}`;
+    return `${n(s.comps.length, "part")} · ${n(s.wires.length, "wire")}${s.review ? " · reviewed" : ""}`;
   },
 
   view(map): DesignView {

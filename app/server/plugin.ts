@@ -35,6 +35,8 @@ export type ServerPlugin = {
   >;
   // the state the browser may see; leave out anything the user should work out
   view?: (map: StoredMap) => unknown;
+  // one line for the maps list, e.g. "7 parts · 6 wires"
+  summary?: (map: StoredMap) => string;
 };
 
 // a plugin's state on a map, created on first use

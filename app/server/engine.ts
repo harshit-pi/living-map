@@ -421,7 +421,7 @@ export function createEngine({
       await new Promise((r) => setTimeout(r, 100));
   }
 
-  const isQueuedOrRunning = (nodeId: string, label: string) =>
+  const isQueuedOrRunning = (nodeId: string | null, label: string) =>
     (state.working?.nodeId === nodeId && state.working.label === label) ||
     state.waiting.some((t) => t.nodeId === nodeId && t.label === label);
 

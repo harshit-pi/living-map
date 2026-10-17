@@ -12,6 +12,7 @@ import {
   newState,
   outlineOf,
   removeComp,
+  restoreComp,
   updateComp,
   type DesignState,
 } from "./core.ts";
@@ -152,6 +153,59 @@ test("cycles do not loop forever, and removing a part drops its wires", () => {
   assert.ok(loadCheck(s).b.reads > 0);
   removeComp(s, "b");
   assert.equal(s.wires.length, 1);
+});
+
+test("a cycle is broken where traffic enters it, whatever order the parts were added in", () => {
+  // b was added first, and the wire back from b closes the loop
+  const s = build(
+    [
+      ["b", "service"],
+      ["app", "client"],
+      ["a", "service"],
+    ],
+    [
+      ["app", "a"],
+      ["a", "b"],
+      ["b", "a"],
+    ],
+  );
+  const load = loadCheck(s);
+  assert.equal(load.a.reads, 300_000);
+  assert.equal(load.b.reads, 300_000, "b is still fed by a");
+  assert.equal(load.b.status, "over");
+});
+
+test("Undo puts a removed part back with its wires", () => {
+  const s = build(
+    [
+      ["app", "client"],
+      ["api", "service"],
+      ["db", "sql"],
+    ],
+    [
+      ["app", "api"],
+      ["api", "db", { carries: "read", times: 3 }],
+    ],
+  );
+  updateComp(s, "api", { count: 7 });
+  removeComp(s, "api");
+  removeComp(s, "db");
+  assert.equal(s.wires.length, 0);
+  assert.equal(restoreComp(s)?.id, "db", "the last removed comes back first");
+  assert.equal(
+    s.wires.length,
+    0,
+    "its wire waits for the part at its other end",
+  );
+  assert.equal(restoreComp(s)?.count, 7);
+  assert.deepEqual(
+    s.wires.map((w) => [w.from, w.to, w.carries, w.times]),
+    [
+      ["app", "api", "both", 1],
+      ["api", "db", "read", 3],
+    ],
+  );
+  assert.equal(restoreComp(s), null, "nothing left to undo");
 });
 
 test("the model's ops are cleaned: unknown kinds, bad ids and stray points are dropped", () => {

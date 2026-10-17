@@ -10,9 +10,12 @@ import type { Workspace } from "../lib/workspace.ts";
 export function FloatingComposer({
   ws,
   placeholder,
+  left,
 }: {
   ws: Workspace;
   placeholder: string;
+  // where the canvas starts, when something sits left of it (Design's palette)
+  left?: number;
 }) {
   const { map, live, selection, setSelection, roomy } = ws;
   const caption = useCaption(map, live.busy, live.stream);
@@ -26,7 +29,7 @@ export function FloatingComposer({
   return (
     <div
       className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 px-4 pb-4"
-      style={{ paddingRight: one && roomy ? 450 : undefined }}
+      style={{ paddingRight: one && roomy ? 450 : undefined, left }}
     >
       {caption.text && !inPanel && (
         <div

@@ -11,7 +11,7 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { useMemo, useRef, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import {
   GROUPS,
@@ -23,15 +23,42 @@ import {
   type Reference,
   type Wire,
 } from "../shared.ts";
-import { fmt, GROUP_TONE, STATUS_TONE } from "./format.ts";
+import { fmt, GROUP_TONE, STATUS_TONE, utilText } from "./format.ts";
 import { Icon } from "./Icon.tsx";
 
 export type Picked = { type: "comp" | "wire"; id: string } | null;
 type Act = (name: string, args: Record<string, unknown>) => void;
 
-const NODE_W = 172;
+export const NODE_W = 172;
 const NODE_H = 84;
 const DRAG_TYPE = "application/x-living-map-kind";
+const FIT = { padding: 0.25, maxZoom: 1 };
+// the message box covers the bottom of the canvas: new parts land above it
+const COMPOSER_H = 96;
+
+type Side = "top" | "right" | "bottom" | "left";
+type At = { x: number; y: number };
+
+// A wire runs between the facing sides of its two parts: side to side when
+// they sit next to each other, top to bottom when one is above the other. The
+// second of two opposite wires between the same parts loops round instead, so
+// the two can be told apart.
+function sides(a: At, b: At, back: boolean): [Side, Side] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const across = Math.abs(dx) - NODE_W > Math.abs(dy) - NODE_H;
+  if (across)
+    return back
+      ? ["bottom", "bottom"]
+      : dx > 0
+        ? ["right", "left"]
+        : ["left", "right"];
+  return back
+    ? ["right", "right"]
+    : dy > 0
+      ? ["bottom", "top"]
+      : ["top", "bottom"];
+}
 
 type CompData = { comp: Comp; load?: Load; flagged: boolean; ghost: boolean };
 
@@ -61,6 +88,7 @@ function CompNode({ data, selected }: NodeProps<Node<CompData>>) {
     <div
       className={`rounded-xl bg-surface shadow-xs ${ring} ${ghost ? "opacity-90" : ""}`}
       style={{ width: NODE_W }}
+      title={`${comp.label} (${k.label}): ${k.hint}`}
     >
       {(["top", "right", "bottom", "left"] as const).map((side) => (
         <Handle
@@ -79,7 +107,10 @@ function CompNode({ data, selected }: NodeProps<Node<CompData>>) {
           <Icon kind={comp.kind} />
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold text-ink">
+          {/* the reference's names carry the lesson ("sharded by tweet id"): shown whole */}
+          <div
+            className={`text-[13px] font-semibold text-ink ${ghost ? "leading-tight" : "truncate"}`}
+          >
             {comp.label}
           </div>
           <div className="truncate text-[11px] text-muted">
@@ -92,15 +123,11 @@ function CompNode({ data, selected }: NodeProps<Node<CompData>>) {
         <div className="px-2.5 pt-1.5 pb-2">
           {load && load.status !== "idle" ? (
             <>
-              <div className="flex justify-between text-[10.5px] tabular-nums">
-                <span className="text-muted">
+              <div className="flex justify-between gap-1 text-[10.5px] whitespace-nowrap tabular-nums">
+                <span className="truncate text-muted">
                   {fmt(load.reads)} r · {fmt(load.writes)} w /s
                 </span>
-                <span className={st.text}>
-                  {load.util > 1
-                    ? `${+load.util.toFixed(1)}× cap`
-                    : `${Math.round(load.util * 100)}%`}
-                </span>
+                <span className={st.text}>{utilText(load.util)}</span>
               </div>
               <div className="mt-1 h-1 overflow-hidden rounded-full bg-panel">
                 <div
@@ -138,13 +165,13 @@ function laidOut(ref: Reference) {
     marginy: 20,
   });
   g.setDefaultEdgeLabel(() => ({}));
-  for (const c of ref.comps) g.setNode(c.id, { width: NODE_W, height: 56 });
+  for (const c of ref.comps) g.setNode(c.id, { width: NODE_W, height: 64 });
   for (const w of ref.wires) g.setEdge(w.from, w.to);
   dagre.layout(g);
   return ref.comps.map((c): Comp => ({
     ...c,
     x: g.node(c.id).x - NODE_W / 2,
-    y: g.node(c.id).y - 28,
+    y: g.node(c.id).y - 32,
     count: 1,
     shards: 1,
     by: "claude",
@@ -166,19 +193,29 @@ export function DesignCanvas({
   onPick: (p: Picked) => void;
   act: Act;
 }) {
-  const { screenToFlowPosition } = useReactFlow();
+  const rf = useReactFlow();
+  const { screenToFlowPosition } = rf;
   const box = useRef<HTMLDivElement>(null);
   // where you are dragging a component, until the server has the new position
-  const [drag, setDrag] = useState<Record<string, { x: number; y: number }>>(
-    {},
-  );
+  const [drag, setDrag] = useState<Record<string, At>>({});
+  // each card's measured size, kept on the nodes: a node handed over without
+  // it is hidden until React Flow measures it again, which a card whose size
+  // did not change may never get, leaving the canvas blank
+  const [sizes, setSizes] = useState<
+    Record<string, { width: number; height: number }>
+  >({});
+  // spots just asked for, so quick clicks in the palette do not stack parts
+  // before the server has them
+  const recent = useRef<(At & { at: number })[]>([]);
   const ref = showReference ? view.reference : null;
+  const mode = ref ? "reference" : "design";
 
   const nodes: Node<CompData>[] = useMemo(() => {
     const comps = ref ? laidOut(ref) : view.comps;
     return comps.map((c) => ({
       id: c.id,
       type: "comp",
+      measured: sizes[`${mode}:${c.id}`],
       position: (!ref && drag[c.id]) || { x: c.x, y: c.y },
       data: {
         comp: c,
@@ -189,20 +226,30 @@ export function DesignCanvas({
       selected: !ref && picked?.type === "comp" && picked.id === c.id,
       draggable: !ref,
     }));
-  }, [ref, view.comps, view.load, drag, flagged, picked]);
+  }, [ref, mode, view.comps, view.load, drag, sizes, flagged, picked]);
 
   const edges: Edge[] = useMemo(() => {
     const wires = ref
       ? ref.wires.map((w, i) => ({ ...w, id: `ref-${i}` }))
       : view.wires;
+    const at = new Map(nodes.map((n) => [n.id, n.position]));
+    const pairs = new Set(wires.map((w) => `${w.from}>${w.to}`));
     return wires.map((w) => {
       const to = ref ? undefined : view.load[w.to];
       const hot = to && (to.status === "over" || to.status === "backlog");
       const color = hot ? "var(--color-danger)" : "var(--color-line-strong)";
+      const back = pairs.has(`${w.to}>${w.from}`) && w.from > w.to;
+      const [sourceHandle, targetHandle] = sides(
+        at.get(w.from) ?? { x: 0, y: 0 },
+        at.get(w.to) ?? { x: 0, y: 0 },
+        back,
+      );
       return {
         id: w.id,
         source: w.from,
         target: w.to,
+        sourceHandle,
+        targetHandle,
         label: wireLabel(w) || undefined,
         animated: !!to?.async,
         selected: !ref && picked?.type === "wire" && picked.id === w.id,
@@ -217,7 +264,37 @@ export function DesignCanvas({
         labelBgStyle: { fill: "var(--color-surface)" },
       };
     });
-  }, [ref, view.wires, view.load, picked]);
+  }, [ref, nodes, view.wires, view.load, picked]);
+
+  // When the canvas narrows (the review opens, a panel slides in, the window
+  // shrinks), bring back into view any part that the change left out of sight.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    let t = 0;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(t);
+      t = window.setTimeout(() => {
+        const { x, y, zoom } = rf.getViewport();
+        const out = rf.getNodes().some((n) => {
+          const sx = n.position.x * zoom + x;
+          const sy = n.position.y * zoom + y;
+          return (
+            sx < 0 ||
+            sy < 0 ||
+            sx + NODE_W * zoom > el.clientWidth ||
+            sy + NODE_H * zoom > el.clientHeight
+          );
+        });
+        if (out) void rf.fitView({ ...FIT, duration: 250 });
+      }, 220);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      clearTimeout(t);
+    };
+  }, [rf]);
 
   const addAt = (kind: KindId, clientX: number, clientY: number) => {
     const p = screenToFlowPosition({ x: clientX, y: clientY });
@@ -230,30 +307,45 @@ export function DesignCanvas({
     if (!r) return;
     const mid = screenToFlowPosition({
       x: r.left + r.width / 2,
-      y: r.top + r.height / 2,
+      y: r.top + (r.height - COMPOSER_H) / 2,
     });
+    // what is visible of the canvas, above the message box
+    const tl = screenToFlowPosition({ x: r.left + 8, y: r.top + 8 });
+    const br = screenToFlowPosition({
+      x: r.right - 8,
+      y: r.bottom - COMPOSER_H,
+    });
+    const now = Date.now();
+    recent.current = recent.current.filter((p) => now - p.at < 3000);
+    const taken: At[] = [...view.comps, ...recent.current];
     const free = (x: number, y: number) =>
-      view.comps.every(
+      taken.every(
         (c) =>
           Math.abs(c.x - x) > NODE_W + 24 || Math.abs(c.y - y) > NODE_H + 24,
       );
+    const seen = (x: number, y: number) =>
+      x >= tl.x && y >= tl.y && x + NODE_W <= br.x && y + NODE_H <= br.y;
+    const place = (x: number, y: number) => {
+      const p = { x: Math.round(x), y: Math.round(y) };
+      recent.current.push({ ...p, at: now });
+      act("add", { kind, ...p });
+    };
     const start = { x: mid.x - NODE_W / 2, y: mid.y - NODE_H / 2 };
-    for (let ring = 0; ring < 12; ring++)
-      for (let i = -ring; i <= ring; i++)
-        for (const [dx, dy] of [
-          [i, -ring],
-          [i, ring],
-          [-ring, i],
-          [ring, i],
-        ]) {
-          const x = start.x + dx * (NODE_W + 40);
-          const y = start.y + dy * (NODE_H + 40);
-          if (free(x, y)) {
-            act("add", { kind, x: Math.round(x), y: Math.round(y) });
-            return;
+    // a free spot in sight first; failing that, any free spot
+    for (const inSight of [true, false])
+      for (let ring = 0; ring < 12; ring++)
+        for (let i = -ring; i <= ring; i++)
+          for (const [dx, dy] of [
+            [i, -ring],
+            [i, ring],
+            [-ring, i],
+            [ring, i],
+          ]) {
+            const x = start.x + dx * (NODE_W + 40);
+            const y = start.y + dy * (NODE_H + 40);
+            if (free(x, y) && (!inSight || seen(x, y))) return place(x, y);
           }
-        }
-    act("add", { kind, x: Math.round(start.x), y: Math.round(start.y) });
+    place(start.x, start.y);
   };
   const onDrop = (e: DragEvent) => {
     const kind = e.dataTransfer.getData(DRAG_TYPE);
@@ -275,13 +367,13 @@ export function DesignCanvas({
       >
         <ReactFlow
           // a fresh canvas per view, so each opens framed to fit
-          key={ref ? "reference" : "design"}
+          key={mode}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
           connectionMode={"loose" as never}
           fitView
-          fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+          fitViewOptions={FIT}
           minZoom={0.3}
           deleteKeyCode={ref ? null : ["Backspace", "Delete"]}
           nodesConnectable={!ref}
@@ -289,12 +381,25 @@ export function DesignCanvas({
             for (const ch of changes) {
               if (ch.type === "position" && ch.position)
                 setDrag((d) => ({ ...d, [ch.id]: ch.position! }));
-              if (ch.type === "remove") act("remove", { id: ch.id });
+              if (ch.type === "dimensions" && ch.dimensions) {
+                const k = `${mode}:${ch.id}`;
+                const { width, height } = ch.dimensions;
+                setSizes((s) =>
+                  s[k]?.width === width && s[k]?.height === height
+                    ? s
+                    : { ...s, [k]: { width, height } },
+                );
+              }
             }
           }}
-          onEdgesChange={(changes) => {
-            for (const ch of changes)
-              if (ch.type === "remove") act("unwire", { id: ch.id });
+          // Delete removes the parts (their wires go with them, and come back
+          // with Undo) and any other selected wires
+          onDelete={({ nodes: gone, edges: cut }) => {
+            const ids = new Set(gone.map((n) => n.id));
+            for (const n of gone) act("remove", { id: n.id });
+            for (const e of cut)
+              if (!ids.has(e.source) && !ids.has(e.target))
+                act("unwire", { id: e.id });
           }}
           onNodeDragStop={(_, n) =>
             act("update", {
@@ -313,17 +418,28 @@ export function DesignCanvas({
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={20} size={1} color="var(--color-line)" />
-          <Controls showInteractive={false} position="bottom-right" />
+          {/* above the message box, which covers the bottom of the canvas, and
+              on the left, clear of the review on a narrow window */}
+          <Controls
+            showInteractive={false}
+            position="bottom-left"
+            style={{ marginBottom: COMPOSER_H }}
+          />
         </ReactFlow>
       </div>
     </div>
   );
 }
 
+export const PALETTE_W = 168;
+
 // the components you can use, by group: drag one onto the canvas, or click it
 function Palette({ onAdd }: { onAdd: (kind: KindId) => void }) {
   return (
-    <div className="h-full w-[168px] shrink-0 overflow-y-auto border-r border-line bg-surface px-2 py-2">
+    <div
+      style={{ width: PALETTE_W }}
+      className="h-full shrink-0 overflow-y-auto border-r border-line bg-surface px-2 py-2"
+    >
       {GROUPS.map((g) => (
         <div key={g} className="mb-1.5">
           <div className="px-1 pb-0.5 text-[10px] font-semibold tracking-wide text-faint uppercase">

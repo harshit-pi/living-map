@@ -5,7 +5,7 @@ import { Mark } from "./components/Logo.tsx";
 import { MapsMenu } from "./components/MapList.tsx";
 import { Segmented } from "./components/Segmented.tsx";
 import { UpdateButton } from "./components/UpdateButton.tsx";
-import { WorkingBar } from "./components/WorkingBar.tsx";
+import { WorkingBar, WorkingPill } from "./components/WorkingBar.tsx";
 import { act } from "./lib/api.ts";
 import { useLiveMap } from "./lib/live.ts";
 import { store, stored } from "./lib/storage.ts";
@@ -124,14 +124,20 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-canvas">
-      <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-line px-4 py-2">
+      <header className="grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_auto] items-center gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Mark size={22} className="shrink-0" />
           <div className="truncate text-[15px] font-semibold text-ink">
             {map.title}
           </div>
         </div>
-        <div />
+        <div className="flex min-w-0 justify-end">
+          <WorkingPill
+            working={live.working}
+            queued={live.queued}
+            onStop={stop}
+          />
+        </div>
         <div className="flex items-center justify-end gap-2">
           {plugin ? (
             <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
@@ -186,7 +192,12 @@ export default function App() {
           </button>
         </div>
       </header>
-      <WorkingBar working={live.working} queued={live.queued} onStop={stop} />
+      <WorkingBar
+        working={live.working}
+        queued={live.queued}
+        onStop={stop}
+        pill={false}
+      />
       {!live.online && (
         <div className="bg-warning-soft px-4 py-1.5 text-sm text-warning-strong">
           Lost the connection to the Living Map server; reconnecting…

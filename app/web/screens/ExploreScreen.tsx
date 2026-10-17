@@ -3,6 +3,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { Canvas } from "../components/Canvas.tsx";
 import { FloatingComposer } from "../components/FloatingComposer.tsx";
 import { NodePanel } from "../components/NodePanel.tsx";
+import { setAside } from "../lib/layout.ts";
 import type { Workspace } from "../lib/workspace.ts";
 
 // Explore: the question as a tree of options and facts, a panel for the node
@@ -15,7 +16,12 @@ export function ExploreScreen({
   showDropped: boolean;
 }) {
   const { map, live, selection, setSelection } = ws;
-  const one = selection.length === 1 ? map.nodes[selection[0]] : undefined;
+  // a node hidden with the set-aside ones takes its panel with it
+  const one =
+    selection.length === 1 &&
+    (showDropped || !setAside(map.nodes, selection[0]))
+      ? map.nodes[selection[0]]
+      : undefined;
   return (
     <>
       <ReactFlowProvider>

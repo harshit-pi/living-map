@@ -24,6 +24,8 @@ export type DesignState = {
   // the design Claude judges against; never sent to the browser until revealed
   reference: Reference | null;
   revealed: boolean;
+  // the parts you removed last, with their wires, newest last, for Undo
+  removed?: { comp: Comp; wires: Wire[] }[];
 };
 
 export const newState = (): DesignState => ({
@@ -33,6 +35,7 @@ export const newState = (): DesignState => ({
   review: null,
   reference: null,
   revealed: false,
+  removed: [],
 });
 
 const num = (v: unknown, lo: number, hi: number, dflt: number): number => {
@@ -77,21 +80,32 @@ export function loadCheck(s: {
     w.set(c.id, (s.brief?.writes ?? 0) / clients.length);
   }
 
-  // topological order; anything in a cycle is taken afterwards, once
+  // topological order. A cycle is broken where traffic enters it: the part
+  // already fed by one placed before it goes next, and the wire back into it
+  // is not followed, so every part in the loop still gets its load.
   const indeg = new Map(s.comps.map((c) => [c.id, 0]));
   for (const x of wires) indeg.set(x.to, (indeg.get(x.to) ?? 0) + 1);
   const order: string[] = [];
+  const placed = new Set<string>();
   const ready = s.comps.filter((c) => indeg.get(c.id) === 0).map((c) => c.id);
-  while (ready.length) {
+  while (order.length < s.comps.length) {
+    if (!ready.length) {
+      const rest = s.comps.filter((c) => !placed.has(c.id));
+      const fed = rest.find((c) =>
+        wires.some((x) => x.to === c.id && placed.has(x.from)),
+      );
+      ready.push((fed ?? rest[0]).id);
+    }
     const id = ready.shift()!;
+    if (placed.has(id)) continue;
+    placed.add(id);
     order.push(id);
     for (const x of wires)
-      if (x.from === id) {
+      if (x.from === id && !placed.has(x.to)) {
         indeg.set(x.to, indeg.get(x.to)! - 1);
         if (indeg.get(x.to) === 0) ready.push(x.to);
       }
   }
-  for (const c of s.comps) if (!order.includes(c.id)) order.push(c.id);
 
   const done = new Set<string>();
   for (const id of order) {
@@ -216,9 +230,32 @@ export function updateComp(s: DesignState, id: unknown, a: Raw): Comp | null {
 export function removeComp(s: DesignState, id: unknown): boolean {
   const c = findComp(s, id);
   if (!c) return false;
+  const wires = s.wires.filter((w) => w.from === c.id || w.to === c.id);
   s.comps = s.comps.filter((o) => o !== c);
-  s.wires = s.wires.filter((w) => w.from !== c.id && w.to !== c.id);
+  s.wires = s.wires.filter((w) => !wires.includes(w));
+  s.removed = [...(s.removed ?? []), { comp: c, wires }].slice(-10);
   return true;
+}
+
+// Undo the last removal: the part comes back where it was, with the wires
+// whose other end is still there.
+export function restoreComp(s: DesignState): Comp | null {
+  const last = s.removed?.pop();
+  if (!last || s.comps.length >= 60) return null;
+  const { comp, wires } = last;
+  if (findComp(s, comp.id)) return null;
+  s.comps.push(comp);
+  for (const w of wires)
+    if (
+      findComp(s, w.from) &&
+      findComp(s, w.to) &&
+      s.wires.length < 120 &&
+      !s.wires.some(
+        (o) => o.id === w.id || (o.from === w.from && o.to === w.to),
+      )
+    )
+      s.wires.push(w);
+  return comp;
 }
 
 export function connect(
@@ -376,11 +413,13 @@ export function applyDesignOp(s: DesignState, op: Raw): number | null {
 const fmt = (n: number) =>
   !Number.isFinite(n)
     ? "∞"
-    : n >= 1e6
-      ? `${+(n / 1e6).toFixed(1)}M`
-      : n >= 1e3
-        ? `${+(n / 1e3).toFixed(1)}k`
-        : String(n);
+    : n >= 1e9
+      ? `${+(n / 1e9).toFixed(1)}B`
+      : n >= 1e6
+        ? `${+(n / 1e6).toFixed(1)}M`
+        : n >= 1e3
+          ? `${+(n / 1e3).toFixed(1)}k`
+          : String(n);
 
 export function outlineOf(s: DesignState): string {
   const load = loadCheck(s);

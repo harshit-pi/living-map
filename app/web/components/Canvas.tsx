@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { NodeCard } from "./NodeCard.tsx";
 import type { MapDoc } from "../../shared/model.ts";
-import { layout } from "../lib/layout.ts";
+import { layout, setAside } from "../lib/layout.ts";
 
 // the floating message box covers the bottom of the canvas: frame above it
 const FRAME = {
@@ -35,7 +35,7 @@ export function Canvas({
   const visible = useMemo(
     () =>
       Object.values(map.nodes).filter(
-        (n) => showDropped || !(n.dropped || n.status === "dropped"),
+        (n) => showDropped || !setAside(map.nodes, n.id),
       ),
     [map, showDropped],
   );

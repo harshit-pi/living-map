@@ -5,11 +5,13 @@ import type { Group, Load } from "../shared.ts";
 export const fmt = (n: number): string =>
   !Number.isFinite(n)
     ? "∞"
-    : n >= 1e6
-      ? `${+(n / 1e6).toFixed(1)}M`
-      : n >= 1e3
-        ? `${+(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`
-        : String(Math.round(n));
+    : n >= 1e9
+      ? `${+(n / 1e9).toFixed(1)}B`
+      : n >= 1e6
+        ? `${+(n / 1e6).toFixed(1)}M`
+        : n >= 1e3
+          ? `${+(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`
+          : String(Math.round(n));
 
 // a component's group, as brand roles
 export const GROUP_TONE: Record<
@@ -73,3 +75,9 @@ export const STATUS_TONE: Record<
     label: "backlog",
   },
 };
+
+// how far over or under capacity, short enough for a card: "70%", "3.5× cap", "7k× cap"
+export const utilText = (util: number): string =>
+  util > 1
+    ? `${util >= 100 ? fmt(Math.round(util)) : +util.toFixed(1)}× cap`
+    : `${Math.round(util * 100)}%`;

@@ -66,7 +66,11 @@ export function switchPurpose(
     return {
       error: "This map's mode is fixed; start a new map for another mode.",
     };
-  map.purpose = purpose === "learn" ? "learn" : "explore";
+  // a plugin's mode is set only when its map is started
+  if (purpose !== "learn" && purpose !== "explore")
+    return { error: "A map switches only between Explore and Learn." };
+  if (map.purpose === purpose) return {};
+  map.purpose = purpose;
   ctx.note(`Switched the canvas to ${map.purpose} mode.`);
   engine.push();
   if (map.purpose === "learn" && !map.diagram && !engine.state.busy)

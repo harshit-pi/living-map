@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { newState } from "../plugins/design/core.ts";
 import type { ServerEvent } from "../shared/model.ts";
 import { act } from "./actions/index.ts";
 import type { StoredMap } from "./core/types.ts";
@@ -571,4 +572,145 @@ test("an answer the blank does not accept still goes to the model", async () => 
   );
   await done;
   assert.equal(m.fills.a1.state, "wrong");
+});
+
+// A Design map with a brief, the client, and Claude's hidden reference.
+function designMap() {
+  const m = newMap("Design Twitter", "design");
+  m.data = {
+    design: {
+      ...newState(),
+      brief: {
+        title: "Design Twitter",
+        goals: [],
+        constraints: [],
+        scale: [],
+        reads: 300_000,
+        writes: 6_000,
+      },
+      comps: [
+        {
+          id: "app",
+          kind: "client",
+          label: "Mobile app",
+          x: 40,
+          y: 220,
+          count: 1,
+          shards: 1,
+          by: "claude",
+        },
+      ],
+      reference: {
+        comps: [{ id: "tweets", kind: "nosql", label: "Secret tweet store" }],
+        wires: [],
+        notes: ["Celebrities are merged in at read time"],
+      },
+    },
+  };
+  return m;
+}
+const design = (name: string, args: Record<string, unknown> = {}) =>
+  ({ type: "plugin", plugin: "design", name, args }) as const;
+
+test("a Design map's reference reaches the browser only once you reveal it", async () => {
+  const { engine, calls, events } = setup(designMap());
+  const secret = /Secret tweet store|Celebrities/;
+  const viewOf = () => {
+    const e = engine.snapshot();
+    assert.ok(e.type === "map");
+    return e.map?.data?.design as { reference: unknown };
+  };
+  assert.equal(viewOf().reference, null, "the browser view leaves it out");
+  assert.doesNotMatch(JSON.stringify(engine.snapshot()), secret);
+
+  // every snapshot pushed while you work leaves it out too, though the model sees it
+  await act(engine, design("add", { kind: "cache", x: 300, y: 220 }));
+  await act(engine, design("connect", { from: "app", to: "cache" }));
+  const check = act(engine, design("check"));
+  await settled(calls, 1);
+  assert.match(calls[0].req.message, /REFERENCE DESIGN \(yours, hidden/);
+  assert.match(calls[0].req.message, secret);
+  calls[0].release(
+    'Close.\n```map\n{"ops":[{"op":"review","summary":"Add a store.","points":[{"level":"fix","text":"Reads have nowhere to go.","on":["cache"]}]}]}\n```',
+  );
+  await check;
+  assert.ok(events.length > 3);
+  for (const e of events) assert.doesNotMatch(JSON.stringify(e), secret);
+
+  assert.deepEqual(await act(engine, design("reveal")), { ok: true });
+  assert.deepEqual(
+    (viewOf().reference as { comps: { label: string }[] }).comps.map(
+      (c) => c.label,
+    ),
+    ["Secret tweet store"],
+  );
+  assert.match(JSON.stringify(engine.snapshot()), /Celebrities/);
+  assert.match(JSON.stringify(events.at(-1)), /Celebrities/, "and is pushed");
+});
+
+test("plugin actions are refused cleanly", async () => {
+  const refused = { error: "That action is not available on this map." };
+  const { engine } = setup(designMap());
+  for (const req of [
+    { type: "plugin", plugin: "nope", name: "add", args: {} },
+    design("nope"),
+    design("constructor"),
+    design("__proto__"),
+    design("toString"),
+    design("hasOwnProperty"),
+    { type: "plugin", plugin: "design" },
+    { type: "plugin", plugin: "design", name: ["add"] },
+    { type: "plugin" },
+  ])
+    assert.deepEqual(
+      await act(engine, req as Parameters<typeof act>[1]),
+      refused,
+      JSON.stringify(req),
+    );
+
+  // a Design action while a Learn map is open
+  const learn = setup(newMap("Hash maps", "learn"));
+  assert.deepEqual(
+    await act(learn.engine, design("add", { kind: "cache" })),
+    refused,
+  );
+  assert.deepEqual(await act(learn.engine, design("constructor")), refused);
+  assert.equal(learn.engine.state.map?.data, undefined, "no Design state made");
+  // and on an Explore map, a plugin action with no plugin named is refused, not a crash
+  const explore = setup(newMap("Which DB?", "explore"));
+  assert.deepEqual(
+    await act(explore.engine, { type: "plugin" } as Parameters<typeof act>[1]),
+    refused,
+  );
+});
+
+test("a mode switch accepts only Explore and Learn, and a Design map keeps its mode", async () => {
+  const { engine } = setup(newMap("Which DB?", "explore"));
+  for (const purpose of ["design", "__proto__", "decide"])
+    assert.match(
+      (await act(engine, { type: "purpose", purpose })).error ?? "",
+      /only between Explore and Learn/,
+    );
+  assert.equal(engine.state.map?.purpose, "explore");
+  const d = setup(designMap());
+  assert.match(
+    (await act(d.engine, { type: "purpose", purpose: "learn" })).error ?? "",
+    /mode is fixed/,
+  );
+});
+
+test("a second Check my design while one runs asks for no second review", async () => {
+  const { engine, calls } = setup(designMap());
+  const first = act(engine, design("check"));
+  await settled(calls, 1);
+  assert.deepEqual(await act(engine, design("check")), {});
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(engine.state.waiting.length, 0, "nothing queued behind it");
+  calls[0].release("Looks thin.");
+  await first;
+  assert.equal(
+    engine.state.map?.chat.filter((c) => c.text === "Check my design.").length,
+    1,
+  );
 });

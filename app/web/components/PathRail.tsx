@@ -31,10 +31,11 @@ function stateOf(map: MapDoc, n: MapNode) {
       cls: "border-primary bg-primary-soft text-primary-strong",
       word: `playing · ${sc.at} of ${sc.total}`,
     };
+  // the badge keeps the step's number; the hint count is in the words
   const h = hintsOf(map, n.id);
   if (h)
     return {
-      mark: String(h),
+      mark: "",
       cls: "border-warning bg-warning-soft text-warning-strong",
       word: `${h} hint${h > 1 ? "s" : ""} used`,
     };

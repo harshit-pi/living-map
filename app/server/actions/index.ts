@@ -58,9 +58,11 @@ export async function act(
       // only the map's own plugin answers, and only with an action it declares
       const plugin = pluginFor(map.purpose);
       const run =
-        plugin?.id === req.plugin
-          ? Object.hasOwn(plugin.actions ?? {}, req.name) &&
-            plugin.actions![req.name]
+        plugin &&
+        plugin.id === req.plugin &&
+        typeof req.name === "string" &&
+        Object.hasOwn(plugin.actions ?? {}, req.name)
+          ? plugin.actions![req.name]
           : null;
       if (!run) return { error: "That action is not available on this map." };
       const args = req.args && typeof req.args === "object" ? req.args : {};

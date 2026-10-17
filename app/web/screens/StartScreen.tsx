@@ -72,9 +72,10 @@ export function StartScreen({
   };
   const mode = MODES.find((m) => m.id === purpose) ?? MODES[0];
   return (
-    // scrolls when the window is short, instead of cutting off the top
+    // scrolls when the window is short, instead of cutting off the top; held
+    // at a fixed height, not centred, so the mode switch stays put between modes
     <div className="h-full overflow-y-auto bg-canvas">
-      <div className="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center px-6 py-8">
+      <div className="mx-auto flex min-h-full w-full max-w-xl flex-col px-6 pt-[max(2rem,12vh)] pb-8">
         <div className="mb-6 flex justify-center">
           <Logo size={30} />
         </div>

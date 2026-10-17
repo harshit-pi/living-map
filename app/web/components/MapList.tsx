@@ -42,9 +42,11 @@ export function MapRows({
                 {m.title}
               </span>
               <span className="block text-[11px] text-muted">
-                {m.purpose === "learn"
-                  ? `${m.done} worked out · ${m.open} to go`
-                  : `${m.nodes} nodes · ${m.open} open`}
+                {m.summary
+                  ? m.summary
+                  : m.purpose === "learn"
+                    ? `${m.done} of ${m.done + m.open} worked out by you`
+                    : `${m.nodes} nodes · ${m.open} open`}
                 {m.form ? ` · ${m.form}` : ""}
               </span>
             </span>

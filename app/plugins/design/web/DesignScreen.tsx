@@ -1,8 +1,16 @@
-import { ReactFlowProvider } from "@xyflow/react";
-import { useState } from "react";
+import { ReactFlowProvider, useStore, useViewport } from "@xyflow/react";
+import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-import { DesignCanvas, type Picked } from "./DesignCanvas.tsx";
+import {
+  DesignCanvas,
+  NODE_W,
+  PALETTE_W,
+  type Picked,
+} from "./DesignCanvas.tsx";
 import { fmt, STATUS_TONE } from "./format.ts";
+import type { ChatLine } from "../../../shared/model.ts";
 import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
 import type { Workspace } from "../../../web/lib/workspace.ts";
@@ -10,15 +18,27 @@ import {
   KINDS,
   PLUGIN_ID,
   type DesignView,
+  type Reference,
   type ReviewPoint,
 } from "../shared.ts";
 
 const REVIEWING = "Reviewing your design";
+const CHECK = "Check my design."; // what a check says in the conversation
 
 // Design: the brief and the deep dives on the left; the canvas you build on in
 // the middle, with the palette; Claude's review and the selected part on top.
 export function DesignScreen({ ws }: { ws: Workspace }) {
+  // the provider wraps the whole screen, so the inspector can sit by its part
+  return (
+    <ReactFlowProvider>
+      <Design ws={ws} />
+    </ReactFlowProvider>
+  );
+}
+
+function Design({ ws }: { ws: Workspace }) {
   const { map, live, selection, setSelection, roomy } = ws;
+  const run = ws.run;
   const view = (map.data?.[PLUGIN_ID] ?? null) as DesignView | null;
   const [picked, setPicked] = useState<Picked>(null);
   const [hover, setHover] = useState<string[]>([]);
@@ -26,12 +46,44 @@ export function DesignScreen({ ws }: { ws: Workspace }) {
   const [sure, setSure] = useState(false);
   // a new review opens; you can fold it away until the next one
   const [folded, setFolded] = useState<number | null>(null);
+  // set from the click until the review is back, so a second click asks nothing
+  const [checking, setChecking] = useState(false);
+  // the part you just removed, with Undo (also Cmd/Ctrl+Z) for a few seconds
+  const [undo, setUndo] = useState<{ label: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => setUndo(null), 8000);
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "z" &&
+        !el?.closest("input, textarea, [contenteditable]")
+      ) {
+        e.preventDefault();
+        setUndo(null);
+        void run({ type: "plugin", plugin: PLUGIN_ID, name: "undo", args: {} });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [undo, run]);
   const open = selection.length === 1 ? map.nodes[selection[0]] : undefined;
   // the review steps aside while a deep dive's panel is open
   const reviewOpen =
     !!view?.review && folded !== view.review.at && !showReference && !open;
-  const act = (name: string, args: Record<string, unknown> = {}) =>
-    ws.run({ type: "plugin", plugin: PLUGIN_ID, name, args });
+  const act = (name: string, args: Record<string, unknown> = {}) => {
+    if (name === "remove") {
+      const c = view?.comps.find((x) => x.id === args.id);
+      if (c) setUndo({ label: c.label, at: Date.now() });
+    }
+    if (name === "undo") setUndo(null);
+    return run({ type: "plugin", plugin: PLUGIN_ID, name, args });
+  };
 
   const root = Object.values(map.nodes).find((n) => !n.parent);
   const dives = Object.values(map.nodes)
@@ -47,10 +99,12 @@ export function DesignScreen({ ws }: { ws: Workspace }) {
     );
 
   const over = view.comps.filter((c) => view.load[c.id]?.status === "over");
+  const ref = showReference ? view.reference : null;
   return (
     <div className="flex h-full">
-      <aside className="flex w-[300px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface">
+      <aside className="flex w-[240px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface xl:w-[300px]">
         <Brief view={view} />
+        <LastWord chat={map.chat} />
         <div className="border-t border-line px-4 py-3">
           <div className="mb-1.5 text-[11px] font-semibold tracking-wide text-faint uppercase">
             Then go deeper
@@ -85,21 +139,24 @@ export function DesignScreen({ ws }: { ws: Workspace }) {
       <div className="relative min-w-0 flex-1">
         <div
           className="h-full transition-[padding]"
-          style={{ paddingRight: open && roomy ? 440 : reviewOpen ? 372 : 0 }}
+          // on a narrow window the review floats over the canvas instead of
+          // squeezing it to nothing
+          style={{
+            paddingRight:
+              open && roomy ? 440 : (reviewOpen || ref) && roomy ? 372 : 0,
+          }}
         >
-          <ReactFlowProvider>
-            <DesignCanvas
-              view={view}
-              showReference={showReference && !!view.reference}
-              flagged={new Set(hover)}
-              picked={picked}
-              onPick={(p) => {
-                setPicked(p);
-                if (p) setSelection([]);
-              }}
-              act={act}
-            />
-          </ReactFlowProvider>
+          <DesignCanvas
+            view={view}
+            showReference={!!ref}
+            flagged={new Set(hover)}
+            picked={picked}
+            onPick={(p) => {
+              setPicked(p);
+              if (p) setSelection([]);
+            }}
+            act={act}
+          />
         </div>
 
         {/* what to do next, and the review */}
@@ -127,14 +184,16 @@ export function DesignScreen({ ws }: { ws: Workspace }) {
               </button>
             )}
             <button
-              disabled={live.busy || !view.comps.length}
+              disabled={live.busy || checking || !view.comps.length}
               onClick={() => {
+                if (checking) return;
+                setChecking(true);
                 setShowReference(false);
-                void act("check");
+                void act("check").finally(() => setChecking(false));
               }}
               className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary shadow-xs hover:bg-primary-strong disabled:opacity-40"
             >
-              {reviewing ? "Reviewing…" : "Check my design"}
+              {reviewing || checking ? "Reviewing…" : "Check my design"}
             </button>
           </div>
           {view.review && !showReference && !reviewOpen && (
@@ -161,6 +220,26 @@ export function DesignScreen({ ws }: { ws: Workspace }) {
               onHover={setHover}
               onFold={() => setFolded(view.review!.at)}
             />
+          </div>
+        )}
+
+        {ref && ref.notes.length > 0 && (
+          <div className="absolute top-14 right-3 bottom-24 z-10 w-[356px]">
+            <ReferenceNotes reference={ref} />
+          </div>
+        )}
+
+        {undo && (
+          <div className="absolute bottom-24 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-surface px-3 py-1.5 text-[12.5px] text-body shadow-md ring-1 ring-line">
+            <span className="max-w-[240px] truncate">
+              Removed "{undo.label}"
+            </span>
+            <button
+              onClick={() => void act("undo")}
+              className="font-medium text-primary-strong hover:underline"
+            >
+              Undo
+            </button>
           </div>
         )}
 
@@ -193,6 +272,8 @@ export function DesignScreen({ ws }: { ws: Workspace }) {
           {!open && (
             <FloatingComposer
               ws={ws}
+              // clear of the palette, so its last parts can still be clicked
+              left={ref ? 0 : PALETTE_W}
               placeholder={
                 roomy
                   ? "Ask about your design, or say what you are unsure of…"
@@ -262,6 +343,51 @@ const List = ({ title, items }: { title: string; items: string[] }) =>
     </div>
   ) : null;
 
+// Claude's last word in the main conversation, kept on screen: the first
+// thing to build, a review's next step, or the answer to what you asked
+function LastWord({ chat }: { chat: ChatLine[] }) {
+  const i = chat.findLastIndex((c) => c.role === "claude");
+  if (i < 0) return null;
+  // what you asked just before it, if it answers a question (not the map's
+  // title, nor a check)
+  let j = i - 1;
+  while (j > 0 && chat[j].role === "system") j--;
+  const question =
+    j > 0 && chat[j].role === "you" && chat[j].text !== CHECK
+      ? chat[j].text
+      : "";
+  return (
+    <div className="border-t border-line px-4 py-3">
+      <div className="mb-1 text-[11px] font-semibold tracking-wide text-faint uppercase">
+        {question ? "You asked" : "Next step"}
+      </div>
+      {question && (
+        <div className="mb-1.5 text-[12.5px] text-muted italic">{question}</div>
+      )}
+      <div className="answer answer-sm max-h-60 overflow-y-auto text-[13px]">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {chat[i].text}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
+function ReferenceNotes({ reference }: { reference: Reference }) {
+  return (
+    <div className="max-h-full w-full overflow-y-auto rounded-xl bg-surface p-3 shadow-md ring-1 ring-line">
+      <div className="text-[11px] font-semibold tracking-wide text-faint uppercase">
+        Why the reference is built this way
+      </div>
+      <ul className="mt-2 list-disc space-y-1 pl-4 text-[13px] text-body">
+        {reference.notes.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 const LEVEL: Record<ReviewPoint["level"], { mark: string; tone: string }> = {
   good: { mark: "✓", tone: "text-success-strong" },
   fix: { mark: "!", tone: "text-danger-strong" },
@@ -328,14 +454,15 @@ function Inspector({
   onClose: () => void;
 }) {
   const box =
-    "absolute bottom-24 left-[184px] z-20 w-[300px] rounded-xl bg-surface p-3 shadow-lg ring-1 ring-line";
+    "absolute z-20 w-[300px] rounded-xl bg-surface p-3 shadow-lg ring-1 ring-line";
+  const beside = useBeside(view, picked);
   if (picked.type === "wire") {
     const w = view.wires.find((x) => x.id === picked.id);
     if (!w) return null;
     const from = view.comps.find((c) => c.id === w.from)?.label;
     const to = view.comps.find((c) => c.id === w.to)?.label;
     return (
-      <div className={box}>
+      <div className={box} style={beside}>
         <Head title={`${from} → ${to}`} onClose={onClose} />
         <div className="mt-2 text-[12px] text-muted">Carries</div>
         <div className="mt-1 flex rounded-lg bg-panel p-0.5 text-[12.5px]">
@@ -359,7 +486,7 @@ function Inspector({
           </span>
           <NumberField
             value={w.times}
-            onCommit={(n) => void act("wire", { id: w.id, times: n })}
+            onCommit={(n) => act("wire", { id: w.id, times: n })}
           />
         </label>
         <button
@@ -380,15 +507,20 @@ function Inspector({
   const l = view.load[c.id];
   const st = STATUS_TONE[l?.status ?? "idle"];
   return (
-    <div className={box}>
+    <div className={box} style={beside}>
       <Head title={k.label} onClose={onClose} />
       <input
-        key={c.id}
+        // shows what was saved once it is (the server trims and caps names)
+        key={`${c.id}:${c.label}`}
         defaultValue={c.label}
-        onBlur={(e) =>
-          e.target.value.trim() !== c.label &&
-          void act("update", { id: c.id, label: e.target.value })
-        }
+        maxLength={40}
+        onBlur={(e) => {
+          const name = e.target.value.trim();
+          // a part keeps a name: an empty one puts the old one back
+          if (!name) e.target.value = c.label;
+          else if (name !== c.label)
+            void act("update", { id: c.id, label: name });
+        }}
         onKeyDown={(e) =>
           e.key === "Enter" && (e.target as HTMLInputElement).blur()
         }
@@ -399,7 +531,7 @@ function Inspector({
         {k.store ? "Replicas" : "Instances"}
         <NumberField
           value={c.count}
-          onCommit={(n) => void act("update", { id: c.id, count: n })}
+          onCommit={(n) => act("update", { id: c.id, count: n })}
         />
       </label>
       {k.shards && (
@@ -407,7 +539,7 @@ function Inspector({
           Shards
           <NumberField
             value={c.shards}
-            onCommit={(n) => void act("update", { id: c.id, shards: n })}
+            onCommit={(n) => act("update", { id: c.id, shards: n })}
           />
         </label>
       )}
@@ -447,38 +579,98 @@ function Inspector({
   );
 }
 
+// The inspector opens beside what you picked (right of it, or left when there
+// is no room), inside the canvas, and follows it when the canvas moves.
+const PANEL_W = 300;
+function useBeside(view: DesignView, picked: NonNullable<Picked>) {
+  const { x, y, zoom } = useViewport();
+  const paneW = useStore((s) => s.width);
+  const paneH = useStore((s) => s.height);
+  const comp = (id: string) => view.comps.find((c) => c.id === id);
+  let at: { x: number; y: number; w: number } | null = null;
+  if (picked.type === "comp") {
+    const c = comp(picked.id);
+    if (c) at = { x: c.x, y: c.y, w: NODE_W };
+  } else {
+    const w = view.wires.find((o) => o.id === picked.id);
+    const a = w && comp(w.from);
+    const b = w && comp(w.to);
+    if (a && b)
+      at = { x: (a.x + b.x + NODE_W) / 2, y: (a.y + b.y) / 2 + 30, w: 0 };
+  }
+  if (!at) return { left: PALETTE_W + 16, top: 12 };
+  const left = PALETTE_W + at.x * zoom + x;
+  const right = left + at.w * zoom;
+  const maxLeft = PALETTE_W + paneW - PANEL_W - 8;
+  return {
+    left: Math.round(
+      right + 12 <= maxLeft
+        ? right + 12
+        : Math.max(PALETTE_W + 8, Math.min(maxLeft, left - PANEL_W - 12)),
+    ),
+    top: Math.round(Math.max(56, Math.min(at.y * zoom + y, paneH - 340))),
+  };
+}
+
 const Head = ({ title, onClose }: { title: string; onClose: () => void }) => (
-  <div className="flex items-center justify-between">
-    <div className="text-[13px] font-semibold text-ink">{title}</div>
-    <button onClick={onClose} className="text-muted hover:text-ink">
+  <div className="flex items-center justify-between gap-2">
+    <div
+      className="min-w-0 truncate text-[13px] font-semibold text-ink"
+      title={title}
+    >
+      {title}
+    </div>
+    <button onClick={onClose} className="shrink-0 text-muted hover:text-ink">
       ×
     </button>
   </div>
 );
 
+// A count you can type or step. It shows what you typed or stepped to while
+// that is on its way, then what was saved (the server keeps 1 to 1000), so
+// quick clicks add up and a typed number is what − and + start from.
 function NumberField({
   value,
   onCommit,
 }: {
   value: number;
-  onCommit: (n: number) => void;
+  onCommit: (n: number) => Promise<unknown>;
 }) {
+  const [text, setText] = useState(String(value));
+  const [synced, setSynced] = useState(value);
+  const [sending, setSending] = useState(0);
+  if (sending === 0 && value !== synced) {
+    setSynced(value);
+    setText(String(value));
+  }
+  const typed = Math.round(Number(text));
+  const current = Number.isFinite(typed) && typed >= 1 ? typed : value;
+  const send = (n: number) => {
+    setText(String(n));
+    if (n === value && sending === 0) return;
+    setSending((k) => k + 1);
+    void onCommit(n).finally(() => {
+      setSending((k) => k - 1);
+      // look at the saved value again once nothing is on its way
+      setSynced(Number.NaN);
+    });
+  };
   return (
     <span className="flex items-center gap-1">
       <button
-        onClick={() => onCommit(Math.max(1, value - 1))}
+        onClick={() => send(Math.max(1, current - 1))}
         className="h-6 w-6 rounded-md bg-panel text-body hover:bg-line"
       >
         −
       </button>
       <input
-        key={value}
-        defaultValue={value}
+        value={text}
         inputMode="numeric"
-        onBlur={(e) => {
-          const n = Number(e.target.value);
-          if (Number.isFinite(n) && n >= 1 && n !== value)
-            onCommit(Math.round(n));
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          // anything that is not a count of at least 1 snaps back
+          if (String(current) === text.trim()) send(current);
+          else setText(String(value));
         }}
         onKeyDown={(e) =>
           e.key === "Enter" && (e.target as HTMLInputElement).blur()
@@ -486,7 +678,7 @@ function NumberField({
         className="w-14 rounded-md border border-line-strong px-1.5 py-0.5 text-center text-[13px] tabular-nums outline-hidden focus:border-primary"
       />
       <button
-        onClick={() => onCommit(value + 1)}
+        onClick={() => send(current + 1)}
         className="h-6 w-6 rounded-md bg-panel text-body hover:bg-line"
       >
         +
