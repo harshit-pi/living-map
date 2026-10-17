@@ -54,6 +54,9 @@ const pkg = JSON.parse(
   fs.readFileSync(path.join(APP_DIR, "package.json"), "utf8"),
 );
 const SLUG = repoSlug(pkg);
+// Updates come from the project's own repository, not `origin`: in a fork,
+// `origin` is the contributor's copy and would never carry new releases.
+const UPSTREAM = SLUG ? `https://github.com/${SLUG}.git` : "origin";
 
 export type Release = {
   tag_name: string;
@@ -131,7 +134,7 @@ export async function checkForUpdate({
       if (sha) {
         await git(
           "git",
-          ["fetch", "--quiet", "--tags", "origin"],
+          ["fetch", "--quiet", "--tags", UPSTREAM],
           APP_DIR,
           30_000,
         );
@@ -194,7 +197,7 @@ export async function runUpdate(
       try {
         await git(
           "git",
-          ["pull", "--rebase", "origin", "main"],
+          ["pull", "--rebase", UPSTREAM, "main"],
           APP_DIR,
           120_000,
         );

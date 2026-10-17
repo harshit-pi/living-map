@@ -88,7 +88,13 @@ test("a lockfile rewritten by npm install does not block the update", async () =
   const r = await runUpdate(() => {}, { beforeRestart: async () => {}, git });
   assert.deepEqual(r, { ok: true });
   const reset = ran.indexOf("git checkout -- package-lock.json");
-  assert.ok(reset >= 0 && reset < ran.indexOf("git pull --rebase origin main"));
+  assert.ok(
+    reset >= 0 &&
+      reset <
+        ran.indexOf(
+          "git pull --rebase https://github.com/harshit-pi/living-map.git main",
+        ),
+  );
 });
 
 test("being offline means no update, not an error", async () => {
@@ -112,7 +118,11 @@ test("an update pulls, installs and builds, reporting each step", async () => {
     git,
   });
   assert.deepEqual(r, { ok: true });
-  assert.ok(ran.includes("git pull --rebase origin main"));
+  assert.ok(
+    ran.includes(
+      "git pull --rebase https://github.com/harshit-pi/living-map.git main",
+    ),
+  );
   assert.ok(ran.some((l) => l.startsWith("npm ci")));
   assert.ok(ran.includes("npm run build"));
   assert.deepEqual(

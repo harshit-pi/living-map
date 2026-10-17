@@ -1,0 +1,29 @@
+name: Bug report
+description: Something in Living Map does not work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a Learn map on "..."
+        2. Click ...
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in the Update popover, or run `git describe --tags` in your checkout.
+      placeholder: v0.1.12
+  - type: textarea
+    id: map
+    attributes:
+      label: Map or screenshot
+      description: Attach the map's JSON from `~/.living-map/maps/` if you can share it, or a screenshot.
