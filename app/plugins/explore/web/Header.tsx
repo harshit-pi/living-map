@@ -148,6 +148,13 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
             ws.setSelection([]);
             return;
           }
+          // Claude leads a cause surely: Next opens it, whose panel marks
+          // it likely
+          if (gap?.kind === "likely" && gap.option) {
+            place.setTab("tree");
+            ws.setSelection([gap.option]);
+            return;
+          }
           // Claude agrees with the cause you marked likely: Next opens the
           // question, whose panel settles it
           if (gap?.kind === "settle") {

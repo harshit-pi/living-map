@@ -281,7 +281,7 @@ function RenameForm({
         Rename
       </button>
       <span className="basis-full">
-        <NameLeft text={title} />
+        <NameLeft text={title} existing />
       </span>
     </form>
   );

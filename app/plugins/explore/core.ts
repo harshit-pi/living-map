@@ -110,6 +110,20 @@ export function clip(v: unknown, words: number, chars: number): string {
   const space = cut.lastIndexOf(" ");
   return (space > chars / 2 ? cut.slice(0, space) : cut.slice(0, chars)).trim();
 }
+// A line of prose cut the same way, so it never ends mid-sentence: back to
+// the last full sentence when that keeps at least half of it, else with an
+// ellipsis. Cut at its 20 words, a stand line ended "That fits the
+// abandonment jump after".
+export function clipLine(v: unknown, words: number, chars: number): string {
+  const all = str(v, 4000).replace(/\s+/g, " ").trim();
+  const cut = clip(all, words, chars);
+  if (cut.length >= all.length) return cut;
+  const end = Math.max(
+    ...[". ", "! ", "? ", "; "].map((p) => cut.lastIndexOf(p)),
+  );
+  if (end + 1 >= cut.length / 2) return cut.slice(0, end + 1).trim();
+  return `${cut.replace(/[\s,;:.\-–—]+$/, "")}…`;
+}
 const idOf = (v: unknown): string | null => {
   const s = typeof v === "string" ? v.trim() : "";
   return s && safeId(s) ? s : null;
@@ -410,22 +424,34 @@ const openChecks = (nodes: Nodes, side: Side | undefined) =>
 // judged the row on it there (`told`), a "can't tell" left is one that
 // nothing you know settles (how a build not yet made will be done): Next
 // sent you back to the same thread after every reply.
-export function waitsOnYou(
-  nodes: Nodes,
-  b: Board,
-  weight: Weight,
-): { want: string; option: string; note: string; check?: string }[] {
+type Tell = {
+  want: string;
+  option: string;
+  note: string;
+  // Claude marked it, but only as a guess, checked once already
+  guess: boolean;
+  check?: string;
+};
+export function waitsOnYou(nodes: Nodes, b: Board, weight: Weight): Tell[] {
   const cols = liveColumns(nodes, b);
   const answered = answeredOn(nodes, b);
   const yours = factsOn(nodes, b).filter((f) => f.by === "you");
   const heard = (side: Side) =>
     yours.some((f) => f.updatedAt > side.at && !side.facts.includes(f.id));
-  const out: { want: string; option: string; note: string; check?: string }[] =
-    [];
+  const out: Tell[] = [];
   for (const r of keptRows(b).filter((x) => x.weight === weight && !x.told)) {
+    // "can't tell", or a guess still after Claude checked it: asked again,
+    // it came back the same guess ("I don't know how much spare time the
+    // team has"), paid for
     const cants = cols
       .map((o) => ({ o, side: own(b.cells, cellKey(o.id, r.id)) }))
-      .filter(({ side }) => !side?.you && side?.claude?.mark === "unknown")
+      .filter(
+        ({ side }) =>
+          !side?.you &&
+          !!side?.claude &&
+          (side.claude.mark === "unknown" ||
+            (!!side.claude.checked && !!shown(side)?.guess)),
+      )
       .map(({ o, side }) => ({ o, side: side!.claude! }));
     const done = cants.filter(({ side }) => answered(side, r.id));
     const checked = done.find(({ side }) => side.checked);
@@ -440,6 +466,7 @@ export function waitsOnYou(
         want: r.id,
         option: first.o.id,
         note: first.side.note,
+        guess: first.side.mark !== "unknown",
         ...(check ? { check } : {}),
       });
     }
@@ -907,8 +934,12 @@ export const wrapLabel = (nodes: Nodes, option: string) =>
   `Pre-mortem on ${named(nodes, option)}`;
 
 // The check Claude said to run first on a causes question (a takeaway on
-// it), while nothing under the question is newer than that pick: until you
-// say what it found, asking again would get the same pick, for a paid move.
+// it), while no finding under the question is newer than that pick: until
+// you say what it found, asking again would get the same pick, for a paid
+// move. A finding is a fact that is no check (a result, or what you said),
+// never a want: a Go deeper that only added causes and checks under one
+// cause took the pick away while the stand line still named it, and Next
+// paid for the same pick again.
 export function runFirst(
   s: ExploreState,
   nodes: Nodes,
@@ -919,9 +950,19 @@ export function runFirst(
     .sort((a, c) => s.takeaways[c.id].at - s.takeaways[a.id].at)[0];
   if (!pick) return undefined;
   const at = s.takeaways[pick.id].at;
+  const wants = new Set(
+    Object.values(s.boards).flatMap((b) => b.rows.map((r) => r.id)),
+  );
   for (const id of subtree(nodes, q)) {
     const n = nodes[id];
-    if (n && n.id !== pick.id && n.kind !== "question" && n.updatedAt > at)
+    if (
+      n &&
+      n.id !== pick.id &&
+      n.kind === "fact" &&
+      !isCheck(n) &&
+      !wants.has(n.id) &&
+      n.updatedAt > at
+    )
       return undefined;
   }
   return { id: pick.id, why: s.takeaways[pick.id].text };
@@ -990,7 +1031,7 @@ function tellGap(
     label: tell.check
       ? `Answer ${named(nodes, tell.check)} to settle ${plural(cells, "cell")}`
       : `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
-    reason: `${what} Claude can't tell without you${tell.note ? ` (${clip(tell.note, 24, 160)})` : ""}`,
+    reason: `${what} Claude ${tell.guess ? "can only guess at" : "can't tell"} without you${tell.note ? ` (${clip(tell.note, 24, 160)})` : ""}`,
   };
 }
 
@@ -1023,7 +1064,16 @@ export function nextGap(
             ? "a choice with one option fails far more often"
             : "there is no keep-things-as-they-are option to weigh against",
       };
-    const must = holes(s, nodes, b, "must", { rechecks: false })[0];
+    // A must only you can settle comes before the guesses Claude has not
+    // checked: with what you know still missing, a check on one came back
+    // the same guess, paid for, and Next went on to the next guess (on
+    // "Wait", whose "meets" was true by definition) rather than ask you. An
+    // empty must on a want that does not wait on you still comes first: no
+    // move has judged it yet. A must only you can settle is yours to say,
+    // in its thread, or to rate, and no move is paid for.
+    const tell = waitsOnYou(nodes, b, "must")[0];
+    const musts = holes(s, nodes, b, "must", { rechecks: false });
+    const must = tell ? musts.find((h) => !h.guess) : musts[0];
     if (must)
       return {
         kind: "ask",
@@ -1033,9 +1083,6 @@ export function nextGap(
         label: checkLabel(nodes, must.option, must.want),
         reason: must.guess ? "a must, only a guess" : "a must, still empty",
       };
-    // a must only you can settle: yours to say, in its thread, or to rate,
-    // and no move is paid for
-    const tell = waitsOnYou(nodes, b, "must")[0];
     if (tell) return tellGap(nodes, b, tell, "a must");
     const lead = liveLead(s, nodes, q);
     const lean = b.lean && own(nodes, b.lean.option);
@@ -1072,10 +1119,11 @@ export function nextGap(
       holes(s, nodes, b, w, { guesses, rechecks: false }).find(
         (h) => h.option === chosen.id,
       );
-    const must = on("must", true);
+    // as before a choice: what only you can say before the guesses
     const tell = waitsOnYou(nodes, b, "must").find(
       (x) => x.option === chosen.id,
     );
+    const must = on("must", !tell);
     const matters = !must && !tell ? on("matters", false) : undefined;
     const cell = must ?? matters;
     if (cell)
@@ -1164,6 +1212,23 @@ export function nextGap(
         label: `Settle it: ${question.title}`,
         reason: `you marked ${named(nodes, st!.lead!)} likely and Claude's last word agrees`,
       };
+    // Claude's last word leads a cause, and surely, but you have marked none
+    // likely: marking it is yours, and free (Next paid for another pick of
+    // a check after Claude said "your replay settles it")
+    if (
+      question.shape === "causes" &&
+      !likely.length &&
+      st?.lead &&
+      (st.sure ?? 0) >= SETTLE_SURE &&
+      own(nodes, st.lead)
+    )
+      return {
+        kind: "likely",
+        q: question.id,
+        option: st.lead,
+        label: `Mark ${named(nodes, st.lead)} likely, then settle`,
+        reason: `Claude's last word leads it, ~${st.sure}% sure`,
+      };
     if (question.shape === "causes")
       return {
         kind: "question",
@@ -1231,7 +1296,12 @@ function boardOfRow(s: ExploreState, want: string, kept = true) {
 // case against and takeaway, and its board's stand; one pinned to a want
 // writes that row (and another row's cell that cites a fact filed under it:
 // what you tell it about your setup bears on more than one want) and its
-// board's stand; any other writes takeaways and moves within its node, and
+// board's stand; one pinned to a fact or a check writes any cell of the
+// board above it that cites that fact (or one filed under it), and the case
+// against the option it is filed under: a check's result told in its thread
+// bears on every column that waits on it, and refused, the stand line moved
+// while each cell Claude rewrote on it stayed as it was; any other writes
+// takeaways and moves within its node, and
 // the stand of the question it sits under (a check's result told in its
 // thread moves where the causes stand; refused, it left the stand stale for
 // a paid "Weigh what came in"). Any thread may pick the check to run next
@@ -1249,9 +1319,14 @@ function threadAllows(
   const inside = subtree(nodes, scope);
   const isWant = !!boardOfRow(s, scope, false);
   const isOption = node.kind === "option";
-  const above = pathTo(nodes, scope)
-    .reverse()
-    .find((n) => n.kind === "question");
+  const isFact = node.kind === "fact" && !isWant;
+  const path = pathTo(nodes, scope).reverse();
+  const above = path.find((n) => n.kind === "question");
+  // the option a fact or check is filed under, on its way up to the question
+  const filedUnder =
+    isFact && above
+      ? path.slice(1, path.indexOf(above)).find((n) => n.kind === "option")
+      : undefined;
   switch (op.op) {
     case "cell": {
       if (isWant) {
@@ -1261,6 +1336,15 @@ function threadAllows(
           !!b &&
           b.rows.some((r) => r.id === op.want) &&
           factsOf(nodes, op.facts).some((f) => f !== scope && inside.has(f))
+        );
+      }
+      if (isFact) {
+        const o = own(nodes, String(op.option ?? ""));
+        return (
+          !!above &&
+          o?.kind === "option" &&
+          o.parent === above.id &&
+          factsOf(nodes, op.facts).some((f) => inside.has(f))
         );
       }
       if (!isOption) return false;
@@ -1276,7 +1360,10 @@ function threadAllows(
       );
     }
     case "against":
-      return isOption && op.option === scope;
+      return (
+        (isOption && op.option === scope) ||
+        (!!filedUnder && op.option === filedUnder.id)
+      );
     case "stand":
       // a question's own thread writes its stand; any other node's, the
       // stand of the nearest question above it
@@ -1397,7 +1484,7 @@ export function applyExploreOp(
       const facts = factsOf(nodes, op.facts);
       const side: Side = {
         mark,
-        note: clip(op.note, 12, 100),
+        note: clipLine(op.note, 12, 100),
         facts,
         sure: facts.length ? given : "low",
         at: now,
@@ -1417,7 +1504,7 @@ export function applyExploreOp(
     }
     case "against": {
       const option = idOf(op.option);
-      const text = clip(op.text, 20, 160);
+      const text = clipLine(op.text, 20, 160);
       const survives: Survives | null =
         op.survives === undefined ? "yes" : oneOf(SURVIVES, op.survives);
       const o = option ? own(nodes, option) : undefined;
@@ -1452,7 +1539,7 @@ export function applyExploreOp(
           lead.status !== "dropped"
             ? lead.id
             : null,
-        line: clip(op.line, 20, 160),
+        line: clipLine(op.line, 20, 160),
         at: now,
       };
       if (op.sure !== undefined && op.sure !== null && Number.isFinite(sure))
@@ -1514,7 +1601,7 @@ export function applyExploreOp(
       const b = o?.parent ? own(s.boards, o.parent) : undefined;
       if (!b?.commit || b.commit.option !== option) return 0;
       const reasons = list(op.reasons, 3)
-        .map((r) => clip(r, 12, 100))
+        .map((r) => clipLine(r, 12, 100))
         .filter(Boolean);
       if (!reasons.length) return 0;
       b.commit.premortem.claude = reasons;

@@ -1056,7 +1056,7 @@ test("a side thread's reply says which of its changes the thread could not make"
   assert.equal(thread.messages.at(-2)?.role, "claude");
   assert.deepEqual(thread.messages.at(-1), {
     role: "system",
-    text: "1 of Claude's changes was not made: it reaches past what this side thread may change.",
+    text: "1 of Claude's changes was not made: it reaches past what this side thread may change. To have them made, ask in the main message box, with nothing selected.",
     ts: thread.messages.at(-1)!.ts,
   });
 });

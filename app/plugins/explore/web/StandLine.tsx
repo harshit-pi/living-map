@@ -113,11 +113,17 @@ export function StandLine({
               </span>
             ) : (
               // with no lead Claude agrees with no choice: said here, not
-              // only in a caption that is gone in seconds
+              // only in a caption that is gone in seconds, and with its
+              // line, whose caveat (what is still unverified) was only in a
+              // hover title, so the board read as if Claude had no view
               stand && (
-                <span className="text-muted" title={stand.line}>
+                <span className="text-muted">
                   {" "}
-                  · Claude: no lead yet
+                  ·{" "}
+                  {/^\s*no lead/i.test(stand.line)
+                    ? "Claude"
+                    : "Claude, no lead"}
+                  : “{stand.line}”
                 </span>
               )
             )}

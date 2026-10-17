@@ -63,8 +63,8 @@ const PROMPT = `You are the engine behind a DECISION BOARD. The user works throu
 - "Against" is the strongest single reason an option is the wrong choice, not a balanced review.
 - Keep scoring light: marks only, never weights, scores or totals.
 - For causes: never set a cause dropped. If a fact rules it out, start its summary "Ruled out:" and name the fact; the user sets it aside. The stand's lead is the cause you think likeliest so far, with how sure you are; its line is about the whole question, never only the cause you last worked on. With no likeliest cause yet, lead null and no sure.
-- A fact node states something known, with its source. A check not yet run is not a fact: start its summary "To check:" and say what it would show; once it is run, rewrite the summary with what it found. A check's result told in its thread: that check is now the fact (rewrite its summary, starting "Found:"), so add no second fact that repeats it, and write a stand op for the question it sits under; if another check on the map is now the one to run, write a takeaway op on it starting "Run first:".
-- When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node; in a check's thread, the check is that fact) and cite it. In a thread, also rewrite each other cell it changes, citing that fact (a thread may write a cell of another option, or in a want's thread of another want, only when the cell cites a fact under the thread's node), and name only the cells you wrote.
+- A fact node states something known, with its source. A check not yet run is not a fact: start its summary "To check:" and say what it would show; once it is run, rewrite the summary with what it found. A check's result told in its thread: that check is now the fact (rewrite its summary, starting "Found:"), so add no second fact that repeats it, and write a stand op for the question it sits under; if a check (one on the map, or one you add now) is the one to run next, write a takeaway op on it starting "Run first:".
+- When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node; in a check's thread, the check is that fact) and cite it. In a thread, also rewrite each other cell it changes, citing that fact (a thread may write a cell of another option, or in a want's thread of another want, only when the cell cites a fact under the thread's node; in a check's thread, the check itself: cite it on every cell its result changes), and name only the cells you wrote.
 - Only the user chooses, sets aside or settles. Never set a question answered while options under it are still proposed: give your lead in a stand op. Never write "Recommended:".
 - Lead only an option you have judged yourself on every must the user kept; until then, lead null and no sure (the user's own rating is theirs, not your evidence).
 - A stand agrees with the cells, yours and the ones you write in the same move: never claim a must result a cell contradicts, and if you lead an option that fails a must or meets fewer musts than another, say why in the line. Argue the line only from what the board shows: a fact that bears on a want goes into that option's cell, cited, never only into the line.
@@ -371,6 +371,10 @@ function gapTurn(ctx: Ctx, gap: Gap) {
     return fail(
       "Claude agrees with the cause you marked likely: settle the question in its panel.",
     );
+  if (gap.kind === "likely")
+    return fail(
+      "Claude leads that cause surely: mark it likely in its panel, then settle the question.",
+    );
   if (gap.kind === "open")
     return fail("That choice has its own board: Next works on it there.");
   ctx.say("Next");
@@ -388,7 +392,7 @@ function gapTurn(ctx: Ctx, gap: Gap) {
         ctx,
         q.id,
         ctx.engine.turn(
-          `${how.prefix} WEIGH what came in on the causes of [${q.id}] ${t(q)}: [${found.id}] ${t(found)}${found.summary ? `: ${found.summary}` : ""}. Say in the caption which cause it points at, how strongly, and what is still unchecked. Write a stand op for [${q.id}], leading the cause it points at, or null if it tells none apart. If a check on the map is now the one to run, write a takeaway op on it starting "Run first:" with what each result would mean, and name it in the line. No other ops.`,
+          `${how.prefix} WEIGH what came in on the causes of [${q.id}] ${t(q)}: [${found.id}] ${t(found)}${found.summary ? `: ${found.summary}` : ""}. Say in the caption which cause it points at, how strongly, and what is still unchecked. Write a stand op for [${q.id}], leading the cause it points at, or null if it tells none apart. If a check on the map is now the one to run, write a takeaway op on it starting "Run first:" with what each result would mean, and name it in the line. If it changes what a cause's summary says, rewrite that summary (an update op), so its card does not contradict your line. No other ops.`,
           ctx.settings,
           { label: how.label, nodeId: q.id },
         ),

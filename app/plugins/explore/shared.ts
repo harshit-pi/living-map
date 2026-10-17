@@ -331,12 +331,13 @@ export type OpenItem = {
   q: string;
 };
 
-// "run", "tell", "open" and "settle" are yours, not Claude's: a check
-// Claude picked to run first, which Next opens (its thread is where you say
-// what it found); a must Claude cannot tell without you, whose want Next
-// opens; a choice with its own board, which Next opens; a cause list whose
-// likely cause Claude's last word agrees with, whose question Next opens to
-// settle
+// "run", "tell", "open", "likely" and "settle" are yours, not Claude's: a
+// check Claude picked to run first, which Next opens (its thread is where
+// you say what it found); a must Claude cannot tell without you, whose want
+// Next opens; a choice with its own board, which Next opens; a cause Claude
+// leads surely that you have not marked likely, which Next opens to mark; a
+// cause list whose likely cause Claude's last word agrees with, whose
+// question Next opens to settle
 export type GapKind =
   | "fill"
   | "something"
@@ -346,6 +347,7 @@ export type GapKind =
   | "question"
   | "open"
   | "settle"
+  | "likely"
   | "run"
   | "tell"
   | "sum";
@@ -356,6 +358,7 @@ export const YOURS: ReadonlySet<GapKind> = new Set([
   "tell",
   "open",
   "settle",
+  "likely",
 ]);
 
 export type Gap = {

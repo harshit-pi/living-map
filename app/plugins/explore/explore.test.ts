@@ -8,6 +8,7 @@ import { test } from "vitest";
 import {
   applyExploreOp,
   clip,
+  clipLine,
   fillCells,
   isStale,
   needsFill,
@@ -2863,7 +2864,14 @@ test("a check whose result is written in is a fact: no RUN FIRST, and Next moves
   assert.equal(v.questions.find((p) => p.id === "root")?.runFirst, undefined);
   const g = nextGap(s, nodes);
   assert.notEqual(g.kind, "run");
-  assert.match(g.reason, /^1 check on the map/);
+  // Claude leads a cause at 85% and you marked none likely: marking it is
+  // yours, and free (QA round 9: Next sold another paid pick of a check)
+  assert.deepEqual([g.kind, g.option], ["likely", "c-proc"]);
+  assert.ok(YOURS.has(g.kind));
+  // less sure, Claude picks the check that best splits the causes
+  s.stand.root.sure = SETTLE_SURE - 1;
+  assert.match(nextGap(s, nodes).reason, /^1 check on the map/);
+  s.stand.root.sure = 85;
   // the thread names the next check to run: it may pick it there
   assert.equal(
     applyExploreOp(
@@ -2916,4 +2924,138 @@ test("a sub-choice under a middle cause is laid narrower, so the causes after it
   const left = Math.min(...Object.values(t.boxes).map((b) => b.x));
   assert.ok(right - left <= WIDE + 1, "within the room at a readable zoom");
   overlapFree(t.boxes);
+});
+
+// ---------------------------------------------------------------- round 9
+
+test("a check's thread rewrites every cell that cites it, and the case against the option it is under", () => {
+  const { map, s } = withWants(boardNodes());
+  const n = map.nodes;
+  // a check filed under Postgres, whose result you tell in its thread
+  n["k-start"] = node("k-start", "pg", "fact", "Start date", {
+    summary: "Found: Postgres team starts week 12",
+    order: 50,
+  });
+  const op = (o: Raw) => applyExploreOp(s, n, o, { scope: "k-start" });
+  const cell = (option: string, facts: string[]) => ({
+    op: "cell",
+    option,
+    want: "w-cost",
+    mark: "worse",
+    facts,
+  });
+  // QA round 9: 4 of Claude's changes, the cell citing the check among them,
+  // were refused while the stand line moved
+  assert.equal(op(cell("pg", ["k-start"])), 1);
+  assert.equal(op(cell("dyn", ["k-start"])), 1);
+  assert.equal(s.boards.q.cells["dyn|w-cost"].claude?.mark, "worse");
+  // a cell that does not cite it, or one on another board, is not its
+  assert.equal(op(cell("keep", ["f-pg"])), 0);
+  assert.equal(op({ ...cell("h1", ["k-start"]) }), 0);
+  assert.equal(op({ op: "against", option: "pg", text: "Too slow" }), 1);
+  assert.equal(op({ op: "against", option: "dyn", text: "No" }), 0);
+  assert.equal(op({ op: "stand", q: "q", lead: null, line: "x" }), 1);
+  assert.equal(
+    op({ op: "want", q: "q", id: "w-x", title: "x", weight: "nice" }),
+    0,
+  );
+});
+
+test("Next asks you for what only you know before paying to check another guess", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  // a Fill: every must a guess, speed judged
+  for (const o of ["keep", "pg", "dyn"]) {
+    applyExploreOp(
+      s,
+      nodes,
+      { op: "cell", option: o, want: "w-cost", mark: "same", sure: "low" },
+      { now: 10 },
+    );
+    applyExploreOp(
+      s,
+      nodes,
+      { op: "cell", option: o, want: "w-speed", mark: "same", facts: ["f-pg"] },
+      { now: 10 },
+    );
+  }
+  let g = nextGap(s, nodes, "q");
+  assert.deepEqual([g.kind, g.want], ["ask", "w-cost"]);
+  // checked in its thread, it comes back the same guess: what decides it
+  // is yours ("I don't know how much spare time the team has")
+  applyExploreOp(
+    s,
+    nodes,
+    {
+      op: "cell",
+      option: g.option,
+      want: "w-cost",
+      mark: "same",
+      note: "depends on the team's spare time",
+      sure: "low",
+    },
+    { scope: g.option!, now: 20 },
+  );
+  assert.deepEqual(
+    waitsOnYou(nodes, s.boards.q, "must").map((w) => w.want),
+    ["w-cost"],
+  );
+  g = nextGap(s, nodes, "q");
+  assert.equal(g.kind, "tell");
+  assert.match(g.label, /^Say what you know: w-cost$/);
+  assert.match(g.reason, /^a must Claude can only guess at without you/);
+  assert.match(g.reason, /spare time/);
+  // an empty must on a want that does not wait on you still comes first
+  applyExploreOp(s, nodes, {
+    op: "want",
+    q: "q",
+    id: "w-legal",
+    title: "Legal",
+    weight: "must",
+  });
+  s.boards.q.rows.find((r) => r.id === "w-legal")!.suggested = false;
+  g = nextGap(s, nodes, "q");
+  assert.deepEqual(
+    [g.kind, g.want, g.reason],
+    ["ask", "w-legal", "a must, still empty"],
+  );
+});
+
+test("Claude's pick of a check survives a Go deeper that only adds causes and checks", () => {
+  const { s, nodes } = checkedCauses();
+  assert.equal(nextGap(s, nodes).kind, "run");
+  // Go deeper on a cause: two causes and a check under it, no finding
+  nodes["c-sub"] = node("c-sub", "c-proc", "option", "New ticket form", {
+    updatedAt: 30,
+    order: 10,
+  });
+  nodes["k-sub"] = node("k-sub", "c-sub", "fact", "Form fields", {
+    summary: "To check: fields added since the switch",
+    updatedAt: 30,
+    order: 11,
+  });
+  nodes["c-proc"].updatedAt = 30;
+  let g = nextGap(s, nodes);
+  assert.deepEqual([g.kind, g.option], ["run", "k-split"]);
+  // a finding newer than the pick: the question is Claude's to weigh again
+  nodes["f-new"] = node("f-new", "c-proc", "fact", "Form added 4 fields", {
+    updatedAt: 40,
+    order: 12,
+  });
+  g = nextGap(s, nodes);
+  assert.notEqual(g.kind, "run");
+});
+
+test("a stand line cut to its words ends on a full sentence, or says it was cut", () => {
+  const line =
+    "Safari tracking prevention blocks the new provider's 3DS iframe in 14 of 20 replays. That fits the abandonment jump after the switch.";
+  assert.equal(
+    clipLine(line, 20, 160),
+    "Safari tracking prevention blocks the new provider's 3DS iframe in 14 of 20 replays.",
+  );
+  assert.equal(
+    clipLine("one two three four five six", 4, 160),
+    "one two three four…",
+  );
+  assert.equal(clipLine("Short and whole.", 20, 160), "Short and whole.");
 });

@@ -56,6 +56,11 @@ export type TurnOptions = {
   relabel?: (m: StoredMap) => string | null;
 };
 
+// where a change a side thread may not make can be asked for: a move on the
+// whole map is scoped to no node
+const ELSEWHERE =
+  "To have them made, ask in the main message box, with nothing selected.";
+
 export type Engine = ReturnType<typeof createEngine>;
 
 export type Save = (m: StoredMap, opts?: { current?: boolean }) => void;
@@ -373,13 +378,15 @@ export function createEngine({
         ...(opts.blankId ? { blankId: opts.blankId } : {}),
         ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
       });
+      // it says how to have them made: told only that they were not, you
+      // were left with a reply naming changes the map did not show
       if (refused)
         messages.push({
           role: "system",
           text:
             refused === 1
-              ? "1 of Claude's changes was not made: it reaches past what this side thread may change."
-              : `${refused} of Claude's changes were not made: they reach past what this side thread may change.`,
+              ? `1 of Claude's changes was not made: it reaches past what this side thread may change. ${ELSEWHERE}`
+              : `${refused} of Claude's changes were not made: they reach past what this side thread may change. ${ELSEWHERE}`,
           ts: Date.now(),
         });
       void reply.usage.then((u) =>

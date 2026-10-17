@@ -5,8 +5,10 @@
 
 import { Btn, MarkText, Pop, WAIT_TITLE } from "./ui.tsx";
 import { anchorOf, type Anchor, type Here } from "./view.ts";
+import type { MapNode } from "../../../shared/model.ts";
 import {
   cellKey,
+  isCheck,
   MARK_LOOK,
   markWord,
   MARKS,
@@ -23,6 +25,19 @@ const HATCH = {
 };
 
 const facts = (n: number) => (n === 1 ? "1 fact" : `${n} facts`);
+
+// What a cell cites, split: the facts behind its mark, and the checks still
+// to run it waits on. Counted together, a guess whose "can't tell" waits on
+// an unrun check read "1 fact", as if evidence backed it.
+function backing(nodes: Record<string, MapNode>, ids: string[]) {
+  const known = ids.map((id) => nodes[id]).filter((n) => !!n);
+  return {
+    facts: known.filter((n) => !isCheck(n)),
+    checks: known.filter((n) => isCheck(n)),
+  };
+}
+const waits = (n: number) =>
+  n === 1 ? "waits on 1 check" : `waits on ${n} checks`;
 
 export function Cell({
   here,
@@ -88,6 +103,7 @@ export function Cell({
   }
   const yours = sc.who === "you";
   const disagree = yours && sc.claude && sc.claude.mark !== sc.mark;
+  const cites = backing(here.ws.map.nodes, sc.facts);
   return (
     <button
       onClick={(e) => onOpen(col.id, row.id, anchorOf(e.currentTarget))}
@@ -110,8 +126,15 @@ export function Cell({
         )}
       </div>
       {sc.note && <div className="mt-0.5 text-body">{sc.note}</div>}
-      {sc.facts.length > 0 && (
-        <div className="mt-0.5 text-muted">{facts(sc.facts.length)}</div>
+      {(cites.facts.length > 0 || cites.checks.length > 0) && (
+        <div className="mt-0.5 text-muted">
+          {[
+            cites.facts.length ? facts(cites.facts.length) : "",
+            cites.checks.length ? waits(cites.checks.length) : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
       )}
       {disagree && sc.claude && (
         <div className="mt-0.5 text-faint">
@@ -166,9 +189,9 @@ export function CellPopover({
             facts: sc.claude.facts,
           }
         : null;
-  const because = [...new Set([...(sc?.facts ?? []), ...(claude?.facts ?? [])])]
-    .map((id) => nodes[id])
-    .filter((n) => !!n);
+  const { facts: because, checks: waitsOn } = backing(nodes, [
+    ...new Set([...(sc?.facts ?? []), ...(claude?.facts ?? [])]),
+  ]);
   const rate = (mark: (typeof MARKS)[number] | null) => {
     void here.act("rate", { option, want, mark });
     onClose();
@@ -216,22 +239,35 @@ export function CellPopover({
           {claude.note && <> · “{claude.note}”</>}
         </div>
       )}
-      {because.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-1">
-          <span className="mr-1 text-xs text-muted">Because:</span>
-          {because.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => {
-                here.select(f.id);
-                onClose();
-              }}
-              className="max-w-full truncate rounded-md border border-line-strong px-1.5 py-0.5 text-left text-xs text-body hover:border-primary"
-            >
-              {f.title}
-            </button>
-          ))}
-        </div>
+      {(
+        [
+          ["Because:", because],
+          ["Waits on:", waitsOn],
+        ] as const
+      ).map(
+        ([word, list]) =>
+          list.length > 0 && (
+            <div key={word} className="mb-2 flex flex-wrap items-center gap-1">
+              <span className="mr-1 text-xs text-muted">{word}</span>
+              {list.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => {
+                    here.select(f.id);
+                    onClose();
+                  }}
+                  title={
+                    word === "Waits on:"
+                      ? "A check still to run: say what it found in its thread"
+                      : undefined
+                  }
+                  className="max-w-full truncate rounded-md border border-line-strong px-1.5 py-0.5 text-left text-xs text-body hover:border-primary"
+                >
+                  {f.title}
+                </button>
+              ))}
+            </div>
+          ),
       )}
       <div className="flex flex-wrap gap-1.5">
         <Btn

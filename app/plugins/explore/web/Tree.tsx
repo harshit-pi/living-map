@@ -107,6 +107,8 @@ const edgeTypes = { tree: TreeLine };
 // whole opens at its question and the cards right under it, and you pan
 // down their columns for the rest
 const READABLE = 0.7;
+// how far inside the room's edge a card the camera brings into view lands
+const PEEK = 16;
 // the node panel (420px wide, 12px from the edge) covers the right of the
 // canvas: new work is framed to its left, unless the canvas is too narrow
 const PANEL_W = 420 + 12;
@@ -270,7 +272,7 @@ export function Tree({
         const was = map.nodes[n.id];
         // a question's card says where it stands as the stand line does
         const state = questionState(view, was);
-        const node =
+        const shownAs =
           state &&
           !was.dropped &&
           (was.status === "open" || was.status === "answered") &&
@@ -283,6 +285,15 @@ export function Tree({
                     : ("open" as const),
               }
             : was;
+        // an open question's card says what Claude's last word on it says:
+        // its summary is from when it was asked ("causes unknown so far"),
+        // and read beside a LEANING badge and an ~85% stand line it
+        // contradicted them
+        const line = view?.stand[was.id]?.line;
+        const node =
+          state && state !== "decided" && line
+            ? { ...shownAs, summary: line }
+            : shownAs;
         const tag =
           state === "leaning" ? "leaning" : tagOf(view, map.nodes, node);
         const folded = tree.folded[n.id];
@@ -440,10 +451,19 @@ export function Tree({
     const inX = x >= room.left && x + w <= room.left + room.w;
     const inY = y >= room.top && y + h <= room.top + room.h;
     if (inX && inY) return;
+    // just far enough to show it, a margin clear of the room's edge:
+    // centred, a card clicked near the bottom took the tree up ~384px and
+    // the question and Claude's lead off the screen
+    const by = (at: number, size: number, start: number, len: number) =>
+      at < start
+        ? start + PEEK - at
+        : at + size > start + len
+          ? start + len - PEEK - (at + size)
+          : 0;
     void setViewport(
       {
-        x: inX ? v.x : room.left + (room.w - w) / 2 - box.x * v.zoom,
-        y: inY ? v.y : room.top + (room.h - h) / 3 - box.y * v.zoom,
+        x: inX ? v.x : v.x + by(x, Math.min(w, room.w), room.left, room.w),
+        y: inY ? v.y : v.y + by(y, h, room.top, room.h),
         zoom: v.zoom,
       },
       { duration: 300 },

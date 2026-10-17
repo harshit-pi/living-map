@@ -14,8 +14,15 @@ import type { Anchor } from "./view.ts";
 
 // A name's room, shown as it nears the limit, and past it how much to cut.
 // The inputs take no maxLength: one stopped typing silently, and a long name
-// was saved cut mid-word.
-export function NameLeft({ text }: { text: string }) {
+// was saved cut mid-word. A rename (`existing`) is of a node already on the
+// map, whose thread is there to take the detail now.
+export function NameLeft({
+  text,
+  existing = false,
+}: {
+  text: string;
+  existing?: boolean;
+}) {
   const left = NAME_MAX - text.trim().length;
   if (left > 20) return null;
   return (
@@ -23,7 +30,7 @@ export function NameLeft({ text }: { text: string }) {
       className={`text-[11px] tabular-nums ${left < 0 ? "font-medium text-danger-strong" : "text-muted"}`}
     >
       {left < 0
-        ? `${-left} ${left === -1 ? "character" : "characters"} too long: keep the name short, and add the detail in its thread once it is added`
+        ? `${-left} ${left === -1 ? "character" : "characters"} too long: keep the name short, and ${existing ? "put the detail in its thread" : "add the detail in its thread once it is added"}`
         : `${left} left`}
     </span>
   );
