@@ -139,14 +139,16 @@ export function Tree({
     );
     return { x, y, w: right - x, h: bottom - y };
   };
-  // The whole tree, or, when it cannot be read whole, the root and the
-  // cards right under it (for a why-question, every cause): those are where
-  // it stands. A fit at the smallest readable zoom would frame the middle of
-  // the bounds, which on a lopsided tree is no card in particular. When the
-  // root and its children do not fit either, the root is centred, kept
-  // within them: their top would leave the root, which sits in their middle,
-  // far below the room. The first frame is instant, so the camera does not
-  // sweep from one frame to another as the tree opens.
+  // The whole tree, or, when it cannot be read whole, the root and its
+  // options (for a why-question, every cause): those are where it stands.
+  // The checks and steps under the root are left to pan to: counted in, they
+  // made the box too tall, and the top causes ended above the room. A fit at
+  // the smallest readable zoom would frame the middle of the bounds, which
+  // on a lopsided tree is no card in particular. When even the options do
+  // not fit, the room starts at the first of them, moved down only as far as
+  // keeps Claude's guess (else the root) in view. The first frame is
+  // instant, so the camera does not sweep from one frame to another as the
+  // tree opens.
   const frameWhole = async (duration = 300) => {
     await fitView({ ...WHOLE, duration });
     const root = laid.nodes.find((n) => !map.nodes[n.id]?.parent);
@@ -154,12 +156,12 @@ export function Tree({
     const z = READABLE;
     const room = Math.max(height - BELOW, 200) - PAD;
     const all = boundsOf(new Set(laid.nodes.map((n) => n.id)));
+    const under = laid.nodes.filter((n) => map.nodes[n.id]?.parent === root.id);
+    const options = under.filter((n) => map.nodes[n.id]?.kind === "option");
     const near = boundsOf(
       new Set([
         root.id,
-        ...laid.nodes
-          .filter((n) => map.nodes[n.id]?.parent === root.id)
-          .map((n) => n.id),
+        ...(options.length ? options : under).map((n) => n.id),
       ]),
     );
     // across: the whole width centred when it fits, else from the root
@@ -167,15 +169,27 @@ export function Tree({
       all.w * z <= width - 2 * PAD
         ? (width - all.w * z) / 2 - all.x * z
         : PAD - all.x * z;
-    // down: the whole tree, else the root and its children, centred in the
-    // room above the message box; else the root centred, within those
+    // down: the whole tree, else the root and its options, centred in the
+    // room above the message box; else the stretch of them that shows the
+    // most (the root and the options in play), Claude's guess always among
+    // them, the earliest of equals
     const box = all.h * z <= room ? all : near;
-    const self = boundsOf(new Set([root.id]));
-    const span = room / z;
-    const top = Math.min(
-      Math.max(self.y + self.h / 2 - span / 2, near.y),
-      near.y + near.h - span,
+    const lead = view?.stand[root.id]?.lead;
+    const keep = boundsOf(
+      new Set([lead && laid.nodes.some((n) => n.id === lead) ? lead : root.id]),
     );
+    const span = room / z;
+    const counted = [
+      root,
+      ...options.filter((n) => !setAside(map.nodes, n.id)),
+    ].map((n) => boundsOf(new Set([n.id])));
+    const shows = (from: number) =>
+      counted.filter((b) => b.y >= from && b.y + b.h <= from + span).length;
+    const top =
+      [keep.y + keep.h - span, ...counted.map((b) => b.y)]
+        .map((from) => Math.max(from, near.y))
+        .filter((from) => from <= keep.y && from + span >= keep.y + keep.h)
+        .sort((a, c) => shows(c) - shows(a) || a - c)[0] ?? keep.y;
     const y =
       box.h * z <= room
         ? PAD + (room - box.h * z) / 2 - box.y * z

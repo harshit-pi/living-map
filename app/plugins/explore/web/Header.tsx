@@ -31,7 +31,7 @@ export function TabAndShape({ ws }: { ws: Workspace }) {
         />
       )}
       {q && shape && (
-        <label className="flex items-center gap-1 text-xs text-muted">
+        <label className="flex shrink-0 items-center gap-1 whitespace-nowrap text-xs text-muted">
           This is:
           <select
             value={shape}
@@ -64,6 +64,14 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
   const { view, tab, board } = place;
   const onBoard = tab === "board" && !!board;
   const gap = view ? (onBoard ? view.boards[board].next : view.next) : null;
+  // the move Next names is already queued or running (a Choose starts its
+  // pre-mortem): pressing would ask for it twice
+  const { working, waiting } = ws.live;
+  const onItsWay =
+    !!gap &&
+    [working, ...waiting].some(
+      (m) => m && (m.label === gap.label || m.label === `Next: ${gap.label}`),
+    );
   return (
     <>
       <div className="hidden items-center gap-2 lg:flex">
@@ -74,7 +82,7 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
       {(tab === "tree" || board) && (
         <label
           aria-hidden={tab !== "tree"}
-          className={`hidden items-center gap-1 text-xs text-muted lg:flex ${tab === "tree" ? "" : "invisible"}`}
+          className={`hidden items-center gap-1 whitespace-nowrap text-xs text-muted lg:flex ${tab === "tree" ? "" : "invisible"}`}
         >
           <input
             type="checkbox"
@@ -94,7 +102,15 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
         </label>
       )}
       <button
+        disabled={onItsWay}
         onClick={() => {
+          // a check Claude picked is yours to run: Next opens it, where you
+          // say what it found, and pays for no move
+          if (gap?.kind === "run" && gap.option) {
+            place.setTab("tree");
+            ws.setSelection([gap.option]);
+            return;
+          }
           if (!view) {
             void ws.run({ type: "next" });
             return;
@@ -110,7 +126,11 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
             place.openBoard(gap.q);
         }}
         title={
-          gap ? `${gap.label}: ${gap.reason}` : "Claude takes the next step"
+          onItsWay
+            ? `${gap.label}: Claude is on it`
+            : gap
+              ? `${gap.label}: ${gap.reason}`
+              : "Claude takes the next step"
         }
         // one width whatever the label says, so the header never shifts;
         // narrower on a smaller window, where the header has less room
@@ -121,7 +141,7 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
             window; its reason is in the title */}
         {gap && (
           <span className="hidden min-w-0 truncate lg:inline">
-            : {gap.label}
+            : {onItsWay ? "on its way…" : gap.label}
           </span>
         )}
         <span className="ml-auto pl-1">▸</span>

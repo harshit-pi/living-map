@@ -143,7 +143,12 @@ export function tagOf(
   if (n.dropped || n.status === "dropped") return undefined;
   // a want is a fact node, but what you want is no fact
   if (view.wants.includes(n.id)) return "want";
-  if (isCheck(n)) return "to check";
+  // the one Claude picked to run first keeps that pick on the tree, not only
+  // in a passing caption
+  if (isCheck(n))
+    return view.questions.some((q) => q.runFirst?.id === n.id)
+      ? "to check · ▶ run first"
+      : "to check";
   if (n.kind !== "option") return undefined;
   const shape =
     view.boards[n.parent]?.shape ??

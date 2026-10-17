@@ -399,6 +399,15 @@ export function PanelExtra({ here, node }: { here: Here; node: MapNode }) {
       </div>
     );
   }
+  // the check Claude said to run first, and what each result would mean
+  const pick = view.questions.find((p) => p.runFirst?.id === node.id)?.runFirst;
+  if (pick)
+    return (
+      <div className={box}>
+        <div className={label}>Claude says run this first</div>
+        <div className="text-ink">{pick.why}</div>
+      </div>
+    );
   const want = rowOf(view, node.id);
   if (!want) return null;
   const { board, row } = want;
@@ -420,7 +429,7 @@ export function PanelExtra({ here, node }: { here: Here; node: MapNode }) {
               </span>
               {sc ? (
                 <span className="shrink-0">
-                  <MarkText mark={sc.mark} />
+                  <MarkText mark={sc.mark} must={row.weight === "must"} />
                   {sc.guess && <span className="text-hint-strong"> guess</span>}
                   {sc.who === "you" && <span className="text-ink"> you</span>}
                 </span>

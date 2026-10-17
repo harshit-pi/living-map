@@ -18,6 +18,7 @@ import {
   reconcile,
   rollup,
   shown,
+  summaryOf,
   tally,
   viewOf,
 } from "./core.ts";
@@ -91,7 +92,9 @@ function withWants(nodes: Nodes) {
 
 // An engine that records the turns it is asked for and runs none of them;
 // `busy` says every turn asked about is already queued or running.
-function stub(map: StoredMap, { busy = false } = {}) {
+// `reply` is what Claude says in the main conversation, as the engine
+// records it.
+function stub(map: StoredMap, { busy = false, reply = "" } = {}) {
   const turns: { action: string; opts: TurnOptions }[] = [];
   let pushes = 0;
   const engine = {
@@ -99,6 +102,13 @@ function stub(map: StoredMap, { busy = false } = {}) {
     push: () => pushes++,
     turn: async (action: string, _s: unknown, opts: TurnOptions = {}) => {
       turns.push({ action, opts });
+      if (reply && !opts.threadId)
+        map.chat.push({
+          role: "claude",
+          text: reply,
+          ts: Date.now(),
+          ...(opts.nodeId ? { nodeId: opts.nodeId } : {}),
+        });
       return {};
     },
     threadOf: (m: StoredMap, id?: string | null) =>
@@ -1464,13 +1474,63 @@ test("Next asks once on a guess Claude checked in a thread, and again only after
   );
   // still open, for you to rate
   assert.ok(openItems(s, nodes).some((o) => o.kind === "guess-must"));
-  // a fact newer than the mark is something to check it against
+  // a newer fact about one option that no cell on the want cites (what Go
+  // deeper adds) is no reason to ask again
+  nodes["f-risk"] = node("f-risk", "pg", "fact", "Risk: vendor lock-in", {
+    updatedAt: 250,
+    order: 59,
+  });
+  g = nextGap(s, nodes, "q");
+  assert.ok(!(g.kind === "ask" && g.option === "pg" && g.want === "w-cost"));
+  // a newer fact a cell on the same want cites is something to check it
+  // against
   nodes["f-budget"] = node("f-budget", "dyn", "fact", "Budget $1,500/mo", {
     updatedAt: 300,
     order: 60,
   });
+  applyExploreOp(
+    s,
+    nodes,
+    {
+      op: "cell",
+      option: "dyn",
+      want: "w-cost",
+      mark: "worse",
+      facts: ["f-budget"],
+    },
+    { now: 310 },
+  );
   g = nextGap(s, nodes, "q");
   assert.deepEqual([g.kind, g.option, g.want], ["ask", "pg", "w-cost"]);
+});
+
+test("Next leaves a can't-tell to you, and checks keep-as-is after the other options", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  // after a Fill: keep-as-is can't tell on the cost must; pg and dyn guess
+  applyExploreOp(s, nodes, {
+    op: "cell",
+    option: "keep",
+    want: "w-cost",
+    mark: "unknown",
+    note: "depends on your current setup",
+  });
+  for (const o of ["pg", "dyn"])
+    applyExploreOp(s, nodes, {
+      op: "cell",
+      option: o,
+      want: "w-cost",
+      mark: "same",
+      sure: "low",
+    });
+  let g = nextGap(s, nodes, "q");
+  assert.deepEqual([g.kind, g.option, g.want], ["ask", "pg", "w-cost"]);
+  // a new must: the options are asked before keep-as-is, which comes first
+  // on the board
+  assert.equal(s.boards.q.keepAsIs, "keep");
+  s.boards.q.rows.find((r) => r.id === "w-speed")!.weight = "must";
+  g = nextGap(s, nodes, "q");
+  assert.deepEqual([g.kind, g.option, g.want], ["ask", "pg", "w-speed"]);
 });
 
 test("the open list counts empty cells, and on how many musts", () => {
@@ -1703,4 +1763,129 @@ test("the open list names the board of a lead with no case against", () => {
   });
   applyExploreOp(s, map.nodes, { op: "stand", q: "q", lead: "pg", line: "x" });
   assert.equal(item()?.label, "no case against the lead");
+});
+
+test("a choice under a cause no one marked likely waits: Next tells the causes apart first", async () => {
+  const m = storedMap(parseDump(RUN2));
+  const { run } = stub(m);
+  await run("commit", { option: "opt-resp-bofu" });
+  await run("settle", { q: "root", answer: "Traffic fell" });
+  // how to act on AI overviews, under that cause, still untested
+  m.nodes["o-a"] = node("o-a", "q-confirm-serp", "option", "Act now");
+  m.nodes["o-b"] = node("o-b", "q-confirm-serp", "option", "Wait");
+  live(m).boards["q-confirm-serp"].shape = "choose";
+  const g = nextGap(peek(m), m.nodes);
+  assert.equal(g.kind, "question");
+  assert.equal(g.q, "q-organic-cause");
+  assert.match(g.label, /^Which check to run first/);
+  // once the cause is marked likely, its choice is Next's
+  await run("commit", { option: "opt-org-serp" });
+  assert.match(nextGap(peek(m), m.nodes).label, /^Open choice: How to confirm/);
+});
+
+test("Claude's pick of a check stays on the map, and Next hands it to you until something newer", async () => {
+  const m = storedMap(parseDump(RUN2));
+  const { run, turns } = stub(m);
+  await run("commit", { option: "opt-resp-bofu" });
+  await run("settle", { q: "root", answer: "Traffic fell" });
+  await run("settle", { q: "q-confirm-serp", answer: "two checks" });
+  await run("next", {});
+  assert.match(turns.at(-1)!.action, /write a takeaway op on that check/);
+  const s = live(m);
+  applyExploreOp(
+    s,
+    m.nodes,
+    {
+      op: "takeaway",
+      node: "fact-query-split",
+      text: "Run first: brand CTR flat means AI overviews",
+    },
+    { now: Date.now() + 1000 },
+  );
+  let g = nextGap(peek(m), m.nodes);
+  assert.deepEqual(
+    [g.kind, g.q, g.option],
+    ["run", "q-organic-cause", "fact-query-split"],
+  );
+  assert.match(g.label, /^Run "Split CTR by query intent", then say/);
+  assert.match(g.reason, /brand CTR flat/);
+  const v = viewOf(peek(m), m.nodes, m.threads);
+  assert.equal(
+    v.questions.find((q) => q.id === "q-organic-cause")?.runFirst?.id,
+    "fact-query-split",
+  );
+  // pressing it on an older screen pays for nothing
+  const before = turns.length;
+  const r = await run("next", {});
+  assert.ok("error" in r);
+  assert.equal(turns.length, before);
+  // what the check found is newer than the pick: the question is Next's again
+  m.nodes["f-found"] = node(
+    "f-found",
+    "opt-org-serp",
+    "fact",
+    "Brand CTR flat",
+    {
+      updatedAt: Date.now() + 2000,
+    },
+  );
+  g = nextGap(peek(m), m.nodes);
+  assert.equal(g.kind, "question");
+  assert.equal(g.q, "q-organic-cause");
+});
+
+test("Go deeper's reply is kept on the node's side thread", async () => {
+  const m = storedMap(boardNodes());
+  const { run } = stub(m, { reply: "I split it into three checks." });
+  await run("deeper", { nodeId: "pg" });
+  const th = Object.values(m.threads).find((x) => x.nodeId === "pg");
+  assert.equal(th?.messages.at(-1)?.text, "I split it into three checks.");
+});
+
+test("a kept want is yours on the map too, so Claude cannot rename or remove it", async () => {
+  const m = storedMap(boardNodes());
+  m.data = { explore: withWants(m.nodes).s };
+  const { run } = stub(m);
+  await run("want", { q: "q", id: "w-sugg", keep: true });
+  assert.equal(m.nodes["w-sugg"].by, "you");
+});
+
+test("a pre-mortem runs once, and is told whether Claude's lead is the option chosen", async () => {
+  const m = storedMap(boardNodes());
+  applyExploreOp(live(m), m.nodes, {
+    op: "stand",
+    q: "q",
+    lead: "dyn",
+    line: "DynamoDB",
+  });
+  const { run, turns } = stub(m);
+  await run("commit", { option: "pg" });
+  assert.match(
+    turns[0].action,
+    /led \[dyn\] "DynamoDB", not the option chosen/,
+  );
+  assert.equal(turns[0].opts.label, 'Pre-mortem on "Postgres"');
+  // Next on it while the Choose's own waits or runs pays for nothing
+  const m2 = storedMap(boardNodes());
+  const two = stub(m2, { busy: true });
+  await two.run("commit", { option: "pg" });
+  await two.run("next", { q: "q" });
+  assert.equal(two.turns.length, 0);
+});
+
+test("gaps are empty cells, apart from guesses and can't-tells", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  for (const o of ["keep", "pg", "dyn"])
+    applyExploreOp(s, nodes, {
+      op: "cell",
+      option: o,
+      want: "w-cost",
+      mark: o === "keep" ? "unknown" : "same",
+      sure: "low",
+    });
+  // every cost cell is marked; speed is empty on all three
+  assert.match(summaryOf(s, nodes), /· 3 gaps$/);
+  const t = tally(s.boards.q, nodes);
+  assert.deepEqual([t.keep.unknown, t.keep.blank, t.keep.empty], [1, 1, 0]);
 });

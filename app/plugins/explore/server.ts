@@ -28,6 +28,7 @@ import {
   viewOf,
   WANT_SUMMARY,
   wantSummary,
+  wrapLabel,
 } from "./core.ts";
 import {
   MARK_LOOK,
@@ -61,7 +62,7 @@ const PROMPT = `You are the engine behind a DECISION BOARD. The user works throu
 - A fact node states something known, with its source. A check not yet run is not a fact: start its summary "To check:" and say what it would show; once it is run, rewrite the summary with what it found.
 - When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node) and cite it. In a thread, also rewrite each other option's cell it changes, citing that fact (a thread may write another option's cell only when the cell cites a fact under the thread's node), and say which you changed.
 - Only the user chooses, sets aside or settles. Never set a question answered while options under it are still proposed: give your lead in a stand op. Never write "Recommended:".
-- A stand agrees with the cells, yours and the ones you write in the same move: never claim a must result a cell contradicts, and if you lead an option that fails a must or meets fewer musts than another, say why in the line.
+- A stand agrees with the cells, yours and the ones you write in the same move: never claim a must result a cell contradicts, and if you lead an option that fails a must or meets fewer musts than another, say why in the line. Argue the line only from what the board shows: a fact that bears on a want goes into that option's cell, cited, never only into the line.
 - End every move that changes a board with a stand op for that board, and write a fresh one for any board whose last stand is marked "written before the last change". Never add fact nodes that sum up where things stand: that is what the stand op is for.
 - Cells land only on wants the user kept: your new wants are suggestions, and a cell on one is dropped. On a board with no kept wants, write no cells, and never describe marks in the caption that the board does not show.
 - Nodes marked (by user) are the user's: your update and remove ops on them are ignored. If asked to change or remove one, say so and point to the board (the user can rename or remove a want, set aside an option, or rate a cell); never claim you changed it.
@@ -71,7 +72,7 @@ BOARD OPS (in the same map block as node ops):
   {"op":"frame","q":"question id","shape":"choose|causes|open","keepAsIs":"option id (choose only)"}
   {"op":"want","q":"question id","id":"w-short-id","title":"at most 6 words","weight":"must|matters|nice"}
   {"op":"cell","option":"option id","want":"want id","mark":"better|same|worse|fails|unknown","note":"at most 12 words","facts":["fact ids"],"sure":"low|mid|high"}
-    better / same / worse compare this option with the others on that want; fails = it misses a must; unknown = cannot tell yet (the note says what would tell).
+    better / same / worse compare this option with the others on that want; fails = it misses a must; unknown = cannot tell yet (the note says what would tell). On a must the mark says whether it is met: same (shown as "meets") or better when it is, fails when it is not, and the note says how, never "no real difference".
   {"op":"against","option":"option id","text":"at most 20 words","survives":"yes|narrowly|no","facts":["fact ids"]}
   {"op":"stand","q":"question id","lead":"option id or null","line":"at most 20 words","sure":65}
   {"op":"takeaway","node":"node id","text":"at most 14 words: what a thread settled"}
@@ -79,18 +80,20 @@ BOARD OPS (in the same map block as node ops):
 The user's ratings, wants and answers are theirs: give your view beside them, never as theirs.`;
 
 // Each op names nodes by id, so it goes after the nodes it names.
-const START = `START: classify the question with a frame op on the root. choose: the root, 3-4 options (one of them "Keep things as they are" or "Wait"), and 4-6 want ops spread over the categories, at most 2 of them must; no cells. causes: the root, 3-5 possible causes as options, and up to 2 checks that would tell them apart (fact nodes whose summary starts "To check:"). open: the root and 3-4 sub-questions; a sub-question that is a choice gets its own frame. Then a stand op for the root, lead null, with a line saying what would decide it. Write each board op after the nodes it names. The caption is one sentence: keep or skip the suggested wants, add your own, then press Fill.`;
+const START = `START: classify the question with a frame op on the root. choose: the root, 3-4 options (one of them "Keep things as they are" or "Wait"), and 4-6 want ops spread over the categories, at most 2 of them must; no cells. causes: the root, 3-5 possible causes as options, and up to 2 checks that would tell them apart (fact nodes whose summary starts "To check:"). open: the root and 3-4 sub-questions; a sub-question that is a choice gets its own frame. Then a stand op for the root, lead null, with a line saying what would decide it. Write each board op after the nodes it names. The caption is one sentence. For a choice: keep or skip the suggested wants, add your own, then press Fill. For causes or an open question: what you laid out on the tree (only a choice is a board).`;
 
 const FILL = `FILL the board named in the ACTION: one cell op for each cell the ACTION lists (option × want), in its order, and no others. Pressing Fill kept every suggestion the user did not skip, so all of them are the user's wants now. Write unknown, with what would tell, for a cell you cannot judge. Add at most 3 facts when one decides a cell, and cite it. You may add one option if the wants point at one the board lacks (no cells for it yet). End with a stand op. In the caption, say what is still empty only as the ACTION says it.`;
 
 const WRAP = `{"op":"premortem","option":"option id","reasons":["at most 12 words"]}          // at most 3, likeliest first
 {"op":"assume","q":"question id","id":"a-short-id","text":"at most 14 words","breaksIf":"at most 14 words"}
 {"op":"step","q":"question id","id":"s-short-id","when":"if/when …, at most 10 words","do":"at most 12 words"}
-WRAP: the ACTION names the option chosen and its question. It is a year from now and the choice failed. Write a premortem op with the 3 likeliest reasons. Turn the top 2 into assume ops: what must stay true, and breaksIf, the first sign you would see that it broke. Write 1-3 step ops, each "if/when X, do Y"; make the first doable this week. End with a stand op for the question: the user's choice is no evidence, so keep your own lead and how sure you are from YOUR LAST STAND (it may be another option), and say in the line whether you agree. No other ops.`;
+WRAP: the ACTION names the option chosen, its question and your last lead. It is a year from now and the choice failed. Write a premortem op with the 3 likeliest reasons. Turn the top 2 into assume ops: what must stay true, and breaksIf, the first sign you would see that it broke. Write 1-3 step ops, each "if/when X, do Y"; make the first doable this week. End with a stand op for the question: the user's choice is no evidence, so keep your own lead and how sure you are from YOUR LAST STAND (it may be another option), and say in the line and the caption whether you agree. You agree only when your lead is the option chosen: a close variant of it is another option, so say you lead that one. No other ops.`;
 
 const SUGGEST = `SUGGEST WANTS for the question named in the ACTION: from what is on the map, write 4-6 want ops for what the user seems to want. Where an existing fact states a want, reuse its id so it becomes the row. No cells.`;
 
 const LAYING_OUT = "Laying out the board";
+// a why-question opens as a tree of causes, not a board
+const LAYING_OUT_CAUSES = "Laying out the causes";
 const FILLING = "Filling the board";
 // Next's label for a fill (core.ts nextGap)
 const FILL_LABEL = "Fill the board";
@@ -167,6 +170,27 @@ function threadOn(ctx: Ctx, nodeId: string): string {
     .sort((a, b) => a.createdAt - b.createdAt)
     .at(-1);
   return latest?.id ?? ctx.engine.openThread(ctx.map, nodeId);
+}
+
+// A move about one node that cannot run in its thread (its ops reach past
+// the node: Go deeper, Next on a cause list) answers in the main
+// conversation, which shows only as a passing caption. Its reply is copied
+// to the node's side thread, so what was added and why stays where the
+// node's panel shows it.
+async function keepReply(
+  ctx: Ctx,
+  nodeId: string,
+  move: ActionResult | Promise<ActionResult>,
+): Promise<ActionResult> {
+  const r = await move;
+  const last = ctx.map.chat.at(-1);
+  if (r.error || r.stopped || last?.role !== "claude" || last.nodeId !== nodeId)
+    return r;
+  if (!own(ctx.map.nodes, nodeId)) return r;
+  const tid = threadOn(ctx, nodeId);
+  ctx.map.threads[tid].messages.push({ ...last, view: "thread" });
+  ctx.engine.push();
+  return r;
 }
 
 // ---------------------------------------------------------------- Claude's turns
@@ -246,12 +270,18 @@ function askTurn(
   )
     return {};
   const threadId = threadOn(ctx, option.id);
+  const isMust = !!(
+    option.parent &&
+    own(state(ctx).boards, option.parent)?.rows.some(
+      (r) => r.id === want.id && r.weight === "must",
+    )
+  );
   ctx.say(`How does it do on ${t(want)}?`, threadId);
   return ctx.engine
     .turn(
       lead(
         how,
-        `ASK CELL: judge [${option.id}] ${t(option)} on the want [${want.id}] ${t(want)}. Write exactly one cell op for it: unknown with what would tell, or same with note "no real difference" if it does not separate the options. Cite a fact, or add at most 1. Then a stand op for [${option.parent}]. Reply in at most 60 words.`,
+        `ASK CELL: judge [${option.id}] ${t(option)} on the want [${want.id}] ${t(want)}. Write exactly one cell op for it: unknown with what would tell${isMust ? "; on this must, same (meets) or better with how it meets it, or fails" : ', or same with note "no real difference" if it does not separate the options'}. Cite a fact, or add at most 1. Then a stand op for [${option.parent}]. Reply in at most 60 words.`,
       ),
       ctx.settings,
       {
@@ -271,7 +301,7 @@ function somethingTurn(ctx: Ctx, q: MapNode, how: TurnHow = {}) {
   return ctx.engine.turn(
     lead(
       how,
-      `SOMETHING ELSE for [${q.id}] ${t(q)}: add exactly one option the user has probably not thought of that could pass the musts. No cells. Then a stand op for [${q.id}] that weighs it.`,
+      `SOMETHING ELSE for [${q.id}] ${t(q)}: add exactly one option the user has probably not thought of that could pass the musts. A fact you add about it backs its cell on the want it bears on, cited; no other cells. Then a stand op for [${q.id}] that weighs it only on what its cells show.`,
     ),
     ctx.settings,
     { label: how.label ?? ANOTHER, nodeId: q.id },
@@ -291,14 +321,26 @@ function againstTurn(ctx: Ctx, option: MapNode, how: TurnHow = {}) {
 }
 
 function wrapTurn(ctx: Ctx, q: MapNode, option: MapNode, how: TurnHow = {}) {
+  const nodes = ctx.map.nodes;
+  // one pre-mortem per choice: Next pressed while the Choose's own runs
+  // would pay for it twice
+  const label = wrapLabel(nodes, option.id);
+  if (
+    ctx.engine.isQueuedOrRunning(option.id, label) ||
+    ctx.engine.isQueuedOrRunning(option.id, `Next: ${label}`)
+  )
+    return {};
+  // named, so "I agree" is said only when the lead is the option chosen
+  const was = own(state(ctx).stand, q.id)?.lead;
+  const lastLead = was ? own(nodes, was) : undefined;
   return ctx.engine.turn(
     lead(
       how,
-      `WRAP: [${option.id}] ${t(option)} was chosen for [${q.id}] ${t(q)}.`,
+      `WRAP: [${option.id}] ${t(option)} was chosen for [${q.id}] ${t(q)}. Your last stand ${lastLead ? `led [${lastLead.id}] ${t(lastLead)}${lastLead.id === option.id ? ", the option chosen" : ", not the option chosen"}` : "led nothing"}.`,
     ),
     ctx.settings,
     {
-      label: how.label ?? `Pre-mortem on ${option.title}`,
+      label: how.label ?? label,
       sections: ["wrap"],
       nodeId: option.id,
     },
@@ -318,6 +360,9 @@ function gapTurn(ctx: Ctx, gap: Gap) {
     return askTurn(ctx, option, want, how);
   if (gap.kind === "against" && option) return againstTurn(ctx, option, how);
   if (gap.kind === "wrap" && q && option) return wrapTurn(ctx, q, option, how);
+  // yours to run: the screen opens the check, and no move is paid for
+  if (gap.kind === "run")
+    return fail("Run that check, then say what it found in its thread.");
   ctx.say("Next");
   // causes are told apart by a fact, never by a choice
   if (
@@ -328,12 +373,16 @@ function gapTurn(ctx: Ctx, gap: Gap) {
     // a check that repeats one on the map is a move spent on nothing
     const checks = checksOn(nodes, q.id);
     const have = checks.length
-      ? ` Checks already on the map: ${checks.map((c) => `[${c.id}] ${t(c)}`).join(", ")}. Never add one that repeats them: if one of them best tells the causes apart, add nothing and say in the caption which to run first and what each result would mean.`
+      ? ` Checks already on the map: ${checks.map((c) => `[${c.id}] ${t(c)}`).join(", ")}. Never add one that repeats them: if one of them best tells the causes apart, add nothing, write a takeaway op on that check starting "Run first:" with what each result would mean, and say the same in the caption.`
       : "";
-    return ctx.engine.turn(
-      `${how.prefix} CAUSES of [${q.id}] ${t(q)}: find the one fact that best tells the causes apart, starting with the cause the user marked likely, else your best guess. Add it under the cause it bears on, say in the caption what it shows and what is still unchecked, then a stand op for [${q.id}].${have}`,
-      ctx.settings,
-      { label: how.label, nodeId: q.id },
+    return keepReply(
+      ctx,
+      q.id,
+      ctx.engine.turn(
+        `${how.prefix} CAUSES of [${q.id}] ${t(q)}: find the one fact that best tells the causes apart, starting with the cause the user marked likely, else your best guess. Add it under the cause it bears on, say in the caption what it shows and what is still unchecked, then a stand op for [${q.id}].${have}`,
+        ctx.settings,
+        { label: how.label, nodeId: q.id },
+      ),
     );
   }
   if (gap.kind === "question" && q)
@@ -448,6 +497,10 @@ function want(ctx: Ctx, a: Raw): ActionResult {
     if (a.keep) {
       row.suggested = false;
       row.by = "you";
+      // the node too: only a node's own "by" keeps Claude's ops off it, and
+      // the board labels a kept want "you"
+      n.by = "you";
+      n.updatedAt = Date.now();
       if (WANT_SUMMARY.test(n.summary))
         n.summary = wantSummary(row.weight, false);
       return ok(
@@ -578,7 +631,12 @@ export const explore: ServerPlugin = {
     const r = await ctx.engine.turn(
       `START EXPLORE: "${ctx.map.title}".`,
       ctx.settings,
-      { label: LAYING_OUT, sections: ["start"] },
+      {
+        label: /^\s*why\b/i.test(ctx.map.title)
+          ? LAYING_OUT_CAUSES
+          : LAYING_OUT,
+        sections: ["start"],
+      },
     );
     // a missing frame is no failure: the board is read from the options
     if (!r.error && !r.stopped && !rootOf(ctx.map.nodes) && !ctx.map.diagram)
@@ -838,6 +896,12 @@ export const explore: ServerPlugin = {
       if (!n) return fail("No such node.");
       if (n.kind === "option" && !n.dropped) return againstTurn(ctx, n);
       return canvas.challenge(ctx, n.id);
+    },
+    // core's Go deeper, its reply kept on the node's side thread
+    deeper(ctx, a) {
+      const n = nodeArg(ctx, a.nodeId);
+      if (!n) return fail("No such node.");
+      return keepReply(ctx, n.id, canvas.deeper(ctx, n.id));
     },
   },
 

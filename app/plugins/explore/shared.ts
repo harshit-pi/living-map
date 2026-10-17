@@ -36,6 +36,11 @@ export const MARK_LOOK: Record<Mark, { symbol: string; word: string }> = {
   fails: { symbol: "✕", word: "fails" },
   unknown: { symbol: "?", word: "can't tell" },
 };
+// On a must a mark says whether it is met (the tally counts better and same
+// as met), so "same" reads "meets": "same" beside a baseline that cannot
+// tell compared with nothing you could see.
+export const markWord = (mark: Mark, must = false) =>
+  must && mark === "same" ? "meets" : MARK_LOOK[mark].word;
 export const WEIGHT_WORD: Record<Weight, string> = {
   must: "Must",
   matters: "Matters",
@@ -165,6 +170,9 @@ export type Tally = {
   unknown: number;
   // musts with no mark yet
   empty: number;
+  // cells with no mark yet, on any want: told apart from "?" (Claude can't
+  // tell), which is a mark
+  blank: number;
   // musts marked fails: the option misses them, so it is out
   mustsFailed: number;
   failsMust: boolean;
@@ -281,12 +289,22 @@ export type OpenItem = {
   q: string;
 };
 
+// "run" is yours, not Claude's: a check Claude picked to run first, which
+// Next opens (its thread is where you say what it found)
 export type GapKind =
-  "fill" | "something" | "ask" | "against" | "wrap" | "question" | "sum";
+  | "fill"
+  | "something"
+  | "ask"
+  | "against"
+  | "wrap"
+  | "question"
+  | "run"
+  | "sum";
 
 export type Gap = {
   kind: GapKind;
   q: string;
+  // the option, or for "run" the check
   option?: string;
   want?: string;
   label: string;
@@ -300,8 +318,12 @@ export type QuestionView = {
   settled: boolean;
   board: boolean;
   answer: { text: string; by: Who } | null;
+  // empty cells on its board
   gaps: number;
   underAside?: string;
+  // the check Claude said to run first (causes), until something newer is
+  // under the question
+  runFirst?: { id: string; why: string };
 };
 
 export type ExploreView = {

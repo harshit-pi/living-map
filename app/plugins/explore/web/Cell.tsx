@@ -8,6 +8,7 @@ import { anchorOf, type Anchor, type Here } from "./view.ts";
 import {
   cellKey,
   MARK_LOOK,
+  markWord,
   MARKS,
   type BoardView,
   type ColumnView,
@@ -89,7 +90,11 @@ export function Cell({
       className={`block h-full w-full px-2 py-1.5 text-left text-xs leading-snug hover:bg-panel ${yours ? "border-l-2 border-ink" : "border-l-2 border-transparent"} ${fade}`}
     >
       <div className="flex flex-wrap items-baseline gap-x-1.5">
-        <MarkText mark={sc.mark} className="text-[12.5px]" />
+        <MarkText
+          mark={sc.mark}
+          must={row.weight === "must"}
+          className="text-[12.5px]"
+        />
         {sc.guess && (
           <span className="text-[10.5px] font-semibold text-hint-strong">
             guess
@@ -106,7 +111,7 @@ export function Cell({
       {disagree && sc.claude && (
         <div className="mt-0.5 text-faint">
           Claude: {MARK_LOOK[sc.claude.mark].symbol}{" "}
-          {MARK_LOOK[sc.claude.mark].word}
+          {markWord(sc.claude.mark, row.weight === "must")}
         </div>
       )}
     </button>
@@ -134,6 +139,9 @@ export function CellPopover({
 }) {
   const nodes = here.ws.map.nodes;
   const sc: ShownCell | undefined = board.cells[cellKey(option, want)];
+  const must = board.groups.some(
+    (g) => g.weight === "must" && g.rows.some((r) => r.id === want),
+  );
   const mine = sc?.who === "you" ? sc.mark : null;
   // Claude's side: the mark shown, or the one beside yours
   const claude = !sc
@@ -178,12 +186,12 @@ export function CellPopover({
           <button
             key={m}
             onClick={() => rate(m)}
-            title={MARK_LOOK[m].word}
+            title={markWord(m, must)}
             className={`rounded-md border px-1.5 py-0.5 text-xs ${mine === m ? "border-ink bg-panel font-semibold text-ink" : "border-line-strong text-body hover:border-primary"}`}
           >
             {m === "unknown"
               ? "? can't tell"
-              : `${MARK_LOOK[m].symbol} ${MARK_LOOK[m].word}`}
+              : `${MARK_LOOK[m].symbol} ${markWord(m, must)}`}
           </button>
         ))}
         {mine && (
@@ -198,7 +206,7 @@ export function CellPopover({
       {claude && (
         <div className="mb-2 text-xs leading-snug text-body">
           <span className="text-muted">Claude:</span>{" "}
-          <MarkText mark={claude.mark} />
+          <MarkText mark={claude.mark} must={must} />
           {claude.sure && <span className="text-muted"> · {claude.sure}</span>}
           {claude.note && <> · “{claude.note}”</>}
         </div>

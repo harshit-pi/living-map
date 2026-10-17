@@ -342,11 +342,13 @@ export function liveLead(s: ExploreState, nodes: Nodes, q: string) {
 type Hole = { option: string; want: string; guess: boolean };
 // Empty or guess cells on the given rows, over the options still in play,
 // most worth filling first: the lead's column, then empty cells before
-// guesses. A column that already fails a must is out, so its other cells
-// are no gap: filling them cannot change the choice. With `rechecks` off
-// (Next), a guess Claude already checked on its own is left out until a
-// fact newer than its mark is on the board: asking again would only get the
-// same answer, for another paid move.
+// guesses, keep-as-is after the other options (it is your current setup,
+// which you know and Claude can mostly only guess at). A column that already
+// fails a must is out, so its other cells are no gap: filling them cannot
+// change the choice. With `rechecks` off (Next), a guess Claude has already
+// answered (one it checked in a thread, or "can't tell" with what would
+// tell) is left out until a fact that bears on it is newer than its mark:
+// asking again would only get the same answer, for another paid move.
 function holes(
   s: ExploreState,
   nodes: Nodes,
@@ -364,10 +366,29 @@ function holes(
     ? []
     : [...subtree(nodes, b.question)]
         .map((id) => nodes[id])
-        .filter((n) => n?.kind === "fact" && !rowIds.has(n.id));
-  const settledGuess = (side: Side) =>
-    !!side.checked &&
-    !facts.some((f) => f.updatedAt > side.at && !side.facts.includes(f.id));
+        .filter((n) => n?.kind === "fact" && !rowIds.has(n.id) && !isCheck(n));
+  // a fact bears on a cell when it is yours, or a cell on the same want
+  // cites it: Go deeper's facts about one option (a risk, a check) are no
+  // news on that option's first paying customer
+  const citedOn = (want: string) =>
+    new Set(
+      Object.entries(b.cells)
+        .filter(([k]) => k.endsWith(`|${want}`))
+        .flatMap(([, c]) => [
+          ...(c.you?.facts ?? []),
+          ...(c.claude?.facts ?? []),
+        ]),
+    );
+  const settledGuess = (side: Side, want: string) => {
+    if (!side.checked && side.mark !== "unknown") return false;
+    const cited = citedOn(want);
+    return !facts.some(
+      (f) =>
+        f.updatedAt > side.at &&
+        !side.facts.includes(f.id) &&
+        (f.by === "you" || cited.has(f.id)),
+    );
+  };
   const out: Hole[] = [];
   for (const o of cols)
     for (const r of keptRows(b).filter((x) => x.weight === weight)) {
@@ -377,12 +398,16 @@ function holes(
       else if (
         guesses &&
         sc.guess &&
-        (rechecks || !cell?.claude || !settledGuess(cell.claude))
+        (rechecks || !cell?.claude || !settledGuess(cell.claude, r.id))
       )
         out.push({ option: o.id, want: r.id, guess: true });
     }
-  // a stable sort: column order holds within each rank
-  const rank = (h: Hole) => (h.option === lead ? 0 : 2) + Number(h.guess);
+  // a stable sort: column order holds within each rank. The lead's column,
+  // then the other options' empty cells, keep-as-is's, and the guesses.
+  const rank = (h: Hole) =>
+    h.option === lead
+      ? Number(h.guess)
+      : 2 + 2 * Number(h.guess) + Number(h.option === b.keepAsIs);
   return out.sort((a, c) => rank(a) - rank(c));
 }
 
@@ -453,11 +478,13 @@ export function tally(b: Board, nodes: Nodes): Record<string, Tally> {
       fails: 0,
       unknown: 0,
       empty: 0,
+      blank: 0,
       mustsFailed: 0,
       failsMust: false,
     };
     for (const r of keptRows(b)) {
       const sc = shown(own(b.cells, cellKey(o.id, r.id)));
+      if (!sc) t.blank++;
       if (r.weight === "must") {
         t.musts++;
         if (!sc) t.empty++;
@@ -713,6 +740,46 @@ export const checksOn = (nodes: Nodes, q: string): MapNode[] =>
     .filter((n) => n && !n.dropped && isCheck(n))
     .sort(byOrder);
 
+// Next's label for a pre-mortem, and the move's own: a Choose starts it, and
+// Next, seeing the same label at work, does not offer it a second time
+export const wrapLabel = (nodes: Nodes, option: string) =>
+  `Pre-mortem on ${named(nodes, option)}`;
+
+// The check Claude said to run first on a causes question (a takeaway on
+// it), while nothing under the question is newer than that pick: until you
+// say what it found, asking again would get the same pick, for a paid move.
+export function runFirst(
+  s: ExploreState,
+  nodes: Nodes,
+  q: string,
+): { id: string; why: string } | undefined {
+  const pick = checksOn(nodes, q)
+    .filter((c) => own(s.takeaways, c.id))
+    .sort((a, c) => s.takeaways[c.id].at - s.takeaways[a.id].at)[0];
+  if (!pick) return undefined;
+  const at = s.takeaways[pick.id].at;
+  for (const id of subtree(nodes, q)) {
+    const n = nodes[id];
+    if (n && n.id !== pick.id && n.kind !== "question" && n.updatedAt > at)
+      return undefined;
+  }
+  return { id: pick.id, why: s.takeaways[pick.id].text };
+}
+
+// Under a cause no one has marked likely: a choice there (how to fix it)
+// waits until a check confirms the cause, so Next does not steer you into
+// weighing fixes for something still untested.
+function underUntestedCause(s: ExploreState, nodes: Nodes, id: string) {
+  return pathTo(nodes, id).some(
+    (n) =>
+      n.kind === "option" &&
+      n.status !== "chosen" &&
+      !!n.parent &&
+      isQuestion(nodes, n.parent) &&
+      shapeOf(s, nodes, n.parent) === "causes",
+  );
+}
+
 // What Next will do, and why: the board you are on first, then the map.
 export function nextGap(
   s: ExploreState,
@@ -780,14 +847,18 @@ export function nextGap(
       kind: "wrap",
       q,
       option: b.commit.option,
-      label: `Pre-mortem on ${named(nodes, b.commit.option)}`,
+      label: wrapLabel(nodes, b.commit.option),
       reason: "how it could fail, what it rests on, and the first steps",
     };
   // elsewhere, shallowest first, so Next never goes deeper on a settled
   // branch while a choice above is open; set-aside branches wait
   const points = rollup(s, nodes).points.filter((p) => !p.underAside);
   const choice = points.find(
-    (p) => p.open && p.shape === "choose" && p.id !== q,
+    (p) =>
+      p.open &&
+      p.shape === "choose" &&
+      p.id !== q &&
+      !underUntestedCause(s, nodes, p.id),
   );
   if (choice)
     return {
@@ -797,10 +868,13 @@ export function nextGap(
       reason: "the highest choice still open",
     };
   // a cause marked likely is not an answer: a causes question stays open
-  // until you settle it, so it stays Next's work until then
+  // until you settle it, so it stays Next's work until then; one waiting on
+  // a check Claude picked is yours to run, not another move
+  const picked = (p: DecisionPoint) =>
+    p.shape === "causes" && !!runFirst(s, nodes, p.id);
   const question =
-    points.find((p) => p.shape !== "choose" && p.open) ??
-    points.find((p) => p.shape === "causes" && !p.settled);
+    points.find((p) => p.shape !== "choose" && p.open && !picked(p)) ??
+    points.find((p) => p.shape === "causes" && !p.settled && !picked(p));
   if (question) {
     const likely = optionsOf(nodes, question.id).filter(
       (o) => o.status === "chosen",
@@ -830,6 +904,16 @@ export function nextGap(
       reason: "the highest question still open",
     };
   }
+  const waiting = points.find((p) => !p.settled && picked(p));
+  const check = waiting && runFirst(s, nodes, waiting.id);
+  if (waiting && check)
+    return {
+      kind: "run",
+      q: waiting.id,
+      option: check.id,
+      label: `Run ${named(nodes, check.id)}, then say what it found`,
+      reason: `Claude's pick: ${check.why}`,
+    };
   return {
     kind: "sum",
     q: root?.id ?? q,
@@ -1508,8 +1592,9 @@ export function viewOf(
   const gapsOn = (q: string) => {
     const b = own(s.boards, q);
     if (!b || chosenHere(nodes, q)) return 0;
-    return (["must", "matters", "nice"] as const).reduce(
-      (a, w) => a + holes(s, nodes, b, w).length,
+    // empty cells only: a guess is a mark, counted as one on the open list
+    return WEIGHTS.reduce(
+      (a, w) => a + holes(s, nodes, b, w, { guesses: false }).length,
       0,
     );
   };
@@ -1529,6 +1614,9 @@ export function viewOf(
           : null,
       gaps: gapsOn(p.id),
       ...(p.underAside ? { underAside: p.underAside } : {}),
+      ...(p.shape === "causes" && !p.settled && runFirst(s, nodes, p.id)
+        ? { runFirst: runFirst(s, nodes, p.id) }
+        : {}),
     };
   });
   const outcomeDue = Object.values(s.boards).flatMap((b) => {
@@ -1601,7 +1689,11 @@ export function summaryOf(s: ExploreState, nodes: Nodes): string {
   }
   if (b && b.shape === "choose" && keptRows(b).length) {
     const cols = columnsOf(nodes, b).filter(inPlay).length;
-    const gaps = WEIGHTS.reduce((a, w) => a + holes(s, nodes, b, w).length, 0);
+    // empty cells: a guess is a mark already
+    const gaps = WEIGHTS.reduce(
+      (a, w) => a + holes(s, nodes, b, w, { guesses: false }).length,
+      0,
+    );
     return `${plural(cols, "option")} × ${plural(keptRows(b).length, "want")} · ${plural(gaps, "gap")}`;
   }
   const word = { decided: "Decided", leaning: "Leaning", open: "Open" }[

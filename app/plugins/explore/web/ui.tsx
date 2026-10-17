@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { MARK_LOOK, type Mark } from "../shared.ts";
+import { MARK_LOOK, markWord, type Mark } from "../shared.ts";
 import type { Anchor } from "./view.ts";
 
 export function Btn({
@@ -46,9 +46,12 @@ export function Btn({
 // a mark is a symbol and a word, never colour alone; fails reads as a warning
 export function MarkText({
   mark,
+  must = false,
   className = "",
 }: {
   mark: Mark;
+  // on a must row: "same" reads "meets"
+  must?: boolean;
   className?: string;
 }) {
   const look = MARK_LOOK[mark];
@@ -60,7 +63,7 @@ export function MarkText({
         : "text-ink";
   return (
     <span className={`whitespace-nowrap font-medium ${tone} ${className}`}>
-      <span aria-hidden>{look.symbol}</span> {look.word}
+      <span aria-hidden>{look.symbol}</span> {markWord(mark, must)}
     </span>
   );
 }

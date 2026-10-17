@@ -471,8 +471,9 @@ function FoldedCounts({
   const parts = (["better", "same", "worse", "fails"] as const)
     .filter((m) => count(m))
     .map((m) => `${count(m)}${MARK_LOOK[m].symbol}`);
-  const unknown = count("unknown") + (col.faded ? 0 : empty);
-  if (unknown) parts.push(`${unknown}?`);
+  // "?" is Claude's can't-tell, a mark; a cell no one has judged is empty
+  if (count("unknown")) parts.push(`${count("unknown")}?`);
+  if (empty && !col.faded) parts.push(`${empty} empty`);
   return (
     <div
       className={`px-2 py-1 text-xs text-muted ${col.faded ? "opacity-50" : ""}`}
@@ -644,11 +645,14 @@ function TallyCell({
       [t.better, "▲"],
       [t.same, "＝"],
       [t.worse, "▼"],
-      [t.unknown + t.empty, "?"],
+      [t.unknown, "?"],
     ] as const
   )
     .filter(([k]) => k)
     .map(([k, s]) => `${k}${s}`)
+    // "?" is Claude's can't-tell, a mark; a cell no one has judged yet is
+    // counted apart, on every want
+    .concat(t.blank && !col.faded ? [`${t.blank} empty`] : [])
     .join(" ");
   return (
     <div className={`px-2 py-1.5 text-xs ${col.faded ? "opacity-50" : ""}`}>
@@ -659,13 +663,13 @@ function TallyCell({
         title={
           t.failsMust
             ? "It misses a must, so it is out"
-            : "Musts marked better or same, of all musts. A must marked worse is weaker than the others, not failed: only ✕ fails rules an option out"
+            : "Musts marked better or meets, of all musts. A must marked worse is weaker than the others, not failed: only ✕ fails rules an option out"
         }
       >
         {t.failsMust
           ? `✕ fails ${t.mustsFailed === 1 ? "a must" : `${t.mustsFailed} musts`}`
           : t.musts
-            ? `${t.empty ? "" : "none fails · "}musts ▲＝ ${t.mustsMet}/${t.musts}${t.empty ? ` · ${t.empty} ?` : ""}`
+            ? `${t.empty ? "" : "none fails · "}musts ▲＝ ${t.mustsMet}/${t.musts}${t.empty ? ` · ${t.empty} empty` : ""}`
             : "no musts yet"}
       </div>
       {counts && <div className="mt-0.5 text-muted">{counts}</div>}
