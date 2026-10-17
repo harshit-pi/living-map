@@ -23,6 +23,7 @@ import {
 import { splitStart } from "./start.ts";
 import type { Canvas, SceneData } from "./types.ts";
 import { explore } from "../../plugins/explore/server.ts";
+import { learn as learnPlugin } from "../../plugins/learn/server.ts";
 import type { ArrayState, BoardState, Diagram } from "../../shared/model.ts";
 
 type Of<F extends Diagram["form"]> = Extract<Diagram, { form: F }>;
@@ -214,10 +215,10 @@ test("outline and prompts", () => {
   const m = fresh();
   applyOps(m, completeOps(FULL));
   assert.match(outline(m.nodes), /- \[q\] question · open/);
-  const learn = systemPrompt("learn", ["diagram", "scene"]);
+  const learn = systemPrompt("learn", ["diagram", "scene"], learnPlugin);
   assert.match(learn, /TOPIC DIAGRAM/);
   assert.match(learn, /PLAYABLE SCENE/);
-  const lean = systemPrompt("learn");
+  const lean = systemPrompt("learn", [], learnPlugin);
   assert.doesNotMatch(
     lean,
     /TOPIC DIAGRAM \(learning maps only\)|PLAYABLE SCENE|EXPLAIN on a node|THREADS:/,

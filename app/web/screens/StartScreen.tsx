@@ -8,36 +8,8 @@ import { useMaps } from "../lib/api.ts";
 import { store, stored } from "../lib/storage.ts";
 import { PLUGINS } from "../plugins.ts";
 
-type Mode = {
-  id: Purpose;
-  order?: number;
-  label: string;
-  heading: string;
-  blurb: string;
-  placeholder: string;
-  examples: string[];
-};
-
-// Learn is built in; every other mode is a plugin. They show in `order`.
-const MODES: Mode[] = [
-  {
-    id: "learn",
-    order: 20,
-    label: "Learn",
-    heading: "What do you want to understand?",
-    blurb:
-      "Any subject. Claude draws it in the shape that fits and leaves the key parts blank for you to fill.",
-    placeholder:
-      "e.g. a protocol, a theory, a period of history, a coding problem",
-    examples: [
-      "How TCP opens a connection",
-      "What drives an option price (Black–Scholes)?",
-      "Why did World War I start?",
-      "LeetCode 146: LRU Cache",
-    ],
-  },
-  ...PLUGINS,
-].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+// every mode is a plugin; they show in `order`
+const MODES = [...PLUGINS].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
 
 export function StartScreen({
   error,

@@ -20,7 +20,6 @@ import type {
   Working,
 } from "../shared/model.ts";
 import { applyOps, outline, pathTo } from "./core/canvas.ts";
-import { diagramOutline } from "./core/diagram.ts";
 import { systemPrompt, viewLine, type Section } from "./core/prompts.ts";
 import {
   completeOps,
@@ -31,7 +30,7 @@ import {
 import { sceneOutline, sceneView } from "./core/scene.ts";
 import type { Raw, StoredMap } from "./core/types.ts";
 import type { Hub } from "./events.ts";
-import { pluginFor } from "./plugins.ts";
+import { modeOf, pluginFor } from "./plugins.ts";
 import type {
   ModelCall,
   ModelProvider,
@@ -158,13 +157,10 @@ export function createEngine({
     notes: string[],
   ) {
     const sceneId = scope ?? opts.nodeId;
-    const plugin = pluginFor(m.purpose);
+    const plugin = modeOf(m.purpose);
     return [
-      `CANVAS (${plugin ? (plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`) : "learning path"}):\n${outline(m.nodes)}`,
-      plugin?.outline?.(m) ?? "",
-      m.purpose === "learn"
-        ? `TOPIC DIAGRAM:\n${diagramOutline(m.diagram, m.fills, m.answers)}`
-        : "",
+      `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${outline(m.nodes)}`,
+      plugin.outline?.(m) ?? "",
       scope
         ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(
             m.nodes,
@@ -231,11 +227,11 @@ export function createEngine({
     const thread = threadId ? m.threads[threadId] : null;
     const scope = thread?.nodeId ?? null;
     // ops core does not know go to the map's plugin
-    const plugin = pluginFor(m.purpose);
+    const plugin = modeOf(m.purpose);
     // a side thread may change only what its node allows: an op the plugin
     // refused there is said under the reply, which may still name it as made
     let refused = 0;
-    const opExtra = plugin?.applyOp
+    const opExtra = plugin.applyOp
       ? (op: Raw) => {
           const n = plugin.applyOp!(m, op, { scope });
           if (n === 0 && scope) refused++;
@@ -279,11 +275,7 @@ export function createEngine({
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          system: systemPrompt(
-            m.purpose,
-            opts.sections ?? [],
-            pluginFor(m.purpose),
-          ),
+          system: systemPrompt(m.purpose, opts.sections ?? [], plugin),
           message: text,
           ...settings,
         },
@@ -305,7 +297,7 @@ export function createEngine({
                 judge: opts.judge,
                 extra: opExtra,
                 keep: opts.keep,
-                keepYours: plugin?.keepUserNodes,
+                keepYours: plugin.keepUserNodes,
               });
             } catch (e) {
               console.error("[move] an op could not be applied:", e);
@@ -352,7 +344,7 @@ export function createEngine({
           judge: opts.judge,
           extra: opExtra,
           keep: opts.keep,
-          keepYours: plugin?.keepUserNodes,
+          keepYours: plugin.keepUserNodes,
         });
       // say so when some of the model's changes could not be read, rather than
       // dropping them silently

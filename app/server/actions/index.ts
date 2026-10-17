@@ -2,11 +2,11 @@
 
 import { safeId } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
-import { pluginFor } from "../plugins.ts";
+import { modeOf } from "../plugins.ts";
 import * as canvas from "./canvas.ts";
 import { makeCtx } from "./context.ts";
-import * as learn from "./learn.ts";
 import * as maps from "./maps.ts";
+import * as steps from "./steps.ts";
 import type {
   ActionRequest,
   ActionResult,
@@ -52,10 +52,9 @@ export async function act(
   const map = engine.state.map;
   if (!map) return { error: "Start first." };
   const ctx = makeCtx(engine, settings, map);
-  // a plugin's map takes its own actions and only the core ones its screen uses
-  const own = pluginFor(map.purpose);
+  // a map takes its mode's own actions and only the core ones its screen uses
+  const own = modeOf(map.purpose);
   if (
-    own &&
     req.type !== "plugin" &&
     req.type !== "purpose" &&
     !own.core.includes(req.type)
@@ -68,9 +67,9 @@ export async function act(
       )
     : [];
   // a plugin may answer a core action its screen uses its own way (Explore's
-  // choose records why; its Next picks the gap): it gets the whole request
+  // choose records why; its Next picks the gap; Learn's blanks and scenes are
+  // its own): it gets the whole request
   if (
-    own &&
     req.type !== "plugin" &&
     req.type !== "purpose" &&
     own.core.includes(req.type) &&
@@ -83,13 +82,11 @@ export async function act(
       return maps.switchPurpose(ctx, req.purpose);
     case "plugin": {
       // only the map's own plugin answers, and only with an action it declares
-      const plugin = pluginFor(map.purpose);
       const run =
-        plugin &&
-        plugin.id === req.plugin &&
+        own.id === req.plugin &&
         typeof req.name === "string" &&
-        Object.hasOwn(plugin.actions ?? {}, req.name)
-          ? plugin.actions![req.name]
+        Object.hasOwn(own.actions ?? {}, req.name)
+          ? own.actions![req.name]
           : null;
       if (!run) return { error: "That action is not available on this map." };
       const args = req.args && typeof req.args === "object" ? req.args : {};
@@ -117,20 +114,10 @@ export async function act(
       return canvas.next(ctx);
     case "message":
       return canvas.message(ctx, req.text, selection);
-    case "fill":
-      return learn.fill(ctx, req.blankId, req.text);
     case "hint":
-      return learn.hint(ctx, req.nodeId);
+      return steps.hint(ctx, req.nodeId);
     case "answer":
-      return learn.answer(ctx, req.nodeId, req.threadId);
-    case "scene":
-      return learn.buildScene(ctx, req.nodeId);
-    case "play":
-      return learn.play(ctx, req.nodeId, req.key);
-    case "playshow":
-      return learn.show(ctx, req.nodeId);
-    case "replay":
-      return learn.replay(ctx, req.nodeId);
+      return steps.answer(ctx, req.nodeId, req.threadId);
     default:
       return { error: `Unknown action "${(req as { type: string }).type}".` };
   }

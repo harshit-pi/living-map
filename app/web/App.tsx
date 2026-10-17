@@ -10,8 +10,7 @@ import { act } from "./lib/api.ts";
 import { useLiveMap } from "./lib/live.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
-import { PLUGINS, pluginFor } from "./plugins.ts";
-import { LearnScreen } from "./screens/LearnScreen.tsx";
+import { modeOf, PLUGINS, pluginFor } from "./plugins.ts";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
 import { StartScreen } from "./screens/StartScreen.tsx";
 
@@ -126,26 +125,17 @@ export default function App() {
     setSelection,
     roomy,
   };
-  // Learn is built in; any other mode is a plugin with its own screen
-  const plugin = pluginFor(map.purpose);
+  // every mode is a plugin with its own screen
+  const plugin = modeOf(map.purpose);
   // the modes this map can switch between (Explore and Learn share their map)
   const switches = PLUGINS.filter(
     (p) =>
       p.id === map.purpose ||
       p.switchesWith?.includes(map.purpose) ||
-      plugin?.switchesWith?.includes(p.id),
+      pluginFor(map.purpose)?.switchesWith?.includes(p.id),
   );
-  const modes: [string, string][] = [
-    ...switches.map((p): [string, string, number] => [
-      p.id,
-      p.label,
-      p.order ?? 50,
-    ]),
-    ...(map.purpose === "learn" ||
-    switches.some((p) => p.switchesWith?.includes("learn"))
-      ? [["learn", "Learn", 20] as [string, string, number]]
-      : []),
-  ]
+  const modes: [string, string][] = switches
+    .map((p): [string, string, number] => [p.id, p.label, p.order ?? 50])
     .sort((a, b) => a[2] - b[2])
     .map(([id, label]) => [id, label]);
 
@@ -178,10 +168,10 @@ export default function App() {
             />
           ) : (
             <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
-              {plugin?.label ?? "Learn"}
+              {plugin.label}
             </span>
           )}
-          {plugin?.Header && <plugin.Header ws={ws} />}
+          {plugin.Header && <plugin.Header ws={ws} />}
           <UpdateButton steps={live.updateSteps} />
           <MapsMenu
             onOpen={(id) => {
@@ -223,7 +213,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {plugin ? <plugin.Screen ws={ws} /> : <LearnScreen ws={ws} />}
+        <plugin.Screen ws={ws} />
       </main>
     </div>
   );

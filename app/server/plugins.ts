@@ -4,8 +4,17 @@
 import type { ServerPlugin } from "./plugin.ts";
 import { design } from "../plugins/design/server.ts";
 import { explore } from "../plugins/explore/server.ts";
+import { learn } from "../plugins/learn/server.ts";
 
-export const PLUGINS: readonly ServerPlugin[] = [explore, design];
+export const PLUGINS: readonly ServerPlugin[] = [explore, learn, design];
 
 export const pluginFor = (purpose: string): ServerPlugin | undefined =>
   PLUGINS.find((p) => p.id === purpose);
+
+// The mode that serves an open map. A map whose mode is not installed here
+// (saved by a copy with another plugin) is served as Learn: the browser shows
+// it on Learn's screen, so the model is told Learn's job and every action
+// that screen sends is taken. A new map of an unknown mode starts as Explore
+// instead (actions/maps.ts).
+export const modeOf = (purpose: string): ServerPlugin =>
+  pluginFor(purpose) ?? learn;

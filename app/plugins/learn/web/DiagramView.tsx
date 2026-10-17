@@ -1,7 +1,7 @@
 import dagre from "@dagrejs/dagre";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import type { Diagram, Fill, Link } from "../../shared/model.ts";
+import type { Diagram, Fill, Link } from "../../../shared/model.ts";
 
 type Blank = { id: string; blank?: boolean; prompt?: string; filled?: boolean };
 type Ctx = {

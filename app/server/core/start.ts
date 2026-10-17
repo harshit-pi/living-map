@@ -1,4 +1,5 @@
-// The opening move: what you typed or pasted, and what the model is asked to draw.
+// The opening move: what you typed or pasted, as a title and source material.
+// Each mode writes its own first move (ServerPlugin.start).
 
 // Lines a problem page adds around the problem itself (LeetCode and similar).
 const CHROME =
@@ -22,9 +23,4 @@ export function splitStart(text: unknown): { title: string; source: string } {
     title,
     source: rest.length > title.length + 20 ? rest.slice(0, 6000) : "",
   };
-}
-
-// Learn's first move; a plugin's mode writes its own (ServerPlugin.start)
-export function startAction(title: string): string {
-  return `start. The learner wants to understand: "${title}". Create the root question (the topic, parent null) and 3-5 steps under it in learning order. Then build the TOPIC DIAGRAM in the form that fits this topic best: the skeleton of the subject, with the 2-3 parts the learner should discover first as blanks. No solution. In the map block write the diagram op FIRST, then the root and the steps, so the picture appears before the path.`;
 }

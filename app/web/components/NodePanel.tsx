@@ -87,7 +87,7 @@ export function NodePanel({
   run: Run;
   onSelect: (id: string) => void;
   onClose: () => void;
-  // treat questions as steps to work out (hints, show answer), as Learn does
+  // treat questions as steps to work out (hints, show answer): Learn and Design
   asSteps?: boolean;
   // a plugin's own buttons for this node, in place of the usual row
   actions?: ReactNode;
@@ -96,7 +96,7 @@ export function NodePanel({
   // a plugin's own word for the node's kind, over the title
   tag?: string;
 }) {
-  const learn = asSteps ?? map.purpose === "learn";
+  const learn = !!asSteps;
   const threads = useMemo(
     () =>
       Object.values(map.threads ?? {})
