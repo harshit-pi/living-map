@@ -42,6 +42,7 @@ For a UI change, also run `npm start` and try it in the browser: Explore and Lea
 - `app/server/update.ts` and `app/server/launcher.ts`: the one-click update (compare with the latest GitHub release, pull, `npm ci`, build, restart).
 - `app/web/`: `App.tsx` is the shell; `screens/` (Start, Loading, Explore, Learn), `components/`, `hooks/`, `lib/` (live connection, API client, storage, step navigation).
 - `app/eval/forms.ts`: the diagram-fit eval, through the same provider.
+- Plugins add a mode of their own (Design is the first). The contract is `app/server/plugin.ts` and `app/web/plugin.ts`; the registries are `app/server/plugins.ts` and `app/web/plugins.ts`. A plugin lives in `app/plugins/<id>/`: `shared.ts` (types both sides use), `core.ts` (pure logic, tested), `server.ts` (prompt, ops, actions, browser view), `web/` (its screen). Its state is `map.data[<id>]`.
 
 ## Releases
 
@@ -51,7 +52,8 @@ Every push to `main` that passes CI publishes a GitHub release `v0.1.<run>` (the
 
 - Imports carry their extension (`./engine.ts`, `./App.tsx`); Node needs it for the server, and the browser follows the same rule. ESLint orders them: external, blank line, internal. <!-- agent-docs: ignore -->
 - The engine never names Claude: anything model-specific lives in a provider.
-- The model's output is untrusted (`Raw`): clean every field before it reaches the map (`cleanSpec`, `cleanScene`).
+- The model's output is untrusted (`Raw`): clean every field before it reaches the map (`cleanSpec`, `cleanScene`, and a plugin's own cleaners).
+- A plugin's `view` is all the browser sees of its state: anything the user should work out (Design's reference design) stays out until they ask for it.
 - Explanations are written only when a node is opened; a move asked while another runs waits in the queue, never refused.
 - Colours come only from the roles in `app/web/brand.css` (`bg-canvas`, `text-ink`, `bg-primary`, `border-success-line`, …): no Tailwind palette colours or hex codes in components. The logo mark is `app/web/lib/mark.ts`; the favicon is drawn from it at startup.
 - No `setState` inside effects: derive the value, or reset state when its key changes during render.

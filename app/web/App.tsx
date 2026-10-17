@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import type { Action, Purpose, Settings } from "../shared/model.ts";
 import { Mark } from "./components/Logo.tsx";
 import { MapsMenu } from "./components/MapList.tsx";
 import { Segmented } from "./components/Segmented.tsx";
 import { UpdateButton } from "./components/UpdateButton.tsx";
-import { WorkingBar } from "./components/WorkingBar.tsx";
+import { WorkingBar, WorkingPill } from "./components/WorkingBar.tsx";
 import { act } from "./lib/api.ts";
+import { setAside } from "./lib/layout.ts";
 import { useLiveMap } from "./lib/live.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
+import { pluginFor } from "./plugins.ts";
 import { ExploreScreen } from "./screens/ExploreScreen.tsx";
 import { LearnScreen } from "./screens/LearnScreen.tsx";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
@@ -17,13 +19,20 @@ import { StartScreen } from "./screens/StartScreen.tsx";
 
 const DEFAULTS: Settings = { model: "", effort: "" };
 
-// on a narrow window the side panel floats over the work instead of pushing it aside
+// on a narrow window the side panel floats over the work instead of pushing
+// it aside; followed as the window is resized, not only when the page loads
 const isRoomy = () =>
   typeof window !== "undefined" && window.innerWidth >= 1200;
+const onResize = (f: () => void) => {
+  window.addEventListener("resize", f);
+  return () => window.removeEventListener("resize", f);
+};
+const useRoomy = () => useSyncExternalStore(onResize, isRoomy, () => false);
 
 export default function App() {
   const live = useLiveMap();
   const { map } = live;
+  const roomy = useRoomy();
   const [selection, setSelection] = useState<string[]>([]);
   const [showDropped, setShowDropped] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -71,6 +80,12 @@ export default function App() {
   // a node that disappears (removed by Claude) closes its panel
   if (map && selection.some((id) => !map.nodes[id]))
     setSelection((s) => s.filter((id) => map.nodes[id]));
+  // so does one hidden with the set-aside nodes: what you write is then about
+  // the whole map, not a node you cannot see
+  const hidden = (id: string) =>
+    !!map && map.purpose === "explore" && setAside(map.nodes, id);
+  if (!showDropped && selection.some(hidden))
+    setSelection((s) => s.filter((id) => !hidden(id)));
 
   const openMap = async (mapId: string) => {
     setSelection([]);
@@ -86,6 +101,8 @@ export default function App() {
     return (
       <StartScreen
         error={startError}
+        // a move still running on the open map stops when another one starts
+        working={hasContent && live.busy ? (live.working?.label ?? "") : null}
         onCancel={hasContent ? () => setStarting(false) : undefined}
         onOpen={(id) => {
           void openMap(id);
@@ -112,35 +129,50 @@ export default function App() {
     settings,
     onSettings,
     run,
+    showError: setError,
     stop,
     selection,
     setSelection,
-    roomy: isRoomy(),
+    roomy,
   };
   const learn = map.purpose === "learn";
+  // a plugin's map has its own screen and a fixed mode
+  const plugin = pluginFor(map.purpose);
 
   return (
     <div className="flex h-full flex-col bg-canvas">
-      <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-line px-4 py-2">
+      <header className="grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_auto] items-center gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Mark size={22} className="shrink-0" />
           <div className="truncate text-[15px] font-semibold text-ink">
             {map.title}
           </div>
         </div>
-        <div />
-        <div className="flex items-center justify-end gap-2">
-          <Segmented
-            value={map.purpose}
-            options={[
-              ["explore", "Explore"],
-              ["learn", "Learn"],
-            ]}
-            onChange={(purpose) => {
-              void run({ type: "purpose", purpose });
-            }}
+        <div className="flex min-w-0 justify-end">
+          <WorkingPill
+            working={live.working}
+            queued={live.queued}
+            onStop={stop}
           />
-          {!learn && (
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          {plugin ? (
+            <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
+              {plugin.label}
+            </span>
+          ) : (
+            <Segmented
+              value={map.purpose}
+              options={[
+                ["explore", "Explore"],
+                ["learn", "Learn"],
+              ]}
+              onChange={(purpose) => {
+                void run({ type: "purpose", purpose });
+              }}
+            />
+          )}
+          {!learn && !plugin && (
             <label className="flex items-center gap-1 text-xs text-muted">
               <input
                 type="checkbox"
@@ -150,7 +182,7 @@ export default function App() {
               Set aside
             </label>
           )}
-          {!learn && (
+          {!learn && !plugin && (
             <button
               onClick={() => {
                 void run({ type: "next" });
@@ -177,22 +209,33 @@ export default function App() {
           </button>
         </div>
       </header>
-      <WorkingBar working={live.working} queued={live.queued} onStop={stop} />
+      <WorkingBar
+        working={live.working}
+        queued={live.queued}
+        onStop={stop}
+        pill={false}
+      />
       {!live.online && (
         <div className="bg-warning-soft px-4 py-1.5 text-sm text-warning-strong">
           Lost the connection to the Living Map server; reconnecting…
         </div>
       )}
-      {error && (
-        <div className="flex items-center bg-warning-soft px-4 py-1.5 text-sm text-warning-strong">
-          <span className="flex-1">{error}</span>
-          <button onClick={() => setError("")} className="text-warning-strong">
-            ×
-          </button>
-        </div>
-      )}
       <main className="relative min-h-0 flex-1">
-        {learn ? (
+        {/* floats over the top of the work, so nothing below it moves */}
+        {error && (
+          <div className="absolute top-2 left-1/2 z-40 flex max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-3 rounded-lg bg-warning-soft px-3 py-1.5 text-sm text-warning-strong shadow-md ring-1 ring-warning-line">
+            <span className="min-w-0 flex-1">{error}</span>
+            <button
+              onClick={() => setError("")}
+              className="shrink-0 text-warning-strong"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {plugin ? (
+          <plugin.Screen ws={ws} />
+        ) : learn ? (
           <LearnScreen ws={ws} />
         ) : (
           <ExploreScreen ws={ws} showDropped={showDropped} />

@@ -142,10 +142,14 @@ export function explain(
   );
 }
 
-export function deeper(ctx: Ctx, nodeId: string): Promise<ActionResult> {
+export function deeper(
+  ctx: Ctx,
+  nodeId: string,
+): Promise<ActionResult> | ActionResult {
   const found = ctx.node(nodeId);
-  ctx.say(`Go deeper: ${found?.node.title}`);
-  return ctx.engine.turn(`go deeper on ${found?.named}.`, ctx.settings, {
+  if (!found) return { error: "No such node." };
+  ctx.say(`Go deeper: ${found.node.title}`);
+  return ctx.engine.turn(`go deeper on ${found.named}.`, ctx.settings, {
     label:
       ctx.map.purpose === "learn"
         ? "Breaking it into smaller steps"
@@ -154,11 +158,15 @@ export function deeper(ctx: Ctx, nodeId: string): Promise<ActionResult> {
   });
 }
 
-export function challenge(ctx: Ctx, nodeId: string): Promise<ActionResult> {
+export function challenge(
+  ctx: Ctx,
+  nodeId: string,
+): Promise<ActionResult> | ActionResult {
   const found = ctx.node(nodeId);
-  ctx.say(`Challenge: ${found?.node.title}`);
+  if (!found) return { error: "No such node." };
+  ctx.say(`Challenge: ${found.node.title}`);
   return ctx.engine.turn(
-    `challenge ${found?.named}: does it still hold?`,
+    `challenge ${found.named}: does it still hold?`,
     ctx.settings,
     { label: "Re-checking it", nodeId },
   );

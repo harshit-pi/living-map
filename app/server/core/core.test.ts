@@ -552,6 +552,61 @@ test("accepted answers survive a redraw that does not repeat them", () => {
   assert.deepEqual(m.answers?.a1.accept, ["4"]);
 });
 
+test("a grid row never names its blank's answer in the cell beside it", () => {
+  const m: Canvas = { nodes: {}, diagram: null, fills: {} };
+  applyOps(m, [
+    {
+      op: "diagram",
+      spec: {
+        form: "grid",
+        title: "Notes app: how each query runs",
+        columns: ["DynamoDB", "Postgres"],
+        rows: [
+          {
+            label: "Count notes per user",
+            cells: [
+              "No GROUP BY: export to Athena",
+              {
+                id: "pg-count",
+                blank: true,
+                prompt: "Which SQL clause gives counts per user?",
+                accept: ["GROUP BY", "group by user_id"],
+              },
+            ],
+          },
+          { label: "Get one note", cells: ["GetItem by key", "GROUP BY"] },
+        ],
+      },
+    },
+  ]);
+  const g = as(m.diagram, "grid");
+  assert.equal(g.rows[0].cells[0].text, "No …: export to Athena");
+  assert.equal(
+    g.rows[1].cells[1].text,
+    "GROUP BY",
+    "only the blank's own row is checked",
+  );
+  assert.deepEqual(m.answers?.["pg-count"].accept, [
+    "GROUP BY",
+    "group by user_id",
+  ]);
+});
+
+test("a move told to keep the map removes nothing", () => {
+  const m: Canvas = {
+    nodes: {
+      q: { id: "q", parent: null, kind: "question", title: "Q?" } as never,
+      o: { id: "o", parent: "q", kind: "option", title: "O" } as never,
+    },
+    diagram: null,
+    fills: {},
+  };
+  applyOps(m, [{ op: "remove", id: "o" }], { keep: true });
+  assert.ok(m.nodes.o);
+  applyOps(m, [{ op: "remove", id: "o" }]);
+  assert.equal(m.nodes.o, undefined);
+});
+
 test("the same answer typed differently still matches", () => {
   assert.equal(normAnswer("(2, 0)"), normAnswer("2,0"));
   assert.equal(normAnswer("\u22121"), normAnswer("-1"));

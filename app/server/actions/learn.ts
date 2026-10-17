@@ -7,7 +7,7 @@ import {
   type ActionResult,
   type MapNode,
 } from "../../shared/model.ts";
-import { accepts, revealBlank } from "../core/diagram.ts";
+import { accepts, elementsOf, revealBlank } from "../core/diagram.ts";
 import { newPlay, playMove, showMove } from "../core/scene.ts";
 import { own, type Play } from "../core/types.ts";
 
@@ -16,7 +16,14 @@ export function fill(
   blankId: string,
   text: string,
 ): Promise<ActionResult> | ActionResult {
-  if (!blankId) return { error: "No blank." };
+  // only a blank still on the diagram is asked about: no paid turn for one
+  // that is not there
+  if (
+    !blankId ||
+    !ctx.map.diagram ||
+    !elementsOf(ctx.map.diagram).some((el) => el.id === blankId && el.blank)
+  )
+    return { error: "No such blank." };
   const typed = String(text ?? "").slice(0, 200);
   ctx.map.chat.push({
     role: "you",
@@ -55,19 +62,24 @@ export function fill(
   );
 }
 
-export function hint(ctx: Ctx, nodeId: string): Promise<ActionResult> {
+export function hint(
+  ctx: Ctx,
+  nodeId: string,
+): Promise<ActionResult> | ActionResult {
   const found = ctx.node(nodeId);
-  ctx.say(`Hint: ${found?.node.title}`);
+  // a hint is on a step or a deep dive, never the map's own question
+  if (!found || !found.node.parent) return { error: "No such step." };
+  ctx.say(`Hint: ${found.node.title}`);
   const count = hintCount(ctx.map, nodeId);
   const scene = ctx.map.scenes[nodeId];
   if (scene && (ctx.map.play[nodeId]?.at ?? 0) < scene.moves.length)
     return ctx.engine.turn(
-      `HINT on the scene for step ${found?.named}: the learner is stuck on its current move. Add a fact under the step titled "Hint ${count + 1}" with one pointed question about THIS move (use their wrong tries), never the answer.`,
+      `HINT on the scene for step ${found.named}: the learner is stuck on its current move. Add a fact under the step titled "Hint ${count + 1}" with one pointed question about THIS move (use their wrong tries), never the answer.`,
       ctx.settings,
       { label: "Finding a hint for this move", nodeId },
     );
   return ctx.engine.turn(
-    `HINT on step ${found?.named}: the next rung of the ladder (it has ${count} hint(s) so far).`,
+    `HINT on step ${found.named}: the next rung of the ladder (it has ${count} hint(s) so far).`,
     ctx.settings,
     {
       label: "Finding the next hint",

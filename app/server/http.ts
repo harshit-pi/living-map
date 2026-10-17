@@ -15,6 +15,20 @@ import { checkForUpdate, runUpdate } from "./update.ts";
 export function createApp(engine: Engine, hub: Hub) {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  // a body that is not JSON gets a plain error, never a stack trace
+  app.use(
+    (
+      err: { status?: number; type?: string },
+      _req: express.Request,
+      res: express.Response,
+      next: express.NextFunction,
+    ) => {
+      if (!err) return next();
+      res
+        .status(err.status && err.status < 500 ? err.status : 400)
+        .json({ error: "That request is not valid." });
+    },
+  );
 
   app.get("/api/events", (req, res) => {
     res.set({
@@ -29,7 +43,9 @@ export function createApp(engine: Engine, hub: Hub) {
 
   app.post("/api/action", async (req, res) => {
     try {
-      res.json(await act(engine, (req.body ?? {}) as ActionRequest));
+      const r = await act(engine, (req.body ?? {}) as ActionRequest);
+      // an action that did not go through says so with the status too
+      res.status(r.error ? 400 : 200).json(r);
     } catch (e) {
       console.error("[action] failed:", e);
       res

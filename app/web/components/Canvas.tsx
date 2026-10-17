@@ -1,19 +1,32 @@
-import { Background, Controls, ReactFlow, useReactFlow } from "@xyflow/react";
-import { useEffect, useMemo, useRef } from "react";
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  useReactFlow,
+  useStore,
+} from "@xyflow/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { NodeCard } from "./NodeCard.tsx";
 import type { MapDoc } from "../../shared/model.ts";
-import { layout } from "../lib/layout.ts";
+import { layout, setAside } from "../lib/layout.ts";
 
-// the floating message box covers the bottom of the canvas: frame above it
+// the floating message box, and Claude's reply above it, cover the bottom of
+// the canvas: frame above both
 const FRAME = {
   top: "24px",
   left: "24px",
   right: "24px",
-  bottom: "140px",
+  bottom: "200px",
 } as const;
 
 const nodeTypes = { map: NodeCard };
+
+// the whole tree, above the message box: on first load and from the fit button
+const WHOLE = { padding: FRAME, maxZoom: 1, minZoom: 0.2 };
+// the node panel (420px wide, 12px from the edge) covers the right of the
+// canvas: new work is framed to its left, unless the canvas is too narrow
+const PANEL_W = 420 + 12;
 
 // The app owns the selection: a click selects one node, Shift-click adds or
 // removes, a click on empty canvas clears.
@@ -23,6 +36,7 @@ export function Canvas({
   selected,
   busy,
   workingId,
+  panelOpen,
   onSelect,
 }: {
   map: MapDoc;
@@ -30,12 +44,26 @@ export function Canvas({
   selected: string[];
   busy: boolean;
   workingId: string | null;
+  panelOpen: boolean;
   onSelect: (ids: string[]) => void;
 }) {
+  const width = useStore((s) => s.width);
+  const frame = useMemo(
+    () =>
+      panelOpen && width > PANEL_W * 2
+        ? { ...FRAME, right: `${PANEL_W + 24}px` as const }
+        : FRAME,
+    [panelOpen, width],
+  );
+  // read when a fit runs: the panel opening is no reason to frame again
+  const framing = useRef(frame);
+  useEffect(() => {
+    framing.current = frame;
+  }, [frame]);
   const visible = useMemo(
     () =>
       Object.values(map.nodes).filter(
-        (n) => showDropped || !(n.dropped || n.status === "dropped"),
+        (n) => showDropped || !setAside(map.nodes, n.id),
       ),
     [map, showDropped],
   );
@@ -46,10 +74,18 @@ export function Canvas({
       c[t.nodeId] = (c[t.nodeId] ?? 0) + 1;
     return c;
   }, [map.threads]);
+  // each card's measured size, kept on the nodes: the layout hands over new
+  // nodes on every change, and one without a size is hidden until React Flow
+  // measures it again, which a card whose size did not change may never get,
+  // leaving the tree blank but for the newest card
+  const [sizes, setSizes] = useState<
+    Record<string, { width: number; height: number }>
+  >({});
   const nodes = useMemo(
     () =>
       laid.nodes.map((n) => ({
         ...n,
+        measured: sizes[n.id],
         selected: selected.includes(n.id),
         data: {
           ...n.data,
@@ -58,26 +94,27 @@ export function Canvas({
           working: n.id === workingId,
         },
       })),
-    [laid, selected, map.purpose, threads, workingId],
+    [laid, sizes, selected, map.purpose, threads, workingId],
   );
   const { fitView } = useReactFlow();
+  // every node the map has had while this canvas was open: one shown again
+  // (set-aside nodes back on) is not new work to follow
   const seen = useRef<Set<string> | null>(null);
 
   // Follow the work: when nodes appear, frame the new ones with their parent at
-  // a readable zoom; on first load, frame the whole tree. Otherwise leave the
-  // view where the user put it.
+  // a readable zoom; on first load, frame the whole tree, however far out that
+  // takes. Otherwise leave the view where the user put it.
   useEffect(() => {
     const ids = new Set(laid.nodes.map((n) => n.id));
     const before = seen.current;
-    seen.current = ids;
+    seen.current = new Set([
+      ...(before ?? []),
+      ...ids,
+      ...Object.keys(map.nodes),
+    ]);
     if (!before) {
       requestAnimationFrame(() => {
-        void fitView({
-          padding: FRAME,
-          duration: 300,
-          maxZoom: 1,
-          minZoom: 0.45,
-        });
+        void fitView({ ...WHOLE, duration: 300 });
       });
       return;
     }
@@ -91,7 +128,7 @@ export function Canvas({
     const t = setTimeout(() => {
       void fitView({
         nodes: focus,
-        padding: FRAME,
+        padding: framing.current,
         duration: 500,
         maxZoom: 1,
         minZoom: 0.55,
@@ -99,6 +136,19 @@ export function Canvas({
     }, 250);
     return () => clearTimeout(t);
   }, [laid, map.nodes, fitView]);
+
+  // Showing or hiding set-aside nodes lays the tree out again: frame the whole
+  // of it, so the root does not end up off the top
+  const shownDropped = useRef(showDropped);
+  useEffect(() => {
+    if (shownDropped.current === showDropped) return;
+    // once the new layout is measured
+    const t = setTimeout(() => {
+      shownDropped.current = showDropped;
+      void fitView({ ...WHOLE, duration: 300 });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [showDropped, fitView]);
 
   // When Claude finishes a move, frame the whole new branch with its parent,
   // zooming out further if the branch is big, so nothing is left cut off.
@@ -114,7 +164,7 @@ export function Canvas({
         const t = setTimeout(() => {
           void fitView({
             nodes: [...ids].map((id) => ({ id })),
-            padding: FRAME,
+            padding: framing.current,
             duration: 500,
             maxZoom: 1,
             minZoom: 0.35,
@@ -135,6 +185,17 @@ export function Canvas({
       elementsSelectable={false}
       nodesDraggable={false}
       nodesConnectable={false}
+      onNodesChange={(changes) => {
+        for (const ch of changes)
+          if (ch.type === "dimensions" && ch.dimensions) {
+            const { width, height } = ch.dimensions;
+            setSizes((s) =>
+              s[ch.id]?.width === width && s[ch.id]?.height === height
+                ? s
+                : { ...s, [ch.id]: { width, height } },
+            );
+          }
+      }}
       onNodeClick={(e, node) => {
         if (e.shiftKey)
           onSelect(
@@ -154,7 +215,11 @@ export function Canvas({
       fitViewOptions={{ maxZoom: 1, minZoom: 0.7, padding: FRAME }}
     >
       <Background color="var(--color-line-strong)" gap={22} />
-      <Controls showInteractive={false} position="top-left" />
+      <Controls
+        showInteractive={false}
+        position="top-left"
+        fitViewOptions={WHOLE}
+      />
     </ReactFlow>
   );
 }

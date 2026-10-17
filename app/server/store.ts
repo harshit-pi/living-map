@@ -5,8 +5,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { CURRENT_FILE, MAPS_DIR } from "./config.ts";
-import type { MapSummary, Purpose } from "../shared/model.ts";
 import type { StoredMap } from "./core/types.ts";
+import { pluginFor } from "./plugins.ts";
+import type { MapSummary, Purpose } from "../shared/model.ts";
 
 const fileOf = (id: string) => path.join(MAPS_DIR, `${id}.json`);
 const isId = (id: string) => /^[\w-]+$/.test(id);
@@ -36,7 +37,13 @@ export function normalise(
   return {
     ...newMap(m.title ?? "Untitled", "explore"),
     ...m,
-    purpose: m.purpose === "learn" ? "learn" : "explore",
+    // a plugin's purpose is kept as is; one that is no longer installed opens as explore
+    purpose:
+      m.purpose &&
+      m.purpose !== "decide" &&
+      /^[a-z][a-z0-9-]{1,30}$/.test(m.purpose)
+        ? m.purpose
+        : "explore",
     threads: m.threads ?? {},
     fills: m.fills ?? {},
     diagram: m.diagram ?? null,
@@ -77,17 +84,30 @@ export function listMaps(currentId: string | null): MapSummary[] {
     if (!m) continue;
     const nodes = Object.values(m.nodes);
     if (!nodes.length && !m.diagram) continue;
-    const steps = nodes.filter((n) => n.kind === "question" && n.parent);
+    const root = nodes.find((n) => !n.parent);
+    const learn = m.purpose === "learn";
+    // Learn counts its path's steps as the path does: worked out by you, not shown
+    const steps = nodes.filter(
+      (n) =>
+        n.kind === "question" && n.parent && (!learn || n.parent === root?.id),
+    );
+    const done = steps.filter(
+      (n) => n.status === "answered" && !(learn && n.revealed),
+    ).length;
+    const summary = pluginFor(m.purpose)?.summary?.(m);
     out.push({
       id: m.id,
       title: m.title,
       purpose: m.purpose,
       updatedAt: fs.statSync(path.join(MAPS_DIR, f)).mtimeMs,
       nodes: nodes.length,
-      open: steps.filter((n) => n.status === "open").length,
-      done: steps.filter((n) => n.status === "answered").length,
+      open: learn
+        ? steps.length - done
+        : steps.filter((n) => n.status === "open").length,
+      done,
       form: m.diagram?.form ?? null,
       current: m.id === currentId,
+      ...(summary ? { summary } : {}),
     });
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);

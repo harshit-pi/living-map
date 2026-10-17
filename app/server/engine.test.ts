@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { newState } from "../plugins/design/core.ts";
 import type { ServerEvent } from "../shared/model.ts";
 import { act } from "./actions/index.ts";
 import type { StoredMap } from "./core/types.ts";
@@ -76,6 +77,17 @@ function setup(initial: StoredMap | null = null) {
   const engine = createEngine({ provider, hub, initial, save: () => {} });
   return { engine, calls, events };
 }
+
+// a topic diagram with one blank on it, to fill
+const withBlank = (m: StoredMap, id: string) => {
+  m.diagram = {
+    form: "structure",
+    title: "T",
+    boxes: [{ id, blank: true, prompt: "What goes here?", label: "" }],
+    arrows: [],
+  };
+  return m;
+};
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const settled = async (calls: unknown[], n: number) => {
@@ -231,8 +243,13 @@ test('maps saved as "decide" open as "explore"', () => {
 });
 
 test("a blank's verdict is tagged so it shows on the blank, not as a caption", async () => {
-  const m = newMap("DBs", "learn");
+  const m = withBlank(newMap("DBs", "learn"), "c2");
   const { engine, calls } = setup(m);
+  assert.deepEqual(
+    await act(engine, { type: "fill", blankId: "c9", text: "rigid" }),
+    { error: "No such blank." },
+    "a blank that is not on the diagram costs no model call",
+  );
   const done = act(engine, { type: "fill", blankId: "c2", text: "rigid" });
   await settled(calls, 1);
   assert.equal(engine.state.working?.blankId, "c2");
@@ -467,6 +484,7 @@ test("each move sends only the instructions it needs", async () => {
     updatedAt: 0,
     order: 1,
   };
+  withBlank(m, "b1");
   const { engine, calls } = setup(m);
   const sent: Record<string, string> = {};
   const run = async (
@@ -571,4 +589,332 @@ test("an answer the blank does not accept still goes to the model", async () => 
   );
   await done;
   assert.equal(m.fills.a1.state, "wrong");
+});
+
+// A Design map with a brief, the client, and Claude's hidden reference.
+function designMap() {
+  const m = newMap("Design Twitter", "design");
+  m.data = {
+    design: {
+      ...newState(),
+      brief: {
+        title: "Design Twitter",
+        goals: [],
+        constraints: [],
+        scale: [],
+        reads: 300_000,
+        writes: 6_000,
+      },
+      comps: [
+        {
+          id: "app",
+          kind: "client",
+          label: "Mobile app",
+          x: 40,
+          y: 220,
+          count: 1,
+          shards: 1,
+          by: "claude",
+        },
+      ],
+      reference: {
+        comps: [{ id: "tweets", kind: "nosql", label: "Secret tweet store" }],
+        wires: [],
+        notes: ["Celebrities are merged in at read time"],
+      },
+    },
+  };
+  return m;
+}
+const design = (name: string, args: Record<string, unknown> = {}) =>
+  ({ type: "plugin", plugin: "design", name, args }) as const;
+
+test("a Design map's reference reaches the browser only once you reveal it", async () => {
+  const { engine, calls, events } = setup(designMap());
+  const secret = /Secret tweet store|Celebrities/;
+  const viewOf = () => {
+    const e = engine.snapshot();
+    assert.ok(e.type === "map");
+    return e.map?.data?.design as { reference: unknown };
+  };
+  assert.equal(viewOf().reference, null, "the browser view leaves it out");
+  assert.doesNotMatch(JSON.stringify(engine.snapshot()), secret);
+
+  // every snapshot pushed while you work leaves it out too, though the model sees it
+  await act(engine, design("add", { kind: "cache", x: 300, y: 220 }));
+  await act(engine, design("connect", { from: "app", to: "cache" }));
+  const check = act(engine, design("check"));
+  await settled(calls, 1);
+  assert.match(calls[0].req.message, /REFERENCE DESIGN \(yours, hidden/);
+  assert.match(calls[0].req.message, secret);
+  calls[0].release(
+    'Close.\n```map\n{"ops":[{"op":"review","summary":"Add a store.","points":[{"level":"fix","text":"Reads have nowhere to go.","on":["cache"]}]}]}\n```',
+  );
+  await check;
+  assert.ok(events.length > 3);
+  for (const e of events) assert.doesNotMatch(JSON.stringify(e), secret);
+
+  assert.deepEqual(await act(engine, design("reveal")), { ok: true });
+  assert.deepEqual(
+    (viewOf().reference as { comps: { label: string }[] }).comps.map(
+      (c) => c.label,
+    ),
+    ["Secret tweet store"],
+  );
+  assert.match(JSON.stringify(engine.snapshot()), /Celebrities/);
+  assert.match(JSON.stringify(events.at(-1)), /Celebrities/, "and is pushed");
+});
+
+test("plugin actions are refused cleanly", async () => {
+  const refused = { error: "That action is not available on this map." };
+  const { engine } = setup(designMap());
+  for (const req of [
+    { type: "plugin", plugin: "nope", name: "add", args: {} },
+    design("nope"),
+    design("constructor"),
+    design("__proto__"),
+    design("toString"),
+    design("hasOwnProperty"),
+    { type: "plugin", plugin: "design" },
+    { type: "plugin", plugin: "design", name: ["add"] },
+    { type: "plugin" },
+  ])
+    assert.deepEqual(
+      await act(engine, req as Parameters<typeof act>[1]),
+      refused,
+      JSON.stringify(req),
+    );
+
+  // a Design action while a Learn map is open
+  const learn = setup(newMap("Hash maps", "learn"));
+  assert.deepEqual(
+    await act(learn.engine, design("add", { kind: "cache" })),
+    refused,
+  );
+  assert.deepEqual(await act(learn.engine, design("constructor")), refused);
+  assert.equal(learn.engine.state.map?.data, undefined, "no Design state made");
+  // and on an Explore map, a plugin action with no plugin named is refused, not a crash
+  const explore = setup(newMap("Which DB?", "explore"));
+  assert.deepEqual(
+    await act(explore.engine, { type: "plugin" } as Parameters<typeof act>[1]),
+    refused,
+  );
+});
+
+test("a mode switch accepts only Explore and Learn, and a Design map keeps its mode", async () => {
+  const { engine } = setup(newMap("Which DB?", "explore"));
+  for (const purpose of ["design", "__proto__", "decide"])
+    assert.match(
+      (await act(engine, { type: "purpose", purpose })).error ?? "",
+      /only between Explore and Learn/,
+    );
+  assert.equal(engine.state.map?.purpose, "explore");
+  const d = setup(designMap());
+  assert.match(
+    (await act(d.engine, { type: "purpose", purpose: "learn" })).error ?? "",
+    /mode is fixed/,
+  );
+});
+
+test("switching an explored map to Learn keeps every node and thread", async () => {
+  const { engine, calls } = setup();
+  const started = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(ROOT);
+  await started;
+  const m = engine.state.map!;
+  m.nodes.deep = { ...m.nodes.pg, id: "deep", parent: "pg", kind: "fact" };
+  m.threads.t1 = {
+    id: "t1",
+    nodeId: "deep",
+    title: "Deep",
+    createdAt: 1,
+    messages: [],
+  };
+  const switched = act(engine, { type: "purpose", purpose: "learn" });
+  await settled(calls, 2);
+  // the model sets the options aside by removing them, as it used to
+  calls[1].release(
+    'Here is your path.\n```map\n{"ops":[\n{"op":"remove","id":"pg"},\n{"op":"add","id":"s1","parent":"q","kind":"question","title":"What do you store?"}\n]}\n```',
+  );
+  await switched;
+  assert.ok(m.nodes.s1, "the step is added");
+  assert.ok(m.nodes.pg && m.nodes.deep, "what you explored stays");
+  assert.equal(m.threads.t1.nodeId, "deep");
+  assert.match(calls[1].req.message, /Remove nothing/);
+});
+
+test("Check my design waits for a part of your own: the brief's clients are not a design", async () => {
+  const { engine, calls } = setup(designMap());
+  assert.match(
+    (await act(engine, design("check"))).error ?? "",
+    /Place a few components first/,
+  );
+  assert.equal(calls.length, 0, "no review is paid for");
+});
+
+test("a second Check my design while one runs asks for no second review", async () => {
+  const { engine, calls } = setup(designMap());
+  await act(engine, design("add", { kind: "service", x: 300, y: 220 }));
+  const first = act(engine, design("check"));
+  await settled(calls, 1);
+  assert.deepEqual(await act(engine, design("check")), {});
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(engine.state.waiting.length, 0, "nothing queued behind it");
+  calls[0].release("Looks thin.");
+  await first;
+  assert.equal(
+    engine.state.map?.chat.filter((c) => c.text === "Check my design.").length,
+    1,
+  );
+});
+
+test("a review written while you changed the design says it is of the design before", async () => {
+  const { engine, calls } = setup(designMap());
+  const added = await act(engine, design("add", { kind: "service", x: 300 }));
+  await act(engine, design("add", { kind: "cache", x: 500 }));
+  const review = (text: string) =>
+    `${text}\n\`\`\`map\n{"ops":[{"op":"review","summary":"${text}","points":[]}]}\n\`\`\``;
+  const reviewOf = () =>
+    (engine.state.map?.data?.design as { review: { edited?: boolean } }).review;
+
+  // nothing changed while it ran: an ordinary review
+  const first = act(engine, design("check"));
+  await settled(calls, 1);
+  calls[0].release(review("Thin."));
+  await first;
+  assert.equal(reviewOf().edited, undefined);
+
+  // a part removed and one added while it ran: the review says so
+  const second = act(engine, design("check"));
+  await settled(calls, 2);
+  await act(engine, design("remove", { id: added.nodeId }));
+  await act(engine, design("add", { kind: "worker", x: 700 }));
+  calls[1].release(review("Still thin."));
+  await second;
+  assert.equal(reviewOf().edited, true);
+  assert.match(calls[1].req.message, /Service/, "the model saw the old design");
+});
+
+test("a Design map refuses the core actions its screen has no use for", async () => {
+  const { engine, calls } = setup(designMap());
+  const m = engine.state.map!;
+  m.nodes.root = {
+    id: "root",
+    parent: null,
+    kind: "question",
+    title: "Design WhatsApp",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
+  m.nodes.dd = {
+    id: "dd",
+    parent: "root",
+    kind: "question",
+    title: "How is no message lost?",
+    summary: "",
+    detail: "",
+    status: "open",
+    by: "claude",
+    updatedAt: 0,
+    order: 0,
+  };
+  const chat = m.chat.length;
+  for (const req of [
+    { type: "next" },
+    { type: "challenge", nodeId: "dd" },
+    { type: "fill", blankId: "b1", text: "x" },
+    { type: "scene", nodeId: "dd" },
+    { type: "play", nodeId: "dd", key: "a" },
+  ])
+    assert.deepEqual(
+      await act(engine, req as Parameters<typeof act>[1]),
+      { error: "That action is not available on this map." },
+      req.type,
+    );
+  // a hint or going deeper needs a deep dive that is there
+  for (const req of [
+    { type: "hint", nodeId: "nope" },
+    { type: "hint", nodeId: "root" },
+    { type: "deeper", nodeId: "nope" },
+  ])
+    assert.match(
+      (await act(engine, req as Parameters<typeof act>[1])).error ?? "",
+      /^No such/,
+      `${req.type} ${req.nodeId}`,
+    );
+  await tick();
+  assert.equal(calls.length, 0, "no model call");
+  assert.equal(m.chat.length, chat, "nothing said");
+
+  // a deep dive's own actions still work, and a hint's reply stays with it
+  const hint = act(engine, { type: "hint", nodeId: "dd" });
+  await settled(calls, 1);
+  calls[0].release("Think about when Alice sees sent.");
+  await hint;
+  assert.equal(m.chat.at(-1)?.nodeId, "dd");
+  // settled in its thread, it says what comes next, for the sidebar
+  const answer = act(engine, {
+    type: "thread",
+    nodeId: "dd",
+    text: "Acks per hop, and a retry queue.",
+  });
+  await settled(calls, 2);
+  calls[1].release(
+    'Right.\n```map\n{"ops":[{"op":"update","id":"dd","status":"answered"},{"op":"next","text":"Now size the chat service.","settles":[]},{"op":"brief","title":"Rewritten"}]}\n```',
+  );
+  await answer;
+  const ds = m.data?.design as {
+    next: { text: string };
+    brief: { title: string };
+  };
+  assert.equal(m.nodes.dd.status, "answered");
+  assert.equal(ds.next.text, "Now size the chat service.");
+  assert.equal(
+    ds.brief.title,
+    "Design Twitter",
+    "a thread cannot rewrite the brief",
+  );
+  // a request with no type is plainly invalid
+  assert.deepEqual(await act(engine, {} as Parameters<typeof act>[1]), {
+    error: "That request is not valid.",
+  });
+});
+
+test("Undo on a Design map puts back a removed wire", async () => {
+  const { engine } = setup(designMap());
+  const s = () =>
+    engine.state.map?.data?.design as {
+      wires: { id: string; times: number }[];
+    };
+  await act(engine, design("add", { kind: "service", x: 300, y: 220 }));
+  await act(engine, design("connect", { from: "app", to: "service" }));
+  const id = s().wires[0].id;
+  await act(engine, design("wire", { id, times: 10 }));
+  await act(engine, design("unwire", { id }));
+  assert.equal(s().wires.length, 0);
+  assert.deepEqual(await act(engine, design("undo")), { ok: true });
+  assert.deepEqual(
+    s().wires.map((w) => [w.id, w.times]),
+    [[id, 10]],
+  );
+  assert.match(
+    (await act(engine, design("connect", { from: "app", to: "app" }))).error ??
+      "",
+    /itself/,
+  );
+  assert.match(
+    (await act(engine, design("connect", { from: "app", to: "service" })))
+      .error ?? "",
+    /already wired/,
+  );
 });

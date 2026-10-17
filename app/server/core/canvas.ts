@@ -4,6 +4,7 @@
 import {
   cleanSpecWithAnswers,
   elementsOf,
+  hideGiveaways,
   keepFilled,
   revealBlank,
 } from "./diagram.ts";
@@ -69,6 +70,10 @@ export function applyOps(
     scope = null as string | null,
     // a scoped move may still judge the topic diagram's blanks (Show answer)
     judge = false,
+    // a plugin's handler for ops core does not know (null: not its op either)
+    extra = undefined as ((op: Raw) => number | null) | undefined,
+    // nothing on the map may be removed (a mode switch: what you explored stays)
+    keep = false,
     now = Date.now(),
   } = {},
 ): number {
@@ -92,6 +97,7 @@ export function applyOps(
           if (a) answers[el.id] = a;
         }
         map.answers = answers;
+        hideGiveaways(spec, answers);
         map.diagram = spec;
         map.diagramAt = now;
         changed++;
@@ -130,6 +136,18 @@ export function applyOps(
       changed++;
       continue;
     }
+    if (
+      extra &&
+      op?.op !== "add" &&
+      op?.op !== "update" &&
+      op?.op !== "remove"
+    ) {
+      const n = extra(op);
+      if (n !== null) {
+        changed += n;
+        continue;
+      }
+    }
     const id = String(op?.id ?? "").trim();
     if (!safeId(id)) continue;
     const allowed = inScope();
@@ -137,6 +155,7 @@ export function applyOps(
     if (op.op === "remove") {
       // the root holds the whole map: it is never removed
       if (
+        !keep &&
         cur &&
         cur.parent !== null &&
         (!allowed || (allowed.has(id) && id !== scope))

@@ -2,6 +2,7 @@
 
 import { safeId } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
+import { pluginFor } from "../plugins.ts";
 import * as canvas from "./canvas.ts";
 import { makeCtx } from "./context.ts";
 import * as learn from "./learn.ts";
@@ -35,6 +36,8 @@ export async function act(
 ): Promise<ActionResult> {
   if (!req || typeof req !== "object" || badIds(req))
     return { error: "That request is not valid." };
+  if (typeof req.type !== "string")
+    return { error: "That request is not valid." };
   const settings = cleanSettings(engine, req.settings);
   switch (req.type) {
     case "stop":
@@ -49,10 +52,33 @@ export async function act(
   const map = engine.state.map;
   if (!map) return { error: "Start first." };
   const ctx = makeCtx(engine, settings, map);
+  // a plugin's map takes its own actions and only the core ones its screen uses
+  const own = pluginFor(map.purpose);
+  if (
+    own &&
+    req.type !== "plugin" &&
+    req.type !== "purpose" &&
+    !own.core.includes(req.type)
+  )
+    return { error: "That action is not available on this map." };
 
   switch (req.type) {
     case "purpose":
       return maps.switchPurpose(ctx, req.purpose);
+    case "plugin": {
+      // only the map's own plugin answers, and only with an action it declares
+      const plugin = pluginFor(map.purpose);
+      const run =
+        plugin &&
+        plugin.id === req.plugin &&
+        typeof req.name === "string" &&
+        Object.hasOwn(plugin.actions ?? {}, req.name)
+          ? plugin.actions![req.name]
+          : null;
+      if (!run) return { error: "That action is not available on this map." };
+      const args = req.args && typeof req.args === "object" ? req.args : {};
+      return run(ctx, args as Record<string, unknown>);
+    }
     case "choose":
       return canvas.choose(ctx, req.nodeId);
     case "drop":
@@ -74,6 +100,11 @@ export async function act(
     case "next":
       return canvas.next(ctx);
     case "message":
+      // a plugin may answer the main conversation its own way
+      if (pluginFor(map.purpose)?.actions?.message)
+        return pluginFor(map.purpose)!.actions!.message(ctx, {
+          text: req.text,
+        });
       return canvas.message(
         ctx,
         req.text,
@@ -96,6 +127,6 @@ export async function act(
     case "replay":
       return learn.replay(ctx, req.nodeId);
     default:
-      return { error: `Unknown action ${(req as { type?: string }).type}` };
+      return { error: `Unknown action "${(req as { type: string }).type}".` };
   }
 }

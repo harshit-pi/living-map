@@ -71,6 +71,7 @@ export function NodePanel({
   run,
   onSelect,
   onClose,
+  asSteps,
 }: {
   map: MapDoc;
   node: MapNode;
@@ -83,8 +84,10 @@ export function NodePanel({
   run: Run;
   onSelect: (id: string) => void;
   onClose: () => void;
+  // treat questions as steps to work out (hints, show answer), as Learn does
+  asSteps?: boolean;
 }) {
-  const learn = map.purpose === "learn";
+  const learn = asSteps ?? map.purpose === "learn";
   const threads = useMemo(
     () =>
       Object.values(map.threads ?? {})
@@ -221,22 +224,29 @@ export function NodePanel({
                   Show answer
                 </Btn>
               )}
-              <Btn
-                onClick={() => act("drop")}
-                title={
-                  learn
+              {/* a step you have settled is done, not one to skip */}
+              {!(
+                learn &&
+                node.kind === "question" &&
+                node.status === "answered"
+              ) && (
+                <Btn
+                  onClick={() => act("drop")}
+                  title={
+                    learn
+                      ? node.kind === "question"
+                        ? "Skip this step: it is greyed out and Claude stops raising it"
+                        : "Remove it from what you looked into"
+                      : "Rule this out: it is greyed out and Claude stops raising it"
+                  }
+                >
+                  {learn
                     ? node.kind === "question"
-                      ? "Skip this step: it is greyed out and Claude stops raising it"
-                      : "Remove it from what you looked into"
-                    : "Rule this out: it is greyed out and Claude stops raising it"
-                }
-              >
-                {learn
-                  ? node.kind === "question"
-                    ? "Skip this step"
-                    : "Remove"
-                  : "Set aside"}
-              </Btn>
+                      ? "Skip this step"
+                      : "Remove"
+                    : "Set aside"}
+                </Btn>
+              )}
             </>
           )}
         </div>

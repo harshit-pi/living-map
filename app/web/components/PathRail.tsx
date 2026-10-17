@@ -1,3 +1,6 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import type { MapDoc, MapNode } from "../../shared/model.ts";
 
 const hintsOf = (map: MapDoc, id: string) =>
@@ -31,10 +34,11 @@ function stateOf(map: MapDoc, n: MapNode) {
       cls: "border-primary bg-primary-soft text-primary-strong",
       word: `playing · ${sc.at} of ${sc.total}`,
     };
+  // the badge keeps the step's number; the hint count is in the words
   const h = hintsOf(map, n.id);
   if (h)
     return {
-      mark: String(h),
+      mark: "",
       cls: "border-warning bg-warning-soft text-warning-strong",
       word: `${h} hint${h > 1 ? "s" : ""} used`,
     };
@@ -73,6 +77,9 @@ export function PathRail({
     Object.values(map.nodes)
       .filter((n) => n.parent === id && n.kind === "question")
       .sort((a, b) => a.order - b.order);
+  const start = map.chat.find(
+    (c) => c.role === "claude" && !c.blankId && !c.nodeId,
+  )?.text;
   const got = steps.filter(
     (s) => s.status === "answered" && !s.revealed,
   ).length;
@@ -101,6 +108,18 @@ export function PathRail({
         <div className="mt-1 text-xs text-muted">
           {got} of {steps.length} worked out by you
         </div>
+        {/* Claude's opening instruction stays here to re-read after its
+            caption above the message box has gone */}
+        {start && (
+          <details className="mt-2 rounded-lg bg-panel px-2.5 py-1.5 text-[12px]">
+            <summary className="cursor-pointer text-[11px] font-semibold text-muted">
+              How to start
+            </summary>
+            <div className="answer answer-sm mt-1 max-h-48 overflow-y-auto text-[12.5px]">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{start}</ReactMarkdown>
+            </div>
+          </details>
+        )}
       </div>
       <ol className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
         {steps.map((s, i) => {
