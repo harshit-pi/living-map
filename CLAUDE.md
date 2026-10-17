@@ -9,7 +9,6 @@
 
 ## Before you finish
 
-- Run the verify command in `AGENTS.md` (its `## Verify` section) and fix what fails. Say what you ran.
 - Comments explain why, in the present tense, in a few lines. No dates, names, ticket or PR numbers, or incident stories: those go in the commit message or PR. Refer to docs by skill name, not "see CLAUDE.md".
 
 ## `main` is PR-only
@@ -20,7 +19,6 @@
 
 ## Pull requests
 
-- Before `gh pr create`, follow the `reviewing-before-a-pr` skill: a fresh subagent, given only the review checklist and your diff, reviews the change. Fix every Blocking and Should fix you confirm in the code (Nits are optional), and say in the PR's How tested that the review ran and what it found.
 - Write the PR description in the sections of `.github/pull_request_template.md`; `gh pr create --body` does not apply the template for you.
 - Link the GitHub issue (`Fixes #N`); if there is none, write `No issue`.
 - Tick every Risk box that applies and say why under it; leave the rest unticked.

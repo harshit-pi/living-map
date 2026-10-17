@@ -67,5 +67,4 @@ Every push to `main` that passes CI publishes a GitHub release `v0.1.<run>` (the
 ## Skills
 
 - `maintaining-agent-docs`: before creating or editing `AGENTS.md`, `CLAUDE.md` or a skill.
-- `reviewing-before-a-pr`: before every `gh pr create`.
 - `addressing-pr-reviews`: when a PR you opened has comments.

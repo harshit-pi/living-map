@@ -7,7 +7,7 @@ description: Handles review comments people leave on a pull request an agent ope
 
 Reviewers are often wrong. Never change code just because a comment says so: check the claim first.
 
-The code review itself runs before the PR opens (the `reviewing-before-a-pr` skill). This skill is for what people say afterwards, so never wait for a review to arrive.
+This skill is for what people say on a PR you opened; never wait for a review to arrive.
 
 ## Steps
 
