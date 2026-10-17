@@ -3,6 +3,8 @@
 <p align="center"><b>Understand anything by seeing it, and by doing it.</b><br>
 A visual canvas that drives your own Claude Code: you steer and answer on the picture, not in a wall of text.</p>
 
+<p align="center"><a href="app/docs/demo.mp4"><img src="app/docs/demo-poster.jpg" alt="Watch the 41-second demo: Living Map draws how noise-cancelling headphones work, you fill the gap, then it maps a rent-or-buy decision" width="720"></a><br><sub>41-second demo, sound on</sub></p>
+
 ---
 
 Long AI answers are hard to hold in your head. Living Map turns the conversation into a picture you work on directly:
