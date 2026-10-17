@@ -1,0 +1,287 @@
+// Learn on the server: any subject as a path of steps, a topic diagram with
+// blanks you fill, and steps you play by hand. Its map is core's node map,
+// shared with Explore, which is why the two switch into each other. Its state
+// is the map's top-level fields (diagram, fills, answers, scenes, play), not
+// map.data: saved maps hold it there, core applies the diagram and scene ops
+// on every map, and an Explore map switched to Learn and back keeps it.
+// Blanks and scene moves are checked here against the answers the model
+// wrote, with no model call; the answers never reach the browser.
+
+import * as canvas from "../../server/actions/canvas.ts";
+import type { Ctx } from "../../server/actions/context.ts";
+import {
+  accepts,
+  diagramOutline,
+  elementsOf,
+  revealBlank,
+} from "../../server/core/diagram.ts";
+import { newPlay, playMove, showMove } from "../../server/core/scene.ts";
+import { own, safeId, type Play, type Raw } from "../../server/core/types.ts";
+import type { ServerPlugin } from "../../server/plugin.ts";
+import type { ActionResult, MapNode } from "../../shared/model.ts";
+
+// the model's job on a learning path, sent on every move
+const PROMPT = `You are the engine behind a visual LEARNING CANVAS for any subject: code, protocols, maths, finance, science, history. The learner builds the understanding; you never hand over the full answer unless they press SHOW ANSWER.
+- The map is the learner's PATH: the root question is the topic; its children are 3-5 STEPS (questions, open until the learner gets them right), in the order to learn them.
+- The TOPIC DIAGRAM shows the subject itself in the form that fits it, with the parts the learner must discover as BLANKS (at most 3 at a time).
+- HINT on a step climbs a ladder, one rung per press: 1 = add a fact under the step titled "Hint 1" with a pointed question; 2 = add or reshape a BLANK on the diagram for that step (and a fact "Hint 2" saying where to look); 3 = a fact "Hint 3" with a fully worked tiny example. Never skip rungs.
+- When the learner answers a step (USER SAYS on a step), judge it: if right, set the step answered and say what they got right; if not, say which part is off, without the fix.
+- SHOW ANSWER on a step: write the full answer in that step's detail (key idea first) and fill the step's blanks on the diagram.
+- Prefer tiny concrete examples written as plain text.
+- Talk to the learner as "you", never "the learner".
+- For a coding problem, the LAST step is titled "Write it" (summary: what the code must do). When the learner sends code there, trace it on the example: say which line first goes wrong and why, or that it works and its cost. Never rewrite their code unless SHOW ANSWER.`;
+
+// sent on the moves that draw, fill or judge the topic diagram
+const DIAGRAM = `TOPIC DIAGRAM (learning maps only). Replace it whole with {"op":"diagram","spec":{...}}. Pick the FORM that fits the topic's shape:
+- "sequence": who does what in order (protocols, algorithms step by step, processes between parties).
+  {"form":"sequence","title":"…","lanes":["Client","Server"],"steps":[{"id":"s1","from":"Client","to":"Server","label":"SYN"}]}
+- "concept": ideas and how they relate (theories, models, formulas' inputs).
+  {"form":"concept","title":"…","nodes":[{"id":"vol","label":"Volatility","note":"≤8 words"}],"links":[{"from":"vol","to":"price","label":"raises"}]}
+- "timeline": events in time (history, versions, a project).
+  {"form":"timeline","title":"…","events":[{"id":"e1","when":"Jun 1914","label":"Archduke shot","note":"≤10 words"}]}
+- "structure": parts inside or pointing to parts (systems, data structures, anatomy, architectures).
+  {"form":"structure","title":"…","boxes":[{"id":"map","label":"Hash map","rows":["key → node"]}],"arrows":[{"from":"map","to":"n1","label":"points to"}]}
+- "grid": alternatives against criteria.
+  {"form":"grid","title":"…","columns":["SQL","NoSQL"],"rows":[{"label":"Schema","cells":[{"id":"c1","text":"Fixed"},{"id":"c2","text":"Flexible"}]}]}
+DRAW IT ON A TINY CONCRETE EXAMPLE: real values, real names, real dates, real messages (e.g. the actual input words and the groups they land in; the actual packets with their numbers). A blank is then something the learner can work out by hand: a value, a key, a pointer, a message, a cause. Never a generic pipeline of abstract stages ("Input feeds Step feeds Output").
+For coding problems, prefer the data the algorithm builds (a grid of input → computed key → where it goes, or the structure's actual state) over a flowchart of the code.
+TEACH BEFORE YOU TEST: a blank must be something the learner can work out from what the diagram already shows plus everyday sense, never something that needs a term or fact they have not been shown. If the question reads as new to the subject ("explain X", "what is X", "how does X work"), draw the whole picture with every label filled and at most ONE blank, the most inferable one; labels name what each part does in plain words ("Vector DB: finds the stored text closest in meaning"), not bare jargon.
+BLANKS: any step, node, event, box or cell may be a blank the learner fills: give it an "id", set "blank":true and a "prompt" (≤10 words), and leave its label/text EMPTY. Also give "accept": 1-5 short forms of the right answer as the learner might type them, the canonical one first (e.g. ["4"], ["(2,0)", "2,0", "row 2 col 0"], ["aet"]), and "why": ≤20 words saying why it is right, shown when they get it. The server checks typed answers against "accept" itself and never shows "accept" or "why" to the learner; put the answer nowhere else in the spec, and do not draw it in place either: if a blank asks where something goes or what it links to, that thing must not already sit there or be linked there elsewhere in the diagram (a blank asking which slot "cow" lands in means no box or arrow shows "cow" in a slot).
+At most 12 elements in a diagram; short labels. Arrows mean ONE thing per diagram, and every arrow has a label.
+Edit in place: when you send the diagram again, keep every element, id and "accept" list that stays, keep filled parts filled, and change only what the move needs.
+When the learner fills a blank (FILL), the server has already accepted any exact match, so you see only answers it could not place: they may still be right in other words. Judge it with {"op":"judge","id":"blank id","state":"right"|"wrong","label":"the correct text, ONLY when right"}. If wrong, say what is off in the caption without giving the answer.
+In anything the learner reads, refer to a blank by what it asks, never by its id.`;
+
+// sent only on the move that builds a playable scene
+const SCENE = `PLAYABLE SCENE (only when the ACTION asks for one): the learner DOES one step by hand, move by move, on a tiny concrete example. In the map block write the scene header FIRST, {"op":"scene","step":"<step id>","spec":{"kind":…,"title":…,"start":<state>}}, then ONE op per move, {"op":"move","step":"<step id>",<move fields>}, so the learner can start playing while you write. Nothing else in the block.
+Pick the kind that fits; every scene is data for one of three shapes:
+- "board": a grid of cells (chess boards, grids, matrices, DP tables, Punnett squares, truth tables). State: {"cells":[["","Q"],["",""]],"marks":[{"at":[1,0],"tone":"attack"}],"note":"≤12 words"}
+- "array": a row of items with named pointers (two pointers, binary search, sorting, stacks, queues, sliding windows). State: {"items":["2","7","11"],"pointers":[{"name":"lo","at":0}],"marks":[{"at":2,"tone":"focus"}],"note":"…"}
+- "tree": nodes with parents (recursion, backtracking, BSTs, heaps, decision trees). State: {"nodes":[{"id":"r","label":"[]","parent":null}],"marks":[{"at":"r","tone":"focus"}],"note":"…"}
+Tones: focus, attack, good, bad, path, dim.
+Move fields: "ask" (≤14 words: what to do now, not how), "answer", "then" (the full state after the right move; omit it if nothing on the picture changes), "why" (≤20 words, shown after a right move), "wrong" ({"<key>":"≤15 words"} for likely wrong picks), "choices" (optional buttons). Keep notes short.
+Marks: every state shows the consequences so far (on a board, every attacked, visited or blocked cell; in an array, the live window or range), so the picture explains itself. A mark must NEVER point at the answer of the move that comes next: no focus on the square to click. Focus only what just changed.
+Answers (exact; the browser checks them without you): {"cell":[r,c]} or {"cells":[[r,c],…]} (any of), {"index":i}, {"node":"id"}, {"choice":"one of the choices"}, {"text":["accepted","answers"]}. Wrong keys: "r,c", "i", node id, or the choice/text.
+5-10 moves. The moves make the learner carry out the process (place, pick, compare, move a pointer, backtrack, expand), not recall facts. Include at least one move where the obvious pick is wrong, with its "wrong" note. Use "choices" for decisions such as ["Place here","Backtrack"] alongside board clicks. Marks show consequences (attacked squares, visited cells, the window), so the picture explains itself after each move.`;
+
+// the first move on a new Learn map
+export function startAction(title: string): string {
+  return `start. The learner wants to understand: "${title}". Create the root question (the topic, parent null) and 3-5 steps under it in learning order. Then build the TOPIC DIAGRAM in the form that fits this topic best: the skeleton of the subject, with the 2-3 parts the learner should discover first as blanks. No solution. In the map block write the diagram op FIRST, then the root and the steps, so the picture appears before the path.`;
+}
+
+// Ids the browser sends become object keys. A core action's ids are checked
+// before it gets here; one sent as a plugin action is checked here.
+const id = (v: unknown): string =>
+  typeof v === "string" && safeId(v) ? v : "";
+
+function fill(
+  ctx: Ctx,
+  blankId: string,
+  text: string,
+): Promise<ActionResult> | ActionResult {
+  // only a blank still on the diagram is asked about: no paid turn for one
+  // that is not there
+  if (
+    !blankId ||
+    !ctx.map.diagram ||
+    !elementsOf(ctx.map.diagram).some((el) => el.id === blankId && el.blank)
+  )
+    return { error: "No such blank." };
+  const typed = String(text ?? "").slice(0, 200);
+  ctx.map.chat.push({
+    role: "you",
+    text: `Filled a blank: ${typed}`,
+    ts: Date.now(),
+  });
+  // a right answer the model already wrote down is checked here, instantly,
+  // with no model call; anything else goes to the model for a verdict
+  const answer = own(ctx.map.answers, blankId);
+  if (accepts(answer, typed) && answer) {
+    const shown = answer.accept[0];
+    ctx.map.fills[blankId] = { text: shown, state: "right" };
+    revealBlank(ctx.map.diagram, blankId, shown);
+    ctx.map.chat.push({
+      role: "claude",
+      text: answer.why ? `Right: ${answer.why}` : "Right.",
+      ts: Date.now(),
+      blankId,
+    });
+    ctx.note(
+      `Filled blank ${blankId} with "${typed}": right (checked against its accepted answers).`,
+    );
+    ctx.engine.push();
+    return { ok: true };
+  }
+  ctx.map.fills[blankId] = { text: typed, state: "pending" };
+  ctx.engine.push();
+  return ctx.engine.turn(
+    `FILL: the learner wrote "${text}" in blank ${blankId} on the topic diagram. Judge it with a judge op.`,
+    ctx.settings,
+    {
+      label: "Checking your answer",
+      sections: ["diagram"],
+      blankId,
+    },
+  );
+}
+
+function buildScene(
+  ctx: Ctx,
+  nodeId: string,
+): Promise<ActionResult> | ActionResult {
+  const found = ctx.node(nodeId);
+  if (!found) return { error: "No such step." };
+  return ctx.engine.turn(
+    `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), on the same tiny example as the diagram where it fits.`,
+    ctx.settings,
+    { label: "Building a playable scene", nodeId, sections: ["scene"] },
+  );
+}
+
+// A finished scene counts as worked out by you unless most of it was shown.
+function finishScene(ctx: Ctx, node: MapNode, p: Play) {
+  const total = ctx.map.scenes[node.id].moves.length;
+  if (node.kind === "question" && !node.revealed) {
+    if (p.shown * 2 > total) node.revealed = true;
+    else node.status = "answered";
+  }
+  ctx.note(
+    `Played the scene on "${node.title}": ${total} moves, ${p.wrong} wrong tries, ${p.shown} shown.`,
+  );
+}
+
+function advance(
+  ctx: Ctx,
+  nodeId: string,
+  step: (before: Play) => Play,
+): ActionResult {
+  const scene = ctx.map.scenes[nodeId];
+  const node = ctx.map.nodes[nodeId];
+  if (!scene || !node) return { error: "No scene on that step." };
+  const before = ctx.map.play[nodeId] ?? newPlay();
+  const p = step(before);
+  ctx.map.play[nodeId] = p;
+  if (p.at >= scene.moves.length && before.at < scene.moves.length)
+    finishScene(ctx, node, p);
+  ctx.engine.push();
+  return { ok: p.last?.ok ?? false };
+}
+
+// Checked here, instantly, against the answers the model wrote: no model call.
+const play = (ctx: Ctx, nodeId: string, key: string) =>
+  advance(ctx, nodeId, (before) =>
+    playMove(ctx.map.scenes[nodeId], before, String(key ?? "")),
+  );
+
+const show = (ctx: Ctx, nodeId: string) =>
+  advance(ctx, nodeId, (before) => showMove(ctx.map.scenes[nodeId], before));
+
+function replay(ctx: Ctx, nodeId: string): ActionResult {
+  if (!ctx.map.scenes[nodeId]) return { error: "No scene on that step." };
+  ctx.map.play[nodeId] = newPlay();
+  ctx.engine.push();
+  return {};
+}
+
+export const learn: ServerPlugin = {
+  id: "learn",
+  label: "Learn",
+  canvasName: "learning path",
+  switchesWith: ["explore"],
+  prompt: PROMPT,
+  sections: { diagram: DIAGRAM, scene: SCENE },
+  outline: (map) =>
+    `TOPIC DIAGRAM:\n${diagramOutline(map.diagram, map.fills, map.answers)}`,
+
+  async start(ctx) {
+    const m = ctx.map;
+    const r = await ctx.engine.turn(startAction(m.title), ctx.settings, {
+      label: "Drawing the topic and your path",
+      sections: ["diagram"],
+    });
+    if (!r.error && !r.stopped && !Object.keys(m.nodes).length && !m.diagram)
+      return {
+        error:
+          "Claude did not lay anything out. Try again, or rephrase the question.",
+      };
+    return r;
+  },
+
+  // a map switched to Learn with no topic diagram gets its path and diagram
+  enter(ctx) {
+    if (ctx.map.diagram || ctx.engine.state.busy) return {};
+    return ctx.engine.turn(
+      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order, and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first. Remove nothing: every node already on the map stays where it is (the learner explored it, and it is listed under what they looked into); a useful existing question can be one of the steps, but keep its title and summary as they are (Explore reads them when the learner switches back): say what a step is in the caption, never by rewriting an existing node.",
+      ctx.settings,
+      // what you explored stays, with its threads, for when you switch back
+      {
+        label: "Turning this into a learning path",
+        sections: ["diagram"],
+        keep: true,
+      },
+    );
+  },
+
+  // every core action: the path, the diagram and the step panel use them all
+  core: [
+    "choose",
+    "drop",
+    "restore",
+    "focus",
+    "fork",
+    "thread",
+    "explain",
+    "deeper",
+    "challenge",
+    "next",
+    "message",
+    "fill",
+    "hint",
+    "answer",
+    "scene",
+    "play",
+    "playshow",
+    "replay",
+  ],
+
+  // blanks and scenes are Learn's own; thread, deeper and next are core's,
+  // worded for a learner working through steps
+  actions: {
+    fill: (ctx, a: Raw) => fill(ctx, id(a.blankId), a.text),
+    scene: (ctx, a: Raw) => buildScene(ctx, id(a.nodeId)),
+    play: (ctx, a: Raw) => play(ctx, id(a.nodeId), a.key),
+    playshow: (ctx, a: Raw) => show(ctx, id(a.nodeId)),
+    replay: (ctx, a: Raw) => replay(ctx, id(a.nodeId)),
+    thread: (ctx, a: Raw) =>
+      canvas.thread(
+        ctx,
+        id(a.nodeId),
+        id(a.threadId) || undefined,
+        a.text,
+        ({ node, named }) =>
+          node.kind === "question"
+            ? `the learner wrote in the thread on step ${named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`
+            : null,
+      ),
+    deeper: (ctx, a: Raw) =>
+      canvas.deeper(ctx, id(a.nodeId), "Breaking it into smaller steps"),
+    next: (ctx) =>
+      canvas.next(
+        ctx,
+        "next: point the learner at the next open step and make its first move clear, without solving it.",
+      ),
+  },
+
+  // the path's steps, counted as the path counts them: worked out by you, not shown
+  summary(map) {
+    const nodes = Object.values(map.nodes);
+    const root = nodes.find((n) => !n.parent);
+    const steps = nodes.filter(
+      (n) => n.kind === "question" && n.parent && n.parent === root?.id,
+    );
+    const done = steps.filter(
+      (n) => n.status === "answered" && !n.revealed,
+    ).length;
+    return `${done} of ${steps.length} worked out by you${map.diagram?.form ? ` · ${map.diagram.form}` : ""}`;
+  },
+};

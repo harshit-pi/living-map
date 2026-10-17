@@ -1,13 +1,13 @@
 import { useState } from "react";
 
-import { DiagramView } from "../components/DiagramView.tsx";
-import { FloatingComposer } from "../components/FloatingComposer.tsx";
-import { NodePanel } from "../components/NodePanel.tsx";
-import { PathRail } from "../components/PathRail.tsx";
-import { ScenePlay } from "../components/ScenePlay.tsx";
-import { act } from "../lib/api.ts";
-import { nextOpenStep, nextStep } from "../lib/steps.ts";
-import type { Workspace } from "../lib/workspace.ts";
+import { DiagramView } from "./DiagramView.tsx";
+import { PathRail } from "./PathRail.tsx";
+import { ScenePlay } from "./ScenePlay.tsx";
+import { nextOpenStep, nextStep } from "./steps.ts";
+import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
+import { NodePanel } from "../../../web/components/NodePanel.tsx";
+import { act } from "../../../web/lib/api.ts";
+import type { Workspace } from "../../../web/lib/workspace.ts";
 
 const BUILDING = "Building a playable scene";
 
@@ -181,6 +181,7 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
               onClose={() =>
                 scene && !roomy ? setPanelOpen(false) : setSelection([])
               }
+              asSteps
             />
           )}
           <FloatingComposer

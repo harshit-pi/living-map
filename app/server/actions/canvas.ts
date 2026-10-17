@@ -2,7 +2,7 @@
 // threads, and the moves that ask the model to change a node.
 
 import { withDetail, type Ctx } from "./context.ts";
-import type { ActionResult } from "../../shared/model.ts";
+import type { ActionResult, MapNode } from "../../shared/model.ts";
 import { choose as chooseOption } from "../core/canvas.ts";
 
 const done = (ctx: Ctx): ActionResult => {
@@ -90,12 +90,15 @@ export function fork(ctx: Ctx, nodeId: string): ActionResult {
   return { threadId };
 }
 
-// A message in a side thread pinned to a node (opens one if needed).
+// A message in a side thread pinned to a node (opens one if needed). A mode
+// may word the move its own way for some nodes (Learn's steps); null keeps
+// the plain wording.
 export async function thread(
   ctx: Ctx,
   nodeId: string,
   threadId: string | undefined,
   text: string,
+  ask?: (found: { node: MapNode; named: string }) => string | null,
 ): Promise<ActionResult> {
   const found = ctx.node(nodeId);
   if (!found) return { error: "No such node." };
@@ -105,9 +108,7 @@ export async function thread(
       : ctx.engine.openThread(ctx.map, nodeId);
   ctx.say(String(text ?? ""), tid);
   const r = await ctx.engine.turn(
-    ctx.map.purpose === "learn" && found.node.kind === "question"
-      ? `the learner wrote in the thread on step ${found.named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`
-      : `the user wrote in the thread on ${found.named}.`,
+    ask?.(found) ?? `the user wrote in the thread on ${found.named}.`,
     ctx.settings,
     {
       text,
@@ -142,18 +143,17 @@ export function explain(
   );
 }
 
+// the label is what the working bar says (Learn: breaking a step down)
 export function deeper(
   ctx: Ctx,
   nodeId: string,
+  label = "Going deeper",
 ): Promise<ActionResult> | ActionResult {
   const found = ctx.node(nodeId);
   if (!found) return { error: "No such node." };
   ctx.say(`Go deeper: ${found.node.title}`);
   return ctx.engine.turn(`go deeper on ${found.named}.`, ctx.settings, {
-    label:
-      ctx.map.purpose === "learn"
-        ? "Breaking it into smaller steps"
-        : "Going deeper",
+    label,
     nodeId,
   });
 }
@@ -172,15 +172,16 @@ export function challenge(
   );
 }
 
-export function next(ctx: Ctx): Promise<ActionResult> {
+// a mode may say what Next means on its canvas (Learn: the next open step)
+export function next(
+  ctx: Ctx,
+  action = "next: take the most important open question and make it clearer or decidable, or if nothing is open, say what is settled and what remains.",
+): Promise<ActionResult> {
   ctx.say("Next");
-  return ctx.engine.turn(
-    ctx.map.purpose === "learn"
-      ? "next: point the learner at the next open step and make its first move clear, without solving it."
-      : "next: take the most important open question and make it clearer or decidable, or if nothing is open, say what is settled and what remains.",
-    ctx.settings,
-    { label: "Working out the next step", sections: ["diagram"] },
-  );
+  return ctx.engine.turn(action, ctx.settings, {
+    label: "Working out the next step",
+    sections: ["diagram"],
+  });
 }
 
 export function message(

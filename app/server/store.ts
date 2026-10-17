@@ -84,16 +84,8 @@ export function listMaps(currentId: string | null): MapSummary[] {
     if (!m) continue;
     const nodes = Object.values(m.nodes);
     if (!nodes.length && !m.diagram) continue;
-    const root = nodes.find((n) => !n.parent);
-    const learn = m.purpose === "learn";
-    // Learn counts its path's steps as the path does: worked out by you, not shown
-    const steps = nodes.filter(
-      (n) =>
-        n.kind === "question" && n.parent && (!learn || n.parent === root?.id),
-    );
-    const done = steps.filter(
-      (n) => n.status === "answered" && !(learn && n.revealed),
-    ).length;
+    const steps = nodes.filter((n) => n.kind === "question" && n.parent);
+    // a mode words its own line (Learn: how much of the path you worked out)
     const summary = pluginFor(m.purpose)?.summary?.(m);
     out.push({
       id: m.id,
@@ -101,13 +93,8 @@ export function listMaps(currentId: string | null): MapSummary[] {
       purpose: m.purpose,
       updatedAt: fs.statSync(path.join(MAPS_DIR, f)).mtimeMs,
       nodes: nodes.length,
-      open: learn
-        ? steps.length - done
-        : steps.filter((n) => n.status === "open").length,
-      done,
-      // the topic diagram's form is Learn's word: a map Learn once opened
-      // keeps its diagram, and an Explore row read "· grid"
-      form: learn ? (m.diagram?.form ?? null) : null,
+      open: steps.filter((n) => n.status === "open").length,
+      done: steps.filter((n) => n.status === "answered").length,
       current: m.id === currentId,
       ...(summary ? { summary } : {}),
     });

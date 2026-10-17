@@ -5,7 +5,7 @@
 export type Kind = "question" | "option" | "fact";
 export type Status =
   "open" | "answered" | "proposed" | "chosen" | "dropped" | "info";
-// "explore" and "learn" are built in; a plugin adds its own (e.g. "design")
+// a mode is a plugin, by its id: "explore", "learn", "design", …
 export type Purpose = "explore" | "learn" | (string & {});
 // How Claude should shape a reply: a caption for the canvas, or a short chat answer in a side thread
 export type View = "visual" | "thread";
@@ -165,9 +165,8 @@ export type MapSummary = {
   nodes: number;
   open: number;
   done: number;
-  form: DiagramForm | null;
   current: boolean;
-  // a plugin's own one-line summary, e.g. "7 parts · 6 wires"
+  // a mode's own one-line summary, e.g. "7 parts · 6 wires"
   summary?: string;
 };
 

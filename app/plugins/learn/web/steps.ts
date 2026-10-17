@@ -1,6 +1,6 @@
 // Moving along a learning path: the steps are the root's question children, in order.
 
-import type { MapDoc, MapNode } from "../../shared/model.ts";
+import type { MapDoc, MapNode } from "../../../shared/model.ts";
 
 function stepsOf(map: MapDoc, parent: string | null | undefined): MapNode[] {
   return Object.values(map.nodes)

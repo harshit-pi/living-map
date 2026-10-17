@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { MapDoc, MapNode } from "../../shared/model.ts";
+import type { MapDoc, MapNode } from "../../../shared/model.ts";
 
 const hintsOf = (map: MapDoc, id: string) =>
   Object.values(map.nodes).filter(

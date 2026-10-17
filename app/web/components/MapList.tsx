@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from "react";
 
 import type { MapSummary } from "../../shared/model.ts";
 import { useMaps } from "../lib/api.ts";
+import { pluginFor } from "../plugins.ts";
+
+const BADGE = {
+  success: "bg-success-soft text-success-strong",
+  warning: "bg-warning-soft text-warning-strong",
+};
 
 function ago(ms: number) {
   const m = Math.round((Date.now() - ms) / 60000);
@@ -34,7 +40,7 @@ export function MapRows({
           >
             <span
               // one width for every kind, so the titles line up
-              className={`w-[62px] shrink-0 rounded-sm py-0.5 text-center text-[10px] font-semibold uppercase tracking-wide ${m.purpose === "learn" ? "bg-success-soft text-success-strong" : "bg-warning-soft text-warning-strong"}`}
+              className={`w-[62px] shrink-0 rounded-sm py-0.5 text-center text-[10px] font-semibold uppercase tracking-wide ${BADGE[pluginFor(m.purpose)?.badge ?? "warning"]}`}
             >
               {m.purpose}
             </span>
@@ -43,12 +49,7 @@ export function MapRows({
                 {m.title}
               </span>
               <span className="block text-[11px] text-muted">
-                {m.summary
-                  ? m.summary
-                  : m.purpose === "learn"
-                    ? `${m.done} of ${m.done + m.open} worked out by you`
-                    : `${m.nodes} nodes · ${m.open} open`}
-                {m.form ? ` · ${m.form}` : ""}
+                {m.summary ?? `${m.nodes} nodes · ${m.open} open`}
               </span>
             </span>
             <span className="shrink-0 text-[11px] text-faint">

@@ -1,8 +1,9 @@
 // The contract a plugin implements on the server. Core keeps the map, the move
 // queue, threads, the model and updates; a plugin adds one way of working on
-// the canvas (Design is the first): what the model is told, the ops it may
-// write, the actions the browser may send, and what of its state the browser
-// sees. A plugin's state lives in map.data[plugin.id].
+// the canvas (Explore, Learn and Design are plugins): what the model is told,
+// the ops it may write, the actions the browser may send, and what of its
+// state the browser sees. A plugin's state lives in map.data[plugin.id]
+// (Learn's lives in the map's older top-level fields; see plugins/learn).
 
 import type { ActionResult } from "../shared/model.ts";
 import type { Ctx } from "./actions/context.ts";
@@ -35,6 +36,9 @@ export type ServerPlugin = {
   keepUserNodes?: boolean;
   // the first move on a new map of this purpose
   start: (ctx: Ctx) => Promise<ActionResult>;
+  // a map switched into this mode from another (see switchesWith), once its
+  // purpose is set: e.g. Learn lays out a path on a map that has none
+  enter?: (ctx: Ctx, from: string) => Promise<ActionResult> | ActionResult;
   // actions the browser sends as {type: "plugin", plugin: id, name, args}
   actions?: Record<
     string,

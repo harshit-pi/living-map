@@ -6,12 +6,12 @@
 
 import fs from "node:fs";
 
+import { learn, startAction } from "../plugins/learn/server.ts";
 import { HOME, MODEL_CWD, PROVIDER } from "../server/config.ts";
 import { applyOps, outline } from "../server/core/canvas.ts";
 import { diagramOutline } from "../server/core/diagram.ts";
 import { systemPrompt, viewLine } from "../server/core/prompts.ts";
 import { completeOps } from "../server/core/reply.ts";
-import { startAction } from "../server/core/start.ts";
 import type { Canvas } from "../server/core/types.ts";
 import { pickProvider } from "../server/providers/index.ts";
 import type { DiagramForm } from "../shared/model.ts";
@@ -71,7 +71,7 @@ async function run(question: string, effort: string): Promise<Result> {
     viewLine("visual"),
   ].join("\n\n");
   const reply = await provider.run(
-    { system: systemPrompt("learn", ["diagram"]), message, effort },
+    { system: systemPrompt("learn", ["diagram"], learn), message, effort },
     () => {},
   ).reply;
   const usage = await reply.usage;

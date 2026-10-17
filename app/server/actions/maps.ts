@@ -1,7 +1,7 @@
 // Starting, reopening and switching maps.
 
 import type { ActionResult, Purpose, Settings } from "../../shared/model.ts";
-import { splitStart, startAction } from "../core/start.ts";
+import { splitStart } from "../core/start.ts";
 import type { Engine } from "../engine.ts";
 import { pluginFor } from "../plugins.ts";
 import { newMap, readMap } from "../store.ts";
@@ -15,29 +15,15 @@ export async function start(
   purpose: Purpose,
 ): Promise<ActionResult> {
   await engine.stop();
-  // Learn is built in; any other mode is a plugin, and an unknown one starts as Explore
-  const plugin =
-    purpose === "learn"
-      ? undefined
-      : (pluginFor(purpose) ?? pluginFor("explore"));
-  const p: Purpose = plugin ? plugin.id : "learn";
+  // an unknown mode starts as Explore
+  const plugin = pluginFor(purpose) ?? pluginFor("explore")!;
   const { title, source } = splitStart(text);
-  const m = newMap(title, p);
+  const m = newMap(title, plugin.id);
   if (source) m.source = source;
   m.chat.push({ role: "you", text: source || title, ts: Date.now() });
   engine.state.map = m;
   engine.push();
-  if (plugin) return plugin.start(makeCtx(engine, settings, m));
-  const r = await engine.turn(startAction(m.title), settings, {
-    label: "Drawing the topic and your path",
-    sections: ["diagram"],
-  });
-  if (!r.error && !r.stopped && !Object.keys(m.nodes).length && !m.diagram)
-    return {
-      error:
-        "Claude did not lay anything out. Try again, or rephrase the question.",
-    };
-  return r;
+  return plugin.start(makeCtx(engine, settings, m));
 }
 
 // Reopen an earlier map; a move still running on the current one is stopped first.
@@ -53,8 +39,9 @@ export async function open(
   return {};
 }
 
-// Switch between Explore and Learn. A map with no topic diagram gets one;
-// nothing on the map is removed on the way, so switching back finds it all.
+// Switch between Explore and Learn. Nothing on the map is removed on the way,
+// so switching back finds it all; the mode switched to may add to it (Learn
+// lays out a path on a map that has none).
 export function switchPurpose(
   ctx: Ctx,
   purpose: Purpose,
@@ -72,19 +59,9 @@ export function switchPurpose(
           ? "This map's mode is fixed; start a new map for another mode."
           : "A map switches only between Explore and Learn.",
     };
+  const from = map.purpose;
   map.purpose = purpose;
   ctx.note(`Switched the canvas to ${map.purpose} mode.`);
   engine.push();
-  if (map.purpose === "learn" && !map.diagram && !engine.state.busy)
-    return engine.turn(
-      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order, and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first. Remove nothing: every node already on the map stays where it is (the learner explored it, and it is listed under what they looked into); a useful existing question can be one of the steps, but keep its title and summary as they are (Explore reads them when the learner switches back): say what a step is in the caption, never by rewriting an existing node.",
-      ctx.settings,
-      // what you explored stays, with its threads, for when you switch back
-      {
-        label: "Turning this into a learning path",
-        sections: ["diagram"],
-        keep: true,
-      },
-    );
-  return {};
+  return pluginFor(map.purpose)?.enter?.(ctx, from) ?? {};
 }

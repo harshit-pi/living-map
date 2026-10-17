@@ -7,7 +7,7 @@ import type {
   Scene,
   Tone,
   TreeState,
-} from "../../shared/model.ts";
+} from "../../../shared/model.ts";
 
 // One step played by hand. The same three shapes serve every subject: a board
 // of cells, a row of items with pointers, a tree. Each click goes to the server,
