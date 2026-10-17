@@ -774,6 +774,33 @@ test("a second Check my design while one runs asks for no second review", async 
   );
 });
 
+test("a review written while you changed the design says it is of the design before", async () => {
+  const { engine, calls } = setup(designMap());
+  const added = await act(engine, design("add", { kind: "service", x: 300 }));
+  await act(engine, design("add", { kind: "cache", x: 500 }));
+  const review = (text: string) =>
+    `${text}\n\`\`\`map\n{"ops":[{"op":"review","summary":"${text}","points":[]}]}\n\`\`\``;
+  const reviewOf = () =>
+    (engine.state.map?.data?.design as { review: { edited?: boolean } }).review;
+
+  // nothing changed while it ran: an ordinary review
+  const first = act(engine, design("check"));
+  await settled(calls, 1);
+  calls[0].release(review("Thin."));
+  await first;
+  assert.equal(reviewOf().edited, undefined);
+
+  // a part removed and one added while it ran: the review says so
+  const second = act(engine, design("check"));
+  await settled(calls, 2);
+  await act(engine, design("remove", { id: added.nodeId }));
+  await act(engine, design("add", { kind: "worker", x: 700 }));
+  calls[1].release(review("Still thin."));
+  await second;
+  assert.equal(reviewOf().edited, true);
+  assert.match(calls[1].req.message, /Service/, "the model saw the old design");
+});
+
 test("a Design map refuses the core actions its screen has no use for", async () => {
   const { engine, calls } = setup(designMap());
   const m = engine.state.map!;

@@ -57,6 +57,7 @@ const REVIEW = `CHECK MY DESIGN: review the learner's design against the brief, 
 Point "on" at the learner's component ids; in the text, name parts by their names, never by id. If the design already settles a deep dive, set that question answered with a summary of what they chose. The caption is one sentence: the single most important thing to do next.`;
 
 const REVIEWING = "Reviewing your design";
+const REVEALED = "The learner opened your reference design.";
 
 const note = (ctx: Ctx, text: string) => {
   ctx.note(text);
@@ -93,7 +94,18 @@ export const design: ServerPlugin = {
       return op?.op && ["brief", "reference", "place", "wire"].includes(op.op)
         ? 0
         : null;
-    return applyDesignOp(state(map), op);
+    const s = state(map);
+    const n = applyDesignOp(s, op);
+    // what you did on the canvas since this move was sent waits in the notes
+    // for the next one: a review written now is of the design before it
+    if (
+      op?.op === "review" &&
+      n &&
+      s.review &&
+      map.notes.some((x) => x !== REVEALED)
+    )
+      s.review.edited = true;
+    return n;
   },
 
   async start(ctx) {
@@ -217,7 +229,7 @@ export const design: ServerPlugin = {
       if (!s.reference)
         return { error: "There is no reference design on this map." };
       s.revealed = true;
-      note(ctx, "The learner opened your reference design.");
+      note(ctx, REVEALED);
       return { ok: true };
     },
     message(ctx, a) {

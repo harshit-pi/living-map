@@ -36,21 +36,31 @@ function control(side: Side, from: At, to: At): At {
   return { x: from.x, y: from.y + off(to.y - from.y) };
 }
 
-// how badly the wire's curve runs over (or brushes) other parts' cards: each
-// card it goes under counts most, then how far it runs under them
-function overlap(a: Card, b: Card, [sa, sb]: [Side, Side], others: Card[]) {
+// points along the wire's curve between two dots, as React Flow draws it
+function along(a: Card, b: Card, [sa, sb]: [Side, Side]): At[] {
   const p0 = dot(a, sa);
   const p3 = dot(b, sb);
   const p1 = control(sa, p0, p3);
   const p2 = control(sb, p3, p0);
-  const under = new Set<Card>();
-  let n = 0;
+  const out: At[] = [];
   for (let i = 1; i < 48; i++) {
     const t = i / 48;
     const u = 1 - t;
     const k = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
-    const x = k[0] * p0.x + k[1] * p1.x + k[2] * p2.x + k[3] * p3.x;
-    const y = k[0] * p0.y + k[1] * p1.y + k[2] * p2.y + k[3] * p3.y;
+    out.push({
+      x: k[0] * p0.x + k[1] * p1.x + k[2] * p2.x + k[3] * p3.x,
+      y: k[0] * p0.y + k[1] * p1.y + k[2] * p2.y + k[3] * p3.y,
+    });
+  }
+  return out;
+}
+
+// how badly the wire's curve runs over (or brushes) other parts' cards: each
+// card it goes under counts most, then how far it runs under them
+function overlap(a: Card, b: Card, sides: [Side, Side], others: Card[]) {
+  const under = new Set<Card>();
+  let n = 0;
+  for (const { x, y } of along(a, b, sides))
     for (const o of others)
       if (
         x > o.x - 6 &&
@@ -61,7 +71,6 @@ function overlap(a: Card, b: Card, [sa, sb]: [Side, Side], others: Card[]) {
         under.add(o);
         n++;
       }
-  }
   return under.size * 12 + n;
 }
 
@@ -161,4 +170,23 @@ export function route(
       set(w, best);
     }
   return out;
+}
+
+// Whether a card put here would sit across a wire already drawn: it would
+// read as wired in when it is not.
+export function onWire(
+  spot: Box,
+  wires: { from: string; to: string; sides: [Side, Side] }[],
+  boxes: Map<string, Box>,
+): boolean {
+  const o = card(spot);
+  return wires.some((w) =>
+    along(card(boxes.get(w.from)), card(boxes.get(w.to)), w.sides).some(
+      ({ x, y }) =>
+        x > o.x - 12 &&
+        x < o.x + o.w + 12 &&
+        y > o.y - 12 &&
+        y < o.y + o.h + 12,
+    ),
+  );
 }

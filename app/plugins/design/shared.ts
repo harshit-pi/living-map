@@ -305,7 +305,14 @@ export type ReviewPoint = {
   on: string[]; // component ids it is about
 };
 
-export type Review = { at: number; summary: string; points: ReviewPoint[] };
+export type Review = {
+  at: number;
+  summary: string;
+  points: ReviewPoint[];
+  // you changed the design while Claude was reviewing it: the review is of
+  // the design before those changes
+  edited?: boolean;
+};
 
 // the next thing to do, written when a deep dive is settled between checks,
 // so the sidebar stops asking what you have just decided

@@ -22,11 +22,12 @@ import {
   type KindId,
   type Load,
   type Reference,
+  type Side,
   type Wire,
 } from "../shared.ts";
 import { fmt, GROUP_TONE, STATUS_TONE, utilText } from "./format.ts";
 import { Icon } from "./Icon.tsx";
-import { NODE_H, NODE_W, route, type At, type Box } from "./route.ts";
+import { NODE_H, NODE_W, onWire, route, type At, type Box } from "./route.ts";
 
 export type Picked = { type: "comp" | "wire"; id: string } | null;
 type Act = (name: string, args: Record<string, unknown>) => void;
@@ -70,7 +71,7 @@ function CompNode({ data, selected }: NodeProps<Node<CompData>>) {
     <div
       className={`rounded-xl bg-surface shadow-xs ${ring} ${ghost ? "opacity-90" : ""}`}
       style={{ width: NODE_W }}
-      title={`${comp.label} (${k.label}): ${k.hint}`}
+      title={`${comp.label} (${k.label}${scale ? `, ${scale}` : ""}): ${k.hint}`}
     >
       {(["top", "right", "bottom", "left"] as const).map((side) => (
         <Handle
@@ -95,9 +96,10 @@ function CompNode({ data, selected }: NodeProps<Node<CompData>>) {
           >
             {comp.label}
           </div>
-          <div className="truncate text-[11px] text-muted">
-            {k.label}
-            {scale && ` · ${scale}`}
+          {/* the scale goes on a line of its own when it does not fit */}
+          <div className="flex flex-wrap gap-x-1 text-[11px] text-muted">
+            <span className="max-w-full truncate">{k.label}</span>
+            {scale && <span className="max-w-full truncate">· {scale}</span>}
           </div>
         </div>
       </div>
@@ -332,11 +334,24 @@ export function DesignCanvas({
     const now = Date.now();
     recent.current = recent.current.filter((p) => now - p.at < 3000);
     const taken: At[] = [...view.comps, ...recent.current];
+    // clear of the cards, and of the wires: a card across a wire reads as
+    // wired in when it is not
+    const boxes = new Map<string, Box>(
+      nodes.map((n) => [
+        n.id,
+        { ...n.position, w: n.measured?.width, h: n.measured?.height },
+      ]),
+    );
+    const drawn = edges.map((e) => ({
+      from: e.source,
+      to: e.target,
+      sides: [e.sourceHandle, e.targetHandle] as [Side, Side],
+    }));
     const free = (x: number, y: number) =>
       taken.every(
         (c) =>
           Math.abs(c.x - x) > NODE_W + 24 || Math.abs(c.y - y) > NODE_H + 24,
-      );
+      ) && !onWire({ x, y }, drawn, boxes);
     // the whole card on the canvas, above the message box, under nothing
     const seen = (x: number, y: number) => {
       const a = flowToScreenPosition({ x, y });

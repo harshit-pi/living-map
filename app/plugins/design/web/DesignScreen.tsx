@@ -11,6 +11,8 @@ import {
   type Picked,
 } from "./DesignCanvas.tsx";
 import { fmt, named, STATUS_TONE } from "./format.ts";
+import { beside } from "./place.ts";
+import { NODE_H } from "./route.ts";
 import type { ChatLine } from "../../../shared/model.ts";
 import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
@@ -389,6 +391,7 @@ function Design({ ws }: { ws: Workspace }) {
               }))}
               summary={named(view.review.summary, view.comps)}
               stale={checkStopped}
+              edited={!!view.review.edited}
               onHover={setHover}
               onFold={() => setFolded(view.review!.at)}
             />
@@ -647,6 +650,7 @@ function ReviewCard({
   summary,
   points,
   stale,
+  edited,
   onHover,
   onFold,
 }: {
@@ -654,6 +658,8 @@ function ReviewCard({
   points: ReviewPoint[];
   // the last check was stopped: this review is the one before it
   stale: boolean;
+  // you changed the design while it was being written
+  edited: boolean;
   onHover: (ids: string[]) => void;
   onFold: () => void;
 }) {
@@ -675,6 +681,12 @@ function ReviewCard({
         <div className="mt-1.5 rounded-md bg-warning-soft px-2 py-1 text-[12px] text-warning-strong ring-1 ring-warning-line">
           Your last check was stopped before Claude finished: this is the review
           before it. Check again for a new one.
+        </div>
+      )}
+      {edited && !stale && (
+        <div className="mt-1.5 rounded-md bg-warning-soft px-2 py-1 text-[12px] text-warning-strong ring-1 ring-warning-line">
+          You changed the design while Claude was reviewing it: this review is
+          of the design before your changes. Check again for a new one.
         </div>
       )}
       {summary && (
@@ -890,8 +902,8 @@ function Inspector({
   );
 }
 
-// The inspector opens beside what you picked (right of it, or left when there
-// is no room), inside the canvas, and follows it when the canvas moves.
+// The inspector opens beside what you picked (see `beside`), inside the
+// canvas, and follows it when the canvas moves.
 const PANEL_W = 300;
 function useBeside(
   view: DesignView,
@@ -901,33 +913,41 @@ function useBeside(
   const { x, y, zoom } = useViewport();
   const paneW = useStore((s) => s.width);
   const paneH = useStore((s) => s.height);
+  // the card as drawn: a wrapped line makes it taller
+  const drawn = useStore((s) =>
+    picked.type === "comp"
+      ? s.nodeLookup.get(picked.id)?.measured.height
+      : undefined,
+  );
   const comp = (id: string) => view.comps.find((c) => c.id === id);
-  let at: { x: number; y: number; w: number } | null = null;
+  let at: { x: number; y: number; w: number; h: number } | null = null;
   if (picked.type === "comp") {
     const c = comp(picked.id);
-    if (c) at = { x: c.x, y: c.y, w: NODE_W };
+    if (c) at = { x: c.x, y: c.y, w: NODE_W, h: drawn ?? NODE_H };
   } else {
     const w = view.wires.find((o) => o.id === picked.id);
     const a = w && comp(w.from);
     const b = w && comp(w.to);
     if (a && b)
-      at = { x: (a.x + b.x + NODE_W) / 2, y: (a.y + b.y) / 2 + 30, w: 0 };
+      at = { x: (a.x + b.x + NODE_W) / 2, y: (a.y + b.y) / 2 + 30, w: 0, h: 0 };
   }
   if (!at) return { left: PALETTE_W + 16, top: 12 };
-  const left = PALETTE_W + at.x * zoom + x;
-  const right = left + at.w * zoom;
-  const maxLeft = PALETTE_W + paneW - PANEL_W - 8;
-  return {
-    left: Math.round(
-      right + 12 <= maxLeft
-        ? right + 12
-        : Math.max(PALETTE_W + 8, Math.min(maxLeft, left - PANEL_W - 12)),
-    ),
-    // below the buttons and above the message box
-    top: Math.round(
-      Math.max(56, Math.min(at.y * zoom + y, paneH - COMPOSER_H - tall - 8)),
-    ),
-  };
+  return beside(
+    {
+      left: PALETTE_W + at.x * zoom + x,
+      top: at.y * zoom + y,
+      w: at.w * zoom,
+      h: at.h * zoom,
+    },
+    { w: PANEL_W, h: tall },
+    {
+      minLeft: PALETTE_W + 8,
+      maxLeft: PALETTE_W + paneW - PANEL_W - 8,
+      // below the buttons and above the message box
+      minTop: 56,
+      maxTop: paneH - COMPOSER_H - tall - 8,
+    },
+  );
 }
 
 const Head = ({ title, onClose }: { title: string; onClose: () => void }) => (

@@ -258,6 +258,28 @@ type GNode = {
   body: ReactNode;
 };
 function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
+  // each box's height as drawn: a row that wraps makes a box taller than its
+  // estimate, and the boxes under it must move down to make room
+  const inner = useRef<HTMLDivElement>(null);
+  const [drawn, setDrawn] = useState<Record<string, number>>({});
+  const ids = nodes.map((n) => n.id).join(" ");
+  useEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const next: Record<string, number> = {};
+      for (const b of el.querySelectorAll<HTMLElement>("[data-box]"))
+        next[b.dataset.box!] = Math.ceil(b.offsetHeight);
+      setDrawn((d) =>
+        Object.keys(next).length === Object.keys(d).length &&
+        Object.entries(next).every(([k, h]) => d[k] === h)
+          ? d
+          : next,
+      );
+    });
+    for (const b of el.querySelectorAll("[data-box]")) ro.observe(b);
+    return () => ro.disconnect();
+  }, [ids]);
   const laid = useMemo(() => {
     const g = new dagre.graphlib.Graph({ multigraph: true });
     g.setGraph({
@@ -268,7 +290,11 @@ function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
       marginy: 16,
     });
     g.setDefaultEdgeLabel(() => ({}));
-    for (const n of nodes) g.setNode(n.id, { width: n.w, height: n.h });
+    for (const n of nodes)
+      g.setNode(n.id, {
+        width: n.w,
+        height: Math.max(n.h, drawn[n.id] ?? 0),
+      });
     // links may name a node by id or by its label
     const find = (ref: string) =>
       nodes.find((n) => n.id === ref)?.id ??
@@ -305,7 +331,7 @@ function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
       pos: Object.fromEntries(nodes.map((n) => [n.id, g.node(n.id)])),
       edges,
     };
-  }, [nodes, links]);
+  }, [nodes, links, drawn]);
   // shrink a wide graph to fit the space (never below 60%; past that, scroll)
   const box = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(0);
@@ -324,6 +350,7 @@ function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
         className="mx-auto"
       >
         <div
+          ref={inner}
           className="relative origin-top-left"
           style={{
             width: laid.g.width,
@@ -381,9 +408,10 @@ function Graph({ nodes, links }: { nodes: GNode[]; links: Link[] }) {
               p && (
                 <div
                   key={n.id}
+                  data-box={n.id}
                   style={{
                     left: p.x - n.w / 2,
-                    top: p.y - n.h / 2,
+                    top: p.y - p.height / 2,
                     width: n.w,
                     minHeight: n.h,
                   }}

@@ -18,7 +18,8 @@ import {
   type DesignState,
 } from "./core.ts";
 import { named } from "./web/format.ts";
-import { route, type Box } from "./web/route.ts";
+import { beside } from "./web/place.ts";
+import { onWire, route, type Box } from "./web/route.ts";
 
 const brief = {
   title: "Twitter",
@@ -540,4 +541,49 @@ test("wires keep off a dot that carries one the other way, and off other cards",
   }
   for (const [dot, w] of ways) assert.ok(w.size === 1, `${dot} runs both ways`);
   assert.notDeepEqual(r.get("post-svc>post-db"), ["bottom", "top"]);
+});
+
+test("a new part is not put across a wire it is not on", () => {
+  // the URL shortener: a wire runs up from the redirect service to the store
+  const boxes = new Map<string, Box>([
+    ["svc", { x: 0, y: 300, w: 172, h: 84 }],
+    ["store", { x: 0, y: 0, w: 172, h: 84 }],
+  ]);
+  const wires = [
+    { from: "svc", to: "store", sides: ["top", "bottom"] as ["top", "bottom"] },
+  ];
+  assert.equal(onWire({ x: 0, y: 150 }, wires, boxes), true, "across it");
+  assert.equal(onWire({ x: 300, y: 150 }, wires, boxes), false, "beside it");
+  assert.equal(onWire({ x: 0, y: 150 }, [], boxes), false, "no wires");
+});
+
+test("the inspector opens beside its part, or under or over it, never on it", () => {
+  const panel = { w: 300, h: 280 };
+  const room = { minLeft: 176, maxLeft: 460, minTop: 56, maxTop: 450 };
+  const covers = (
+    p: { left: number; top: number },
+    c: { left: number; top: number; w: number; h: number },
+  ) =>
+    p.left < c.left + c.w &&
+    p.left + panel.w > c.left &&
+    p.top < c.top + c.h &&
+    p.top + panel.h > c.top;
+  // room on the right
+  const lone = { left: 100, top: 200, w: 152, h: 72 };
+  assert.deepEqual(beside(lone, panel, room), { left: 264, top: 200 });
+  // room only on the left
+  const far = { left: 600, top: 200, w: 152, h: 72 };
+  assert.deepEqual(beside(far, panel, room), { left: 288, top: 200 });
+  // the load balancer by the palette, with the review open: no room either
+  // side, so it opens under the card, in sight
+  const lb = { left: 332, top: 368, w: 152, h: 72 };
+  const p = beside(lb, panel, room);
+  assert.ok(!covers(p, lb), JSON.stringify(p));
+  assert.deepEqual(p, { left: 332, top: 450 });
+  // and over it when there is no room under it
+  const low = { left: 332, top: 420, w: 152, h: 72 };
+  assert.deepEqual(beside(low, panel, room), { left: 332, top: 128 });
+  // a wire's midpoint: right of it, or left when that would cover it
+  const mid = { left: 600, top: 200, w: 0, h: 0 };
+  assert.deepEqual(beside(mid, panel, room), { left: 288, top: 200 });
 });
