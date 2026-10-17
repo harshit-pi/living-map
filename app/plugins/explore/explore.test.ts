@@ -2167,7 +2167,9 @@ test("a check's result reported in its thread is weighed, then settling is yours
   assert.match(g.label, /^Weigh what came in/);
   await run("next", {});
   assert.match(turns.at(-1)!.action, /WEIGH what came in/);
-  assert.match(turns.at(-1)!.action, /Write only a stand op/);
+  assert.match(turns.at(-1)!.action, /Write a stand op/);
+  // and picks the check to run next, so Next does not sell that pick again
+  assert.match(turns.at(-1)!.action, /takeaway op on it starting "Run first:"/);
   // Claude's stand leads the cause it points at; you mark it likely
   applyExploreOp(
     live(m),
@@ -2394,4 +2396,242 @@ test("a cause holding a sub-choice lays it narrower rather than wrap below the f
   assert.ok(t.boxes.fix1.y > t.boxes.fix0.y, "one to a row, as it fits");
   const v = frameOf(t, { left: 24, top: 24, w: 1392, h: 676 });
   assert.ok(v.zoom >= 0.7);
+});
+
+// ---------------------------------------------------------------- round 7
+
+// A rent-or-buy board after a Fill: Claude can't tell Buy now's must without
+// your budget, and says so citing a check still to run.
+function budgetBoard() {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  nodes["k-budget"] = node(
+    "k-budget",
+    "q",
+    "fact",
+    "Your budget not yet known",
+    {
+      summary: "To check: income, savings, local prices decide affordability",
+      updatedAt: 50,
+      order: 40,
+    },
+  );
+  for (const o of ["keep", "pg", "dyn"]) {
+    applyExploreOp(
+      s,
+      nodes,
+      {
+        op: "cell",
+        option: o,
+        want: "w-speed",
+        mark: "same",
+        facts: ["f-pg"],
+      },
+      { now: 60 },
+    );
+    applyExploreOp(
+      s,
+      nodes,
+      o === "pg"
+        ? {
+            op: "cell",
+            option: o,
+            want: "w-cost",
+            mark: "unknown",
+            note: "needs your income",
+            facts: ["k-budget"],
+            sure: "low",
+          }
+        : {
+            op: "cell",
+            option: o,
+            want: "w-cost",
+            mark: "same",
+            facts: ["f-pg"],
+          },
+      { now: 60 },
+    );
+  }
+  return { map, s, nodes };
+}
+
+test("Next never spends a move on a can't-tell that waits on a check only you can answer", () => {
+  const { s, nodes } = budgetBoard();
+  let g = nextGap(s, nodes, "q");
+  assert.equal(g.kind, "tell");
+  assert.ok(YOURS.has(g.kind), "pressing it pays for no move");
+  assert.equal(g.want, "w-cost");
+  assert.equal(g.label, 'Answer "Your budget not yet known" to settle 1 cell');
+  // Claude adds an option with a fact of its own behind its cost cell: no
+  // news on the budget, so still no paid ask on pg's cost
+  nodes.hack = node("hack", "q", "option", "Buy and rent part out", {
+    order: 45,
+    updatedAt: 70,
+  });
+  nodes["f-hack"] = node("f-hack", "hack", "fact", "Tenant rent offsets", {
+    updatedAt: 70,
+    order: 46,
+  });
+  applyExploreOp(
+    s,
+    nodes,
+    {
+      op: "cell",
+      option: "hack",
+      want: "w-cost",
+      mark: "better",
+      facts: ["f-hack"],
+    },
+    { now: 71 },
+  );
+  g = nextGap(s, nodes, "q");
+  assert.ok(
+    !(g.kind === "ask" && g.option === "pg" && g.want === "w-cost"),
+    `no ask on the cell that waits on you (got ${g.kind} ${g.option} ${g.want})`,
+  );
+  // what you say is what it waited for: Claude can judge it again
+  nodes["f-mine"] = node("f-mine", "q", "fact", "Take-home $6,500", {
+    by: "you",
+    updatedAt: 80,
+    order: 47,
+  });
+  g = nextGap(s, nodes, "q");
+  assert.deepEqual([g.kind, g.option, g.want], ["ask", "pg", "w-cost"]);
+});
+
+test("a check is answered once the cells that waited on it are judged on a newer fact", () => {
+  const { s, nodes } = budgetBoard();
+  nodes["f-numbers"] = node("f-numbers", "pg", "fact", "Your numbers", {
+    summary: "$6.5k take-home, $90k saved",
+    updatedAt: 100,
+    order: 48,
+  });
+  applyExploreOp(
+    s,
+    nodes,
+    {
+      op: "cell",
+      option: "pg",
+      want: "w-cost",
+      mark: "fails",
+      facts: ["f-numbers"],
+    },
+    { scope: "pg", now: 110 },
+  );
+  assert.equal(nodes["k-budget"].summary, "Found: $6.5k take-home, $90k saved");
+  assert.ok(!isCheck(nodes["k-budget"]), "no longer a check to run");
+  // a check another cell still cites stays open
+  const b = budgetBoard();
+  b.s.boards.q.cells["dyn|w-cost"].claude!.facts = ["k-budget"];
+  b.nodes["f-numbers"] = nodes["f-numbers"];
+  applyExploreOp(
+    b.s,
+    b.nodes,
+    {
+      op: "cell",
+      option: "pg",
+      want: "w-cost",
+      mark: "fails",
+      facts: ["f-numbers"],
+    },
+    { now: 110 },
+  );
+  assert.ok(isCheck(b.nodes["k-budget"]));
+});
+
+test("Fill stays on the board while a must cell is empty, however full the rest is", () => {
+  const { s, nodes } = budgetBoard();
+  assert.equal(viewOf(s, nodes, {}).boards.q.emptyMusts, 0);
+  nodes.yb = node("yb", "q", "option", "YugabyteDB", { order: 50 });
+  applyExploreOp(s, nodes, {
+    op: "cell",
+    option: "yb",
+    want: "w-speed",
+    mark: "same",
+    facts: ["f-pg"],
+  });
+  const v = viewOf(s, nodes, {}).boards.q;
+  assert.equal(v.needsFill, false, "most of the board has a mark");
+  assert.equal(v.emptyMusts, 1, "yb's cost is empty: Fill stays");
+});
+
+test("a check's thread may write the stand of the question it sits under", () => {
+  const nodes: Nodes = Object.fromEntries(
+    [
+      node("root", null, "question", "Why did AWS costs rise?"),
+      node("c-nat", "root", "option", "NAT charges"),
+      node("k-ce", "root", "fact", "Cost Explorer by service", {
+        summary: "To check: usage types",
+      }),
+      node("k-flow", "c-nat", "fact", "Flow logs", {
+        summary: "To check: top talkers",
+      }),
+    ].map((n, i) => [n.id, { ...n, order: i }]),
+  );
+  const map = { nodes, data: {} as Record<string, unknown> };
+  const s = live(map);
+  const stand = {
+    op: "stand",
+    q: "root",
+    lead: "c-nat",
+    line: "NAT",
+    sure: 85,
+  };
+  assert.equal(applyExploreOp(s, nodes, stand, { scope: "k-ce" }), 1);
+  assert.equal(applyExploreOp(s, nodes, stand, { scope: "k-flow" }), 1);
+  assert.equal(s.stand.root.sure, 85);
+  // never another question's
+  nodes.q2 = node("q2", "c-nat", "question", "How to cut it?", { order: 9 });
+  assert.equal(
+    applyExploreOp(
+      s,
+      nodes,
+      { ...stand, q: "q2", lead: null },
+      { scope: "k-ce" },
+    ),
+    0,
+  );
+});
+
+test("a cause list's outline speaks of causes, never of wants", () => {
+  const nodes: Nodes = Object.fromEntries(
+    [
+      node("root", null, "question", "What could explain the AWS bill?"),
+      node("c1", "root", "option", "NAT charges"),
+    ].map((n, i) => [n.id, { ...n, order: i }]),
+  );
+  const s = live({ nodes, data: {} });
+  assert.equal(s.boards.root.shape, "causes", "read from its words");
+  const text = outlineOf(s, nodes);
+  assert.doesNotMatch(text, /WANTS:/);
+  assert.match(text, /CAUSES: \[c1\]/);
+});
+
+test("an option you added can be renamed; Claude's cannot", async () => {
+  const m = storedMap(boardNodes());
+  const { run } = stub(m);
+  const added = await run("option", { q: "q", title: "CockroachDB" });
+  const id = added.nodeId!;
+  const r = await run("option", {
+    q: "q",
+    id,
+    title: "CockroachDB Serverless",
+  });
+  assert.ok(r.ok);
+  assert.equal(m.nodes[id].title, "CockroachDB Serverless");
+  const no = await run("option", { q: "q", id: "pg", title: "Postgres 17" });
+  assert.ok(no.error);
+  assert.equal(m.nodes.pg.title, "Postgres");
+});
+
+test("a column counts the messages in its threads, as its panel does", () => {
+  const { s, nodes } = budgetBoard();
+  const threads = {
+    t1: { nodeId: "pg", messages: [1, 2, 3] },
+    t2: { nodeId: "pg", messages: [1] },
+  };
+  const col = viewOf(s, nodes, threads).boards.q.columns.find(
+    (c) => c.id === "pg",
+  );
+  assert.equal(col?.threads, 4);
 });

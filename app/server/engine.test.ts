@@ -121,7 +121,7 @@ test("the first move's label follows the shape Claude frames, not the question's
   const { engine, calls, events } = setup();
   const done = act(engine, {
     type: "new",
-    text: "What could explain a sudden rise in AWS costs?",
+    text: "What happened to our AWS costs last month?",
     purpose: "explore",
   });
   await settled(calls, 1);
@@ -134,6 +134,19 @@ test("the first move's label follows the shape Claude frames, not the question's
     e.type === "map" && e.working ? [e.working.label] : [],
   );
   assert.equal(labels.at(-1), "Laying out the causes");
+});
+
+test("a question worded as asking for causes is laid out as causes from the start", async () => {
+  const { engine, calls } = setup();
+  const done = act(engine, {
+    type: "new",
+    text: "What could explain a sudden rise in AWS costs?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  assert.equal(engine.state.working?.label, "Laying out the causes");
+  calls[0].release(ROOT);
+  await done;
 });
 
 test("moves asked while the model is busy wait their turn instead of being refused", async () => {

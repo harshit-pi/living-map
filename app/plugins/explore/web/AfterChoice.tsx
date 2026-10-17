@@ -45,7 +45,12 @@ export function AfterChoice({ here, board }: { here: Here; board: BoardView }) {
           </span>
         ) : (
           empty && (
-            <Btn small primary onClick={() => void here.act("wrap", { q })}>
+            <Btn
+              small
+              primary
+              busy={here.busy}
+              onClick={() => void here.act("wrap", { q })}
+            >
               Write the pre-mortem ▸
             </Btn>
           )

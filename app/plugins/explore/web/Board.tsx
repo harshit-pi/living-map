@@ -13,7 +13,7 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Cell, CellPopover } from "./Cell.tsx";
-import { Btn, NameLeft } from "./ui.tsx";
+import { Btn, NameLeft, WAIT_TITLE } from "./ui.tsx";
 import { anchorOf, useOpened, type Anchor, type Here } from "./view.ts";
 import {
   cellKey,
@@ -109,13 +109,18 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
       span: (
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-[13px] text-body">
           This board has no list of what you want yet.
-          <Btn small primary onClick={() => void act("suggest", { q })}>
+          <Btn
+            small
+            primary
+            busy={here.busy}
+            onClick={() => void act("suggest", { q })}
+          >
             Suggest what to weigh ▸
           </Btn>
         </div>
       ),
     });
-  else if (board.needsFill) {
+  else if (board.needsFill || board.emptyMusts > 0) {
     // a Fill already on its way (from here or from Next) is not asked twice
     const filling = [ws.live.working, ...ws.live.waiting].some(
       (m) =>
@@ -135,10 +140,18 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
                 Claude suggested what to weigh. Keep, skip or add your own, mark
                 the musts, then press <b>Fill the board</b>.
               </>
-            ) : (
+            ) : board.needsFill ? (
               <>
                 Most of the board is empty. <b>Fill the board</b> has Claude
                 judge every empty cell; your own marks stay.
+              </>
+            ) : (
+              <>
+                {board.emptyMusts === 1
+                  ? "A must cell is still empty."
+                  : `${board.emptyMusts} must cells are still empty.`}{" "}
+                <b>Fill the board</b> has Claude judge every empty cell; your
+                own marks stay.
               </>
             )}
           </span>
@@ -146,6 +159,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
             small
             primary
             disabled={filling}
+            busy={!filling && here.busy}
             onClick={() => void act("fill", { q })}
           >
             {filling ? "Filling…" : "Fill the board ▸"}
@@ -574,7 +588,9 @@ function ColumnHead({
         )}
       </button>
       <div className="mt-auto pt-1 text-[11.5px] leading-snug text-muted">
-        {col.threads > 0 && <span title="Side threads">💬{col.threads}</span>}
+        {col.threads > 0 && (
+          <span title="Messages in its side threads">💬{col.threads}</span>
+        )}
         {col.takeaway && (
           <span title="What a thread settled">
             {col.threads > 0 && " · "}“{col.takeaway}”
@@ -633,9 +649,14 @@ function AgainstCell({ here, col }: { here: Here; col: ColumnView }) {
             <>
               {" · "}
               <button
+                disabled={here.busy}
                 onClick={() => void here.act("against", { option: col.id })}
-                title="Claude makes the case again; this one is kept as history"
-                className="underline-offset-2 hover:text-ink hover:underline"
+                title={
+                  here.busy
+                    ? WAIT_TITLE
+                    : "Claude makes the case again; this one is kept as history"
+                }
+                className="underline-offset-2 hover:text-ink hover:underline disabled:cursor-not-allowed disabled:opacity-40"
               >
                 again
               </button>
@@ -658,6 +679,7 @@ function AgainstCell({ here, col }: { here: Here; col: ColumnView }) {
     <div className={`px-2 py-1.5 ${gap ? "bg-warning-soft/60" : ""}`}>
       <Btn
         small
+        busy={here.busy}
         onClick={() => void here.act("against", { option: col.id })}
         title="Claude writes the strongest single reason this is the wrong choice"
       >
@@ -867,9 +889,14 @@ function SomethingElse({ here, q }: { here: Here; q: string }) {
         </div>
       )}
       <button
+        disabled={here.busy}
         onClick={() => void here.act("something", { q })}
-        title="Claude adds exactly one option you have probably not thought of"
-        className="mt-2 block text-left text-xs text-primary-strong underline-offset-2 hover:underline"
+        title={
+          here.busy
+            ? WAIT_TITLE
+            : "Claude adds exactly one option you have probably not thought of"
+        }
+        className="mt-2 block text-left text-xs text-primary-strong underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
       >
         Ask Claude for one ▸
       </button>

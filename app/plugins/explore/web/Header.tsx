@@ -2,7 +2,13 @@
 // choice, finding a cause, an open question), show or hide what you set aside
 // (Tree only), and Next, which says what it will do before you press it.
 
-import { pluginAct, usePlace, useShowDropped } from "./view.ts";
+import {
+  layingOut,
+  moving,
+  pluginAct,
+  usePlace,
+  useShowDropped,
+} from "./view.ts";
 import { Segmented } from "../../../web/components/Segmented.tsx";
 import { setAside } from "../../../web/lib/layout.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
@@ -13,7 +19,7 @@ import { SHAPE_WORD, SHAPES, YOURS, type Shape } from "../shared.ts";
 export function TabAndShape({ ws }: { ws: Workspace }) {
   const place = usePlace(ws.map);
   const { view, tab, board } = place;
-  if (!view) return <></>;
+  if (!view || layingOut(view, ws.live)) return <></>;
   const q = tab === "board" && board ? board : view.root;
   const shape = q
     ? (view.boards[q]?.shape ?? view.questions.find((p) => p.id === q)?.shape)
@@ -106,9 +112,7 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
   // would queue a second paid move. Next waits for the map to settle; a step
   // that is yours (a check to run, a must to tell) pays for nothing and
   // stays open.
-  const { busy, working, waiting } = ws.live;
-  const onItsWay =
-    !!gap && !YOURS.has(gap.kind) && (busy || !!working || waiting.length > 0);
+  const onItsWay = !!gap && !YOURS.has(gap.kind) && moving(ws.live);
   return (
     <>
       {/* on a window narrower than xl these sit above the work

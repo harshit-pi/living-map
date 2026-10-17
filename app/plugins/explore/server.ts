@@ -31,6 +31,8 @@ import {
   wrapLabel,
 } from "./core.ts";
 import {
+  ASKS_CAUSES,
+  LAYING_OUT,
   MARK_LOOK,
   MARKS,
   NAME_MAX,
@@ -44,7 +46,6 @@ import {
   type Board,
   type Gap,
   type Outcome,
-  type Shape,
   type Weight,
 } from "./shared.ts";
 import * as canvas from "../../server/actions/canvas.ts";
@@ -62,13 +63,13 @@ const PROMPT = `You are the engine behind a DECISION BOARD. The user works throu
 - "Against" is the strongest single reason an option is the wrong choice, not a balanced review.
 - Keep scoring light: marks only, never weights, scores or totals.
 - For causes: never set a cause dropped. If a fact rules it out, start its summary "Ruled out:" and name the fact; the user sets it aside. The stand's lead is the cause you think likeliest so far, with how sure you are; its line is about the whole question, never only the cause you last worked on. With no likeliest cause yet, lead null and no sure.
-- A fact node states something known, with its source. A check not yet run is not a fact: start its summary "To check:" and say what it would show; once it is run, rewrite the summary with what it found.
-- When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node) and cite it. In a thread, also rewrite each other option's cell it changes, citing that fact (a thread may write another option's cell only when the cell cites a fact under the thread's node), and say which you changed.
+- A fact node states something known, with its source. A check not yet run is not a fact: start its summary "To check:" and say what it would show; once it is run, rewrite the summary with what it found. A check's result told in its thread: that check is now the fact (rewrite its summary, starting "Found:"), so add no second fact that repeats it, and write a stand op for the question it sits under.
+- When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node; in a check's thread, the check is that fact) and cite it. In a thread, also rewrite each other option's cell it changes, citing that fact (a thread may write another option's cell only when the cell cites a fact under the thread's node), and say which you changed.
 - Only the user chooses, sets aside or settles. Never set a question answered while options under it are still proposed: give your lead in a stand op. Never write "Recommended:".
 - A stand agrees with the cells, yours and the ones you write in the same move: never claim a must result a cell contradicts, and if you lead an option that fails a must or meets fewer musts than another, say why in the line. Argue the line only from what the board shows: a fact that bears on a want goes into that option's cell, cited, never only into the line.
 - End every move that changes a board with a stand op for that board, and write a fresh one for any board whose last stand is marked "written before the last change". Never add fact nodes that sum up where things stand: that is what the stand op is for.
-- Cells land only on wants the user kept: your new wants are suggestions, and a cell on one is dropped. On a board with no kept wants, write no cells, and never describe marks in the caption that the board does not show.
-- Nodes marked (by user) are the user's: your update and remove ops on them are ignored. If asked to change or remove one, say so and point to the board (the user can rename or remove a want, set aside an option, or rate a cell); never claim you changed it.
+- Cells land only on wants the user kept: your new wants are suggestions, and a cell on one is dropped. On a choice with no kept wants, write no cells, and never describe marks in the caption that the board does not show. Only a choice has wants and cells: on a causes or open question speak of causes, checks, facts and your lead, never of wants, cells or a board.
+- Nodes marked (by user) are the user's: your update and remove ops on them are ignored. If asked to change or remove one, say so and point to what the user can do, and nothing else: rename or remove a want, rename an option they added, set aside an option (there is no removing one), or rate a cell; never claim you changed it.
 - File each point where it belongs: options under the question they answer, facts under the option or question they bear on. Fix a misplaced node with a move op.
 - Use tools (web search, reading files) only when the user asks or a fact decides a cell.
 BOARD OPS (in the same map block as node ops):
@@ -94,12 +95,6 @@ WRAP: the ACTION names the option chosen, its question and your last lead. It is
 
 const SUGGEST = `SUGGEST WANTS for the question named in the ACTION: from what is on the map, write 4-6 want ops for what the user seems to want. Where an existing fact states a want, reuse its id so it becomes the row. No cells.`;
 
-// what the first move lays out, by the shape Claude frames the root as
-const LAYING_OUT: Record<Shape, string> = {
-  choose: "Laying out the board",
-  causes: "Laying out the causes",
-  open: "Laying out the question",
-};
 const FILLING = FILLING_LABEL;
 const SUGGESTING = "Suggesting what to weigh";
 const ANOTHER = "Looking for another option";
@@ -392,7 +387,7 @@ function gapTurn(ctx: Ctx, gap: Gap) {
         ctx,
         q.id,
         ctx.engine.turn(
-          `${how.prefix} WEIGH what came in on the causes of [${q.id}] ${t(q)}: [${found.id}] ${t(found)}${found.summary ? `: ${found.summary}` : ""}. Say in the caption which cause it points at, how strongly, and what is still unchecked. Write only a stand op for [${q.id}], leading the cause it points at, or null if it tells none apart.`,
+          `${how.prefix} WEIGH what came in on the causes of [${q.id}] ${t(q)}: [${found.id}] ${t(found)}${found.summary ? `: ${found.summary}` : ""}. Say in the caption which cause it points at, how strongly, and what is still unchecked. Write a stand op for [${q.id}], leading the cause it points at, or null if it tells none apart. If a check on the map is now the one to run, write a takeaway op on it starting "Run first:" with what each result would mean, and name it in the line. No other ops.`,
           ctx.settings,
           { label: how.label, nodeId: q.id },
         ),
@@ -666,7 +661,7 @@ export const explore: ServerPlugin = {
         // a guess from the words until the frame op says what it is: "What
         // could explain…" is a causes question too
         label:
-          LAYING_OUT[/^\s*why\b/i.test(ctx.map.title) ? "causes" : "choose"],
+          LAYING_OUT[ASKS_CAUSES.test(ctx.map.title) ? "causes" : "choose"],
         relabel: (m) => {
           const root = rootOf(m.nodes);
           const shape = root && own(peek(m).boards, root.id)?.shape;
@@ -693,6 +688,19 @@ export const explore: ServerPlugin = {
       if (!title) return fail("Name the option in a few words.");
       const s = state(ctx);
       const nodes = ctx.map.nodes;
+      // renaming an option you added: a typo or a long name was there for
+      // good, since Claude may not touch it and set aside was all there was
+      if (a.id !== undefined) {
+        const o = nodeArg(ctx, a.id, "option");
+        if (!o || o.parent !== q.id) return fail("That option is gone.");
+        if (addedBy(s, o) !== "you")
+          return fail("Only an option you added can be renamed.");
+        if (title === o.title) return { ok: true };
+        const was = o.title;
+        o.title = title;
+        o.updatedAt = Date.now();
+        return ok(ctx, `You renamed the option "${was}" to ${t(o)}.`);
+      }
       const n = makeNode(nodes, {
         id: freshId(nodes, "o", title),
         parent: q.id,

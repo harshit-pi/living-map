@@ -29,11 +29,15 @@ export function NameLeft({ text }: { text: string }) {
   );
 }
 
+// said on a button that starts a paid move while Claude works (view's moving)
+export const WAIT_TITLE = "Claude is working: this opens once the map settles";
+
 export function Btn({
   children,
   onClick,
   primary,
   disabled,
+  busy,
   title,
   small,
 }: {
@@ -41,14 +45,16 @@ export function Btn({
   onClick: (e: ClickEvent<HTMLButtonElement>) => void;
   primary?: boolean;
   disabled?: boolean;
+  // it starts a paid move and one runs or waits: off, and says why
+  busy?: boolean;
   title?: string;
   small?: boolean;
 }) {
   return (
     <button
-      disabled={disabled}
+      disabled={disabled || busy}
       onClick={onClick}
-      title={title}
+      title={busy ? WAIT_TITLE : title}
       className={`whitespace-nowrap rounded-full font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${small ? "px-2 py-0.5 text-[11.5px]" : "px-3 py-1 text-xs"} ${
         primary
           ? "bg-primary text-on-primary hover:bg-primary-strong"

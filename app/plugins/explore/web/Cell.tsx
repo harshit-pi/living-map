@@ -3,7 +3,7 @@
 // own rating has a solid left edge, and an empty cell is a gap you can see,
 // with "ask" (Claude writes this one cell) and "rate" (you judge it).
 
-import { Btn, MarkText, Pop } from "./ui.tsx";
+import { Btn, MarkText, Pop, WAIT_TITLE } from "./ui.tsx";
 import { anchorOf, type Anchor, type Here } from "./view.ts";
 import {
   cellKey,
@@ -62,11 +62,16 @@ export function Cell({
       >
         <span aria-hidden>·</span>
         <button
+          disabled={here.busy}
           onClick={() => {
             void here.act("ask", { option: col.id, want: row.id });
           }}
-          title="Claude judges this one cell, in the option's thread"
-          className="underline-offset-2 hover:underline"
+          title={
+            here.busy
+              ? WAIT_TITLE
+              : "Claude judges this one cell, in the option's thread"
+          }
+          className="underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
         >
           ask
         </button>
@@ -231,6 +236,7 @@ export function CellPopover({
       <div className="flex flex-wrap gap-1.5">
         <Btn
           small
+          busy={here.busy}
           onClick={() => {
             void here.act("ask", { option, want });
             onClose();

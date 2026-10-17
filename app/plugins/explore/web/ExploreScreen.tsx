@@ -10,7 +10,9 @@ import { StandLine } from "./StandLine.tsx";
 import { Tree } from "./Tree.tsx";
 import { Btn } from "./ui.tsx";
 import {
-  pluginAct,
+  guardedAct,
+  layingOut,
+  moving,
   tagOf,
   usePlace,
   useShowDropped,
@@ -21,6 +23,7 @@ import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
 import { setAside } from "../../../web/lib/layout.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
+import { LAYING_OUT } from "../shared.ts";
 
 // the room you can see in the board's pane, less its gutters
 const WIDE = "calc(var(--pane-w, 100vw) - 16px - var(--cover))";
@@ -44,15 +47,20 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
       ? ws.selection
       : ws.selection.filter((id) => !setAside(map.nodes, id));
   const one = selection.length === 1 ? map.nodes[selection[0]] : undefined;
+  const busy = moving(live);
   const here: Here | null = view && {
     ws,
     view,
-    act: pluginAct(ws.run),
+    busy,
+    act: guardedAct(ws.run, busy),
     select: (id) => setSelection([id]),
     openBoard: place.openBoard,
     choose: (option, at) => setSheet({ option, at }),
   };
   const shown = view && board ? view.boards[board] : undefined;
+  const choices = Object.values(view?.boards ?? {}).filter(
+    (b) => b.shape === "choose",
+  );
   const standOn = onTree ? view?.root : board;
   // the pane's width, for what keeps to the room you can see as the board
   // scrolls sideways (the lines across the board, what is under it)
@@ -64,6 +72,16 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  if (layingOut(view, live))
+    return (
+      <div className="absolute inset-0 flex items-center justify-center text-muted">
+        <div className="max-w-md px-4 text-center">
+          <div className="animate-pulse">{live.working?.label}…</div>
+          <div className="mt-3 text-sm text-faint">{live.stream.text}</div>
+        </div>
+      </div>
+    );
 
   return (
     <div className="absolute inset-0 flex flex-col">
@@ -86,6 +104,10 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
               selected={selection}
               workingId={live.working?.nodeId ?? null}
               busy={live.busy}
+              laying={
+                !!live.working &&
+                Object.values(LAYING_OUT).includes(live.working.label)
+              }
               panelOpen={!!one}
               onSelect={setSelection}
             />
@@ -159,6 +181,27 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
                   <Btn small onClick={() => place.setTab("tree")}>
                     Show the tree
                   </Btn>
+                  {/* a choice further down has a board: the way to it, or
+                      this page was a dead end beside it */}
+                  {choices.length > 0 && (
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      <span className="text-muted">
+                        {choices.length === 1
+                          ? "The choice on this map:"
+                          : "The choices on this map:"}
+                      </span>
+                      {choices.map((c) => (
+                        <Btn
+                          key={c.question}
+                          small
+                          primary={!c.settled}
+                          onClick={() => place.openBoard(c.question)}
+                        >
+                          {c.title} ▸
+                        </Btn>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

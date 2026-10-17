@@ -7,6 +7,7 @@
 //   model ops ──► applyExploreOp ─┘            └──► viewOf · outlineOf
 
 import {
+  ASKS_CAUSES,
   cellKey,
   isCheck,
   MARKS,
@@ -121,7 +122,7 @@ const named = (nodes: Nodes, id: string) => `"${own(nodes, id)?.title ?? id}"`;
 
 // "Why did X happen?" asks for causes; a question with options is a choice.
 export function inferShape(nodes: Nodes, q: string): Shape {
-  if (/^\s*why\b/i.test(own(nodes, q)?.title ?? "")) return "causes";
+  if (ASKS_CAUSES.test(own(nodes, q)?.title ?? "")) return "causes";
   return optionsOf(nodes, q).length ? "choose" : "open";
 }
 export const shapeOf = (s: ExploreState, nodes: Nodes, q: string): Shape =>
@@ -358,10 +359,7 @@ function liveColumns(nodes: Nodes, b: Board): MapNode[] {
 // the same want cites it: Go deeper's facts about one option (a risk, a
 // check) are no news on that option's first paying customer.
 function answeredOn(nodes: Nodes, b: Board) {
-  const rowIds = new Set(b.rows.map((r) => r.id));
-  const facts = [...subtree(nodes, b.question)]
-    .map((id) => nodes[id])
-    .filter((n) => n?.kind === "fact" && !rowIds.has(n.id) && !isCheck(n));
+  const facts = factsOn(nodes, b);
   const citedOn = (want: string) =>
     new Set(
       Object.entries(b.cells)
@@ -383,40 +381,84 @@ function answeredOn(nodes: Nodes, b: Board) {
   };
 }
 
+// The facts on a board that can be news on a cell: no want, no check
+const factsOn = (nodes: Nodes, b: Board) => {
+  const rowIds = new Set(b.rows.map((r) => r.id));
+  return [...subtree(nodes, b.question)]
+    .map((id) => nodes[id])
+    .filter((n) => n?.kind === "fact" && !rowIds.has(n.id) && !isCheck(n));
+};
+
+// The checks still to run that a cell of Claude's cites: its "can't tell"
+// waits on them, and a check on a choice is about you (your budget, your
+// commute), which no move of Claude's can run.
+const openChecks = (nodes: Nodes, side: Side | undefined) =>
+  (side?.facts ?? []).filter((id) => {
+    const n = own(nodes, id);
+    return !!n && !n.dropped && isCheck(n);
+  });
+
 // The wants Claude cannot judge without you, each with the cell that says
 // what it lacks: on one, Claude checked a cell in a thread and still could
 // not tell, or it could not tell on two options, and nothing newer bears on
-// it. What it lacks then is yours (your budget, where you work), the same on
-// every option: Next asks you for it, rather than paying for another move
-// that ends "can't tell" on the option beside it.
+// it; or its "can't tell" waits on a check still to run ("Your budget not
+// yet known") and you have said nothing since: only you can run that check,
+// so news from Claude (an option it added, a fact behind that option's
+// cell) settles nothing, and Next spent a move that ended "can't tell"
+// again. What it lacks then is yours, the same on every option: Next asks
+// you for it.
 export function waitsOnYou(
   nodes: Nodes,
   b: Board,
   weight: Weight,
-): { want: string; option: string; note: string }[] {
+): { want: string; option: string; note: string; check?: string }[] {
   const cols = liveColumns(nodes, b);
   const answered = answeredOn(nodes, b);
-  const out: { want: string; option: string; note: string }[] = [];
+  const yours = factsOn(nodes, b).filter((f) => f.by === "you");
+  const heard = (side: Side) =>
+    yours.some((f) => f.updatedAt > side.at && !side.facts.includes(f.id));
+  const out: { want: string; option: string; note: string; check?: string }[] =
+    [];
   for (const r of keptRows(b).filter((x) => x.weight === weight)) {
     const cants = cols
-      .map((o) => ({ o, cell: own(b.cells, cellKey(o.id, r.id)) }))
-      .filter(
-        ({ cell }) =>
-          !cell?.you &&
-          cell?.claude?.mark === "unknown" &&
-          answered(cell.claude, r.id),
-      );
-    const checked = cants.find(({ cell }) => cell?.claude?.checked);
-    const first = checked ?? (cants.length >= 2 ? cants[0] : undefined);
-    if (first)
+      .map((o) => ({ o, side: own(b.cells, cellKey(o.id, r.id)) }))
+      .filter(({ side }) => !side?.you && side?.claude?.mark === "unknown")
+      .map(({ o, side }) => ({ o, side: side!.claude! }));
+    const done = cants.filter(({ side }) => answered(side, r.id));
+    const checked = done.find(({ side }) => side.checked);
+    const waiting = cants.find(
+      ({ side }) => openChecks(nodes, side).length && !heard(side),
+    );
+    const first =
+      checked ?? waiting ?? (done.length >= 2 ? done[0] : undefined);
+    if (first) {
+      const check = openChecks(nodes, first.side)[0];
       out.push({
         want: r.id,
         option: first.o.id,
-        note: first.cell?.claude?.note ?? "",
+        note: first.side.note,
+        ...(check ? { check } : {}),
       });
+    }
   }
   return out;
 }
+
+// How many of Claude's "can't tell" cells on a board wait on one check.
+const waitingOn = (nodes: Nodes, b: Board, check: string) =>
+  liveColumns(nodes, b).reduce(
+    (n, o) =>
+      n +
+      keptRows(b).filter((r) => {
+        const c = own(b.cells, cellKey(o.id, r.id));
+        return (
+          !c?.you &&
+          c?.claude?.mark === "unknown" &&
+          c.claude.facts.includes(check)
+        );
+      }).length,
+    0,
+  );
 
 // Empty or guess cells on the given rows, over the options still in play,
 // most worth filling first: the lead's column, then empty cells before
@@ -498,6 +540,19 @@ export function needsFill(nodes: Nodes, b: Board): boolean {
     for (const r of rows)
       if (!shown(own(b.cells, cellKey(o.id, r.id)))) empty++;
   return empty * 2 > cols.length * rows.length;
+}
+
+// The must cells still empty on the options in play, before a choice: Fill
+// stays on the board while there is one, even once most of the board has a
+// mark (an option added late came with its musts empty, and Fill had gone,
+// leaving a paid Ask per cell).
+export function emptyMusts(nodes: Nodes, b: Board): number {
+  if (b.shape !== "choose" || chosenHere(nodes, b.question)) return 0;
+  let n = 0;
+  for (const o of liveColumns(nodes, b))
+    for (const r of keptRows(b).filter((x) => x.weight === "must"))
+      if (!shown(own(b.cells, cellKey(o.id, r.id)))) n++;
+  return n;
 }
 
 // ---------------------------------------------------------------- fold, tally
@@ -907,6 +962,28 @@ function underUntestedCause(s: ExploreState, nodes: Nodes, id: string) {
   );
 }
 
+// A must only you can settle, as Next says it: what Claude lacks, and, when
+// a check still to run is what it waits on (your budget, "not yet known"),
+// that check by name and how many cells it would settle.
+function tellGap(
+  nodes: Nodes,
+  b: Board,
+  tell: ReturnType<typeof waitsOnYou>[number],
+  what: string,
+): Gap {
+  const cells = tell.check ? waitingOn(nodes, b, tell.check) : 0;
+  return {
+    kind: "tell",
+    q: b.question,
+    option: tell.option,
+    want: tell.want,
+    label: tell.check
+      ? `Answer ${named(nodes, tell.check)} to settle ${plural(cells, "cell")}`
+      : `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
+    reason: `${what} Claude can't tell without you${tell.note ? ` (${clip(tell.note, 24, 160)})` : ""}`,
+  };
+}
+
 // What Next will do, and why: the board you are on first, then the map.
 export function nextGap(
   s: ExploreState,
@@ -949,15 +1026,7 @@ export function nextGap(
     // a must only you can settle: yours to say, in its thread, or to rate,
     // and no move is paid for
     const tell = waitsOnYou(nodes, b, "must")[0];
-    if (tell)
-      return {
-        kind: "tell",
-        q,
-        option: tell.option,
-        want: tell.want,
-        label: `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
-        reason: `a must Claude can't tell without you${tell.note ? ` (${clip(tell.note, 24, 160)})` : ""}`,
-      };
+    if (tell) return tellGap(nodes, b, tell, "a must");
     const lead = liveLead(s, nodes, q);
     const lean = b.lean && own(nodes, b.lean.option);
     for (const o of [lead, lean && inPlay(lean) ? lean : undefined])
@@ -1010,15 +1079,7 @@ export function nextGap(
           ? `a must on your choice, ${must.guess ? "only a guess" : "still empty"}`
           : "it matters to your choice, still empty",
       };
-    if (tell)
-      return {
-        kind: "tell",
-        q,
-        option: tell.option,
-        want: tell.want,
-        label: `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
-        reason: "a must on your choice Claude can't tell without you",
-      };
+    if (tell) return tellGap(nodes, b, tell, "a must on your choice");
   }
   if (b?.commit && !b.commit.premortem.claude.length)
     return {
@@ -1159,7 +1220,10 @@ function boardOfRow(s: ExploreState, want: string, kept = true) {
 // column (and another column's cell that cites a fact filed under it), its
 // case against and takeaway, and its board's stand; one pinned to
 // a want writes that row and its board's stand; any other writes takeaways
-// and moves within its node. Framing and wants are never a thread's.
+// and moves within its node, and the stand of the question it sits under (a
+// check's result told in its thread moves where the causes stand; refused,
+// it left the stand stale for a paid "Weigh what came in"). Framing and
+// wants are never a thread's.
 function threadAllows(
   s: ExploreState,
   nodes: Nodes,
@@ -1188,8 +1252,14 @@ function threadAllows(
     }
     case "against":
       return isOption && op.option === scope;
-    case "stand":
-      return (isOption || isWant) && op.q === node.parent;
+    case "stand": {
+      // a question's own thread writes its stand; any other node's, the
+      // stand of the nearest question above it
+      const q = pathTo(nodes, scope)
+        .reverse()
+        .find((n) => n.kind === "question");
+      return !!q && op.q === q.id;
+    }
     case "takeaway":
       return inside.has(String(op.node ?? ""));
     case "move":
@@ -1307,7 +1377,9 @@ export function applyExploreOp(
         ...(scope ? { checked: true } : {}),
       };
       const key = cellKey(option, want);
+      const before = own(b.cells, key)?.claude;
       b.cells[key] = { ...own(b.cells, key), claude: side };
+      answerChecks(s, nodes, before, side, now);
       return 1;
     }
     case "against": {
@@ -1449,6 +1521,44 @@ export function applyExploreOp(
   return null;
 }
 
+// A check a "can't tell" waited on ("Your budget not yet known") is answered
+// once the cells that cited it are judged on a newer fact instead and none
+// cites it any more: it says what was found, so it no longer reads as open
+// beside the cells it once backed. A thread on an option cannot rewrite a
+// check filed under the question, and Claude left it "To check:".
+function answerChecks(
+  s: ExploreState,
+  nodes: Nodes,
+  before: Side | undefined,
+  side: Side,
+  now: number,
+) {
+  if (side.mark === "unknown") return;
+  const dropped = openChecks(nodes, before).filter(
+    (id) => !side.facts.includes(id),
+  );
+  if (!dropped.length) return;
+  const cited = new Set(
+    Object.values(s.boards).flatMap((b) =>
+      Object.values(b.cells).flatMap((c) => [
+        ...(c.you?.facts ?? []),
+        ...(c.claude?.facts ?? []),
+      ]),
+    ),
+  );
+  for (const id of dropped) {
+    const check = nodes[id];
+    if (cited.has(id) || check.by === "you") continue;
+    const found = side.facts
+      .map((f) => nodes[f])
+      .filter((f) => !isCheck(f) && f.updatedAt > check.updatedAt)
+      .sort((a, c) => c.updatedAt - a.updatedAt)[0];
+    if (!found) continue;
+    check.summary = clip(`Found: ${found.summary || found.title}`, 30, 200);
+    check.updatedAt = now;
+  }
+}
+
 // The facts a cell or a case against cites: ids of nodes on the map, at most 4.
 function factsOf(nodes: Nodes, v: unknown): string[] {
   const ids = list(v, 20)
@@ -1509,11 +1619,15 @@ export function outlineOf(s: ExploreState, nodes: Nodes): string {
       `BOARD [${q}] ${b.shape}${b.shape === "choose" ? ` · keep-as-is ${b.keepAsIs ? `[${b.keepAsIs}]` : "none"}` : ""} · wants reviewed by user: ${reviewed ? "yes" : "no"}`,
     );
     const kept = keptRows(b);
-    out.push(
-      `WANTS: ${kept.map((r) => `[${r.id}] ${r.weight} "${nodes[r.id].title}"${r.by === "you" ? " (user)" : ""}`).join(" · ") || "none kept yet"}`,
-    );
+    // only a choice weighs its options against what you want: told "WANTS:
+    // none kept yet" on a cause list, Claude explained the missing cells
+    const choice = b.shape === "choose";
+    if (choice)
+      out.push(
+        `WANTS: ${kept.map((r) => `[${r.id}] ${r.weight} "${nodes[r.id].title}"${r.by === "you" ? " (user)" : ""}`).join(" · ") || "none kept yet"}`,
+      );
     const sugg = b.rows.filter((r) => r.suggested);
-    if (sugg.length)
+    if (choice && sugg.length)
       out.push(
         `SUGGESTED, NOT KEPT (do not fill): ${sugg.map((r) => `[${r.id}] "${nodes[r.id].title}"`).join(" · ")}`,
       );
@@ -1527,7 +1641,7 @@ export function outlineOf(s: ExploreState, nodes: Nodes): string {
         .map((r) => r.id);
     const live = cols.filter((o) => !asideByYou(o));
     out.push(
-      `COLUMNS: ${
+      `${choice ? "COLUMNS" : b.shape === "causes" ? "CAUSES" : "OPTIONS"}: ${
         live
           .map((o) =>
             [
@@ -1716,14 +1830,18 @@ const rowView = (nodes: Nodes, r: Board["rows"][number]): RowView => ({
 export function viewOf(
   s: ExploreState,
   nodes: Nodes,
-  threads: Record<string, { nodeId: string }>,
+  threads: Record<string, { nodeId: string; messages?: unknown[] }>,
   now = Date.now(),
 ): ExploreView {
   const root = rootOf(nodes);
   const roll = rollup(s, nodes);
   const point = (q: string) => roll.points.find((p) => p.id === q);
+  // the messages in a node's side threads, as its panel counts them ("Thread
+  // · 3"): a count of threads read 💬 1 beside it
   const threadCount = (id: string) =>
-    Object.values(threads).filter((t) => t.nodeId === id).length;
+    Object.values(threads)
+      .filter((t) => t.nodeId === id)
+      .reduce((n, t) => n + (t.messages?.length ?? 0), 0);
   const boards: Record<string, BoardView> = {};
   for (const b of Object.values(s.boards)) {
     const q = b.question;
@@ -1787,6 +1905,7 @@ export function viewOf(
       filledAt: b.filledAt ?? null,
       needsWants: b.shape === "choose" && !b.rows.length,
       needsFill: needsFill(nodes, b),
+      emptyMusts: emptyMusts(nodes, b),
       settled: point(q)?.settled ?? false,
       next: nextGap(s, nodes, q),
       looseFacts: looseFacts(s, nodes, q),

@@ -11,6 +11,7 @@ import { store, stored } from "../../../web/lib/storage.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
   isCheck,
+  LAYING_OUT,
   PLUGIN_ID,
   type ExploreView,
   type RootState,
@@ -197,10 +198,59 @@ export function questionState(
   return p ? (p.settled ? "decided" : "open") : undefined;
 }
 
+// Whether a move runs or waits. Every button that starts a paid move waits
+// for the map to settle: the map it would act on is about to change, and a
+// press then queued a second paid move on a gap the first was closing (a
+// Fill twice, an Ask on the cell being filled). What you do yourself (rate,
+// keep a want, choose, set aside) stays open, and so does a message: that
+// waits in the queue.
+export const moving = (live: Workspace["live"]) =>
+  live.busy || !!live.working || live.waiting.length > 0;
+
+// Claude's first move is still laying the map out and the root has no board
+// yet: what the question is (a choice, causes) is not known until its frame
+// or first option lands, so the screen says it is being laid out. Shown as
+// it streamed, it was a lone card on the Tree called "an open question"
+// under a caption about the options on the board.
+export const layingOut = (
+  view: ExploreView | null,
+  live: Workspace["live"],
+): boolean =>
+  !!view?.root &&
+  !view.boards[view.root] &&
+  !!live.working &&
+  Object.values(LAYING_OUT).includes(live.working.label);
+
+// Explore's actions and the core ones its screen sends that run a move
+export const PAID: ReadonlySet<string> = new Set([
+  "fill",
+  "ask",
+  "against",
+  "something",
+  "suggest",
+  "wrap",
+  "next",
+  "deeper",
+  "challenge",
+  "explain",
+]);
+
+// The board's actions, with the busy guard: a paid one asked while a move
+// runs or waits is dropped, whatever sent it (a button drawn before the
+// move started, a key)
+export const guardedAct =
+  (run: (a: Action) => Promise<ActionResult>, busy: boolean) =>
+  (name: string, args: Record<string, unknown> = {}) =>
+    busy && PAID.has(name)
+      ? Promise.resolve<ActionResult>({})
+      : pluginAct(run)(name, args);
+
 // What the board's parts work with.
 export type Here = {
   ws: Workspace;
   view: ExploreView;
+  // a move runs or waits: the buttons that start one are off (moving)
+  busy: boolean;
   act: (name: string, args?: Record<string, unknown>) => Promise<ActionResult>;
   // NodePanel on a node
   select: (id: string) => void;

@@ -130,6 +130,7 @@ export function Tree({
   selected,
   workingId,
   busy,
+  laying,
   panelOpen,
   onSelect,
 }: {
@@ -139,6 +140,8 @@ export function Tree({
   workingId: string | null;
   // Claude is making a move
   busy: boolean;
+  // that move is the first, laying the map out
+  laying: boolean;
   panelOpen: boolean;
   onSelect: (ids: string[]) => void;
 }) {
@@ -254,10 +257,11 @@ export function Tree({
       }),
     };
   }, [visible, tree, map.nodes]);
+  // the messages in each node's side threads, as its panel counts them
   const threads = useMemo(() => {
     const c: Record<string, number> = {};
     for (const t of Object.values(map.threads ?? {}))
-      c[t.nodeId] = (c[t.nodeId] ?? 0) + 1;
+      c[t.nodeId] = (c[t.nodeId] ?? 0) + t.messages.length;
     return c;
   }, [map.threads]);
   const nodes = useMemo(
@@ -347,8 +351,9 @@ export function Tree({
   const count = laid.nodes.length;
   // A lone question is no tree yet: while Claude's first move lays it out,
   // card by card, the tree is framed whole as it grows, and once more when
-  // the move ends. After that the camera is yours.
-  const [growing, setGrowing] = useState(count <= 1);
+  // the move ends. After that the camera is yours. The screen shows the tree
+  // only once the question's shape is known, by then with its first cards.
+  const [growing, setGrowing] = useState(count <= 1 || laying);
   if (growing && count > 1 && !busy) setGrowing(false);
   const fitKey = growing ? `growing ${count}` : "whole";
   const fitted = useRef<string | null>(null);
@@ -483,6 +488,13 @@ export function Tree({
             );
         }}
         onPaneClick={() => onSelect([])}
+        // the wheel pans, down the columns as the tree is read; a pinch or
+        // Ctrl-wheel zooms. A wheel that zoomed, turned while reading the
+        // panel or the thread beside the tree, shrank it to 0.7 around the
+        // pointer and sent the question under the header: the camera
+        // seemed to move on its own
+        panOnScroll
+        zoomOnScroll={false}
         minZoom={0.2}
         proOptions={{ hideAttribution: true }}
       >

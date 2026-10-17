@@ -144,6 +144,20 @@ export type ExploreState = {
 export const FILLING_LABEL = "Filling the board";
 export const FILL_LABEL = "Fill the board";
 
+// What the first move lays out, by the shape the question has: the label
+// of the move that frames it, which the screen also knows it by
+export const LAYING_OUT: Record<Shape, string> = {
+  choose: "Laying out the board",
+  causes: "Laying out the causes",
+  open: "Laying out the question",
+};
+
+// A question that asks for causes, read from its words before Claude frames
+// it: "Why did…", and "What could explain…", "What caused…", "What is
+// behind…", which read as a choice until the frame op landed.
+export const ASKS_CAUSES =
+  /^\s*(why\b|how come\b|what\s+(could|might|would|can|may)?\s*(explains?|caused?|causes|is causing|be causing|be behind|is behind|drove|is driving|led to)\b|what('s|\s+is)\s+(causing|behind|driving)\b)/i;
+
 export const cellKey = (option: string, row: string) => `${option}|${row}`;
 
 // A check still to run is not a fact: Claude starts its summary "To check:",
@@ -197,6 +211,7 @@ export type ColumnView = {
   faded: boolean;
   failsMust: boolean;
   by: Who;
+  // messages in its side threads
   threads: number;
   takeaway?: string;
   against?: Against;
@@ -243,6 +258,8 @@ export type BoardView = {
   needsWants: boolean;
   // one Fill is the step: most of the board is still empty (core's needsFill)
   needsFill: boolean;
+  // must cells still empty on the options in play: Fill stays while any is
+  emptyMusts: number;
   settled: boolean;
   // what Next does when this is the board you are on
   next: Gap;

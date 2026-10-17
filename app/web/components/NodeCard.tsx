@@ -44,7 +44,7 @@ export function NodeCard({ data, selected }: NodeProps) {
           {threads > 0 && (
             <span
               className="rounded-full bg-panel px-1.5 text-[10px] text-muted ring-1 ring-line"
-              title="Side threads"
+              title="Messages in its side threads"
             >
               💬 {threads}
             </span>

@@ -6,7 +6,7 @@
 import { useState, type ReactNode } from "react";
 
 import { Btn, MarkText, NameLeft } from "./ui.tsx";
-import { anchorOf, type Here } from "./view.ts";
+import { anchorOf, PAID, type Here } from "./view.ts";
 import type { MapNode, NodeAction } from "../../../shared/model.ts";
 import {
   cellKey,
@@ -48,12 +48,16 @@ const shapeOf = (view: ExploreView, q: string | null) =>
     : "open";
 
 export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
-  const { view, ws, act } = here;
+  const { view, ws, act, busy } = here;
+  // the busy guard, as the board's own actions have it (view's guardedAct)
   const core = (type: NodeAction) => {
+    if (busy && PAID.has(type)) return;
     void ws.run({ type, nodeId: node.id });
   };
   const explain = !node.detail && (
-    <Btn onClick={() => core("explain")}>Explain</Btn>
+    <Btn busy={busy} onClick={() => core("explain")}>
+      Explain
+    </Btn>
   );
   if (node.dropped)
     return (
@@ -102,13 +106,17 @@ export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
             </Btn>
           ))}
         <Btn
+          busy={busy}
           onClick={() => void act("against", { option: node.id })}
           title="The strongest single reason it is the wrong choice"
         >
           Case against
         </Btn>
         {explain}
-        <Btn onClick={() => core("deeper")}>Go deeper</Btn>
+        <Btn busy={busy} onClick={() => core("deeper")}>
+          Go deeper
+        </Btn>
+        <OptionRename key={node.id} here={here} node={node} />
         {chosenOver ? (
           <Btn
             onClick={() => core("restore")}
@@ -153,7 +161,9 @@ export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
 
   return (
     <>
-      <Btn onClick={() => core("challenge")}>Challenge</Btn>
+      <Btn busy={busy} onClick={() => core("challenge")}>
+        Challenge
+      </Btn>
       {explain}
       <Btn onClick={() => core("drop")}>Set aside</Btn>
     </>
@@ -176,7 +186,6 @@ function WantActions({
   const { act } = here;
   const q = board.question;
   const [renaming, setRenaming] = useState(false);
-  const [title, setTitle] = useState(node.title);
   // its marks go with it, and only another Claude move brings them back:
   // with marks on it, Remove asks first
   const [removing, setRemoving] = useState(false);
@@ -224,35 +233,76 @@ function WantActions({
         ))}
       {explain}
       {renaming && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!title.trim() || tooLong(title)) return;
-            void act("want", { q, id: row.id, title });
-            setRenaming(false);
-          }}
-          className="flex basis-full flex-wrap gap-1.5"
-        >
-          <input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setRenaming(false);
-            }}
-            className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={tooLong(title)}
-            className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
-          >
-            Rename
-          </button>
-          <span className="basis-full">
-            <NameLeft text={title} />
-          </span>
-        </form>
+        <RenameForm
+          initial={node.title}
+          onSave={(title) => void act("want", { q, id: row.id, title })}
+          onClose={() => setRenaming(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// A name to change, in the panel: a want's, or an option you added
+function RenameForm({
+  initial,
+  onSave,
+  onClose,
+}: {
+  initial: string;
+  onSave: (title: string) => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(initial);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim() || tooLong(title)) return;
+        onSave(title);
+        onClose();
+      }}
+      className="flex basis-full flex-wrap gap-1.5"
+    >
+      <input
+        autoFocus
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onClose();
+        }}
+        className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={tooLong(title)}
+        className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
+      >
+        Rename
+      </button>
+      <span className="basis-full">
+        <NameLeft text={title} />
+      </span>
+    </form>
+  );
+}
+
+// Rename, on an option you added: Claude may not touch it, so a typo or a
+// long name stayed for good
+function OptionRename({ here, node }: { here: Here; node: MapNode }) {
+  const [renaming, setRenaming] = useState(false);
+  const found = columnOf(here.view, node.id);
+  if (!found || found.col.by !== "you" || !node.parent) return null;
+  const q = node.parent;
+  return (
+    <>
+      <Btn onClick={() => setRenaming(!renaming)}>Rename</Btn>
+      {renaming && (
+        <RenameForm
+          initial={node.title}
+          onSave={(title) => void here.act("option", { q, id: node.id, title })}
+          onClose={() => setRenaming(false)}
+        />
       )}
     </>
   );
@@ -267,7 +317,7 @@ function QuestionActions({
   node: MapNode;
   explain: ReactNode;
 }) {
-  const { view, ws, act } = here;
+  const { view, ws, act, busy } = here;
   const stand = view.stand[node.id];
   const [settling, setSettling] = useState(false);
   // your answer starts from what is already an answer: one given before, or
@@ -283,6 +333,7 @@ function QuestionActions({
     .join("; ");
   const [answer, setAnswer] = useState(given || picked);
   const core = (type: NodeAction) => {
+    if (busy && PAID.has(type)) return;
     void ws.run({ type, nodeId: node.id });
   };
   const board = view.boards[node.id];
@@ -294,8 +345,12 @@ function QuestionActions({
       {board?.shape === "choose" && (
         <Btn onClick={() => here.openBoard(node.id)}>Open its board</Btn>
       )}
-      <Btn onClick={() => core("deeper")}>Go deeper</Btn>
-      <Btn onClick={() => core("challenge")}>Challenge</Btn>
+      <Btn busy={busy} onClick={() => core("deeper")}>
+        Go deeper
+      </Btn>
+      <Btn busy={busy} onClick={() => core("challenge")}>
+        Challenge
+      </Btn>
       {explain}
       {node.parent && <Btn onClick={() => core("drop")}>Set aside</Btn>}
       {settling && (
@@ -425,8 +480,11 @@ export function PanelExtra({ here, node }: { here: Here; node: MapNode }) {
           const sc = board.cells[cellKey(c.id, row.id)];
           return (
             <li key={c.id} className="flex justify-between gap-2">
+              {/* one line per option: a long name wrapped, and its second
+                  line read as another option with no mark */}
               <span
-                className={c.faded ? "text-muted line-through" : "text-body"}
+                title={nodes[c.id]?.title ?? c.title}
+                className={`min-w-0 truncate ${c.faded ? "text-muted line-through" : "text-body"}`}
               >
                 {nodes[c.id]?.title ?? c.title}
               </span>
