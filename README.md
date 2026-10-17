@@ -9,7 +9,7 @@ https://github.com/user-attachments/assets/38625c2e-6cb5-4a5e-8310-b8fd85114ca8
 
 Long AI answers are hard to hold in your head. Living Map turns the conversation into a picture you work on directly:
 
-- **Explore** a question as a map of options and facts. Choose, challenge, go deeper, and reply on any node in its own side thread.
+- **Explore** a question as a decision board: the options as columns, what you want as rows, and Claude's judgement in each cell, marked as a guess when no fact backs it. Mark your musts, rate any cell yourself, hear the case against, then Choose with your reasons and a pre-mortem. Questions about causes open as a tree instead, and every node has its own side thread.
 - **Learn** any subject (a protocol, a theory, a period of history, a coding problem). Claude draws it in the shape that fits: a sequence, a concept map, a timeline, a structure, or a grid. The key parts are left blank for you to fill, and Claude checks each one.
 - **Play a step by hand** on a board, an array or a tree, move by move. Your clicks are checked instantly, with no model call. Coding problems end with **Write it**, where Claude traces your code on the example and tells you which line breaks.
 - **Click any part** of a diagram to have it explained in plain words, broken down further, or discussed in a side thread.
