@@ -10,13 +10,7 @@
 //   against    │
 //   tally      │
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Cell, CellPopover } from "./Cell.tsx";
 import { Btn } from "./ui.tsx";
@@ -73,30 +67,14 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [opened, setOpened] = useOpened(ws.map.id, q);
-  // the lines that span the board (the banner, + what else do you want?)
-  // stick to its left edge as it scrolls sideways. A sticky line moves only
+  // The board scrolls with its pane (ExploreScreen), both ways, and never
+  // on its own: the option names stay pinned on top and the rail on the
+  // left. The lines that span the board (the banner, + what else do you
+  // want?) stick to the left as it scrolls sideways. A sticky line moves only
   // within its own span, which stops short of the columns after the options
-  // (the drawer, "Something else?"): it is kept narrower than the box you
-  // see by their width, so it can follow you to the far right. The box's
-  // width is kept on it as --board-w.
-  // The option names stay pinned on top as the rail is on the left, so a
-  // tall board scrolls inside its box, no taller than the room it is in;
-  // past its end, the scroll carries on to what is under it
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = box.current;
-    const room = el?.parentElement;
-    if (!el || !room) return;
-    const fit = () => {
-      el.style.setProperty("--board-w", `${el.clientWidth}px`);
-      el.style.maxHeight = `${Math.max(room.clientHeight - 24, 320)}px`;
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(el);
-    ro.observe(room);
-    return () => ro.disconnect();
-  }, []);
+  // (the drawer, "Something else?"): it is kept narrower than the room you
+  // see (--pane-w, less what covers it) by their width, so it can follow you
+  // to the far right.
   const cols = board.columns;
   const ghost = !board.keepAsIs;
   const aside = board.aside.length > 0;
@@ -302,8 +280,9 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
 
   return (
     <div
-      ref={box}
-      className="w-fit max-w-full overflow-auto rounded-xl border border-line bg-surface"
+      // clip, not hidden: it rounds the corners without becoming a scroller
+      // of its own, which would pin the option names to the box, not the pane
+      className="w-fit overflow-clip rounded-xl border border-line bg-surface"
     >
       <div className="grid w-max" style={{ gridTemplateColumns: template }}>
         {lines.map((l, i) =>
@@ -316,7 +295,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
               <div
                 className="sticky left-0"
                 style={{
-                  maxWidth: `max(calc(var(--board-w, 100vw) - ${trailing}px), 240px)`,
+                  maxWidth: `max(calc(var(--pane-w, 100vw) - var(--cover, 16px) - 2px - ${trailing}px), 240px)`,
                 }}
               >
                 {l.span}
@@ -729,12 +708,16 @@ function AddWant({
         onSubmit={(e) => {
           e.preventDefault();
           if (!title.trim()) return;
-          void here.act("want", { q, title, weight });
-          onAdded(weight);
-          setTitle("");
-          // back to the usual weight: a must you meant once would otherwise
-          // make the next want a must too
-          setWeight("matters");
+          // cleared only once it is on the board: a refused want (the board
+          // is full, it is there already) stays for you to change
+          void here.act("want", { q, title, weight }).then((r) => {
+            if (r.error) return;
+            onAdded(weight);
+            setTitle("");
+            // back to the usual weight: a must you meant once would
+            // otherwise make the next want a must too
+            setWeight("matters");
+          });
         }}
         className="flex flex-wrap items-center gap-1.5"
       >

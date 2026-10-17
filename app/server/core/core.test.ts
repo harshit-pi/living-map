@@ -596,7 +596,7 @@ test("a grid row never names its blank's answer in the cell beside it", () => {
   ]);
 });
 
-test("a move told to keep the map removes nothing", () => {
+test("a move told to keep the map removes and rewords nothing", () => {
   const m: Canvas = {
     nodes: {
       q: { id: "q", parent: null, kind: "question", title: "Q?" } as never,
@@ -607,6 +607,14 @@ test("a move told to keep the map removes nothing", () => {
   };
   applyOps(m, [{ op: "remove", id: "o" }], { keep: true });
   assert.ok(m.nodes.o);
+  // nor rewords what is there: the other mode reads it as it was
+  applyOps(
+    m,
+    [{ op: "update", id: "o", title: "Step 4", summary: "Step 4: pick" }],
+    { keep: true },
+  );
+  assert.equal(m.nodes.o.title, "O");
+  assert.equal(m.nodes.o.summary, undefined);
   applyOps(m, [{ op: "remove", id: "o" }]);
   assert.equal(m.nodes.o, undefined);
 });

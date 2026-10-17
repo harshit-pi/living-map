@@ -114,6 +114,7 @@ const oneOf = <T extends string>(set: readonly T[], v: unknown): T | null =>
   set.includes(v as T) ? (v as T) : null;
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
+const named = (nodes: Nodes, id: string) => `"${own(nodes, id)?.title ?? id}"`;
 
 // "Why did X happen?" asks for causes; a question with options is a choice.
 export function inferShape(nodes: Nodes, q: string): Shape {
@@ -385,6 +386,24 @@ function holes(
   return out.sort((a, c) => rank(a) - rank(c));
 }
 
+// The cells a Fill asks for, in the order to write them: every empty cell on
+// a must, then on what matters, then nice, each want across the options, at
+// most FILL_MAX. The server lists them: told only "musts first", Claude
+// filled what matters on some options while musts stayed empty on others.
+export const FILL_MAX = 24;
+export function fillCells(s: ExploreState, nodes: Nodes, b: Board) {
+  const row = new Map(b.rows.map((r, i) => [r.id, i]));
+  const col = new Map(columnsOf(nodes, b).map((o, i) => [o.id, i]));
+  const all = WEIGHTS.flatMap((w) =>
+    holes(s, nodes, b, w, { guesses: false }).sort(
+      (a, c) =>
+        row.get(a.want)! - row.get(c.want)! ||
+        col.get(a.option)! - col.get(c.option)!,
+    ),
+  );
+  return { cells: all.slice(0, FILL_MAX), left: all.length - FILL_MAX };
+}
+
 // ---------------------------------------------------------------- fold, tally
 
 // Rows grouped by weight. Musts never fold; past `max` rows NICE folds to a
@@ -616,16 +635,19 @@ export function openItems(
     (n) =>
       `${plural(n, "question")}${hidden ? ` (${hidden} under a set-aside option)` : ""}`,
   );
-  add(
-    "no-against",
-    undecided
-      .filter((b) => {
-        const lead = liveLead(s, nodes, b.question);
-        return lead && !own(b.against, lead.id)?.length;
-      })
-      .map((b) => b.question),
-    (n) =>
-      n === 1 ? "no case against the lead" : `${n} leads with no case against`,
+  const noAgainst = undecided
+    .filter((b) => {
+      const lead = liveLead(s, nodes, b.question);
+      return lead && !own(b.against, lead.id)?.length;
+    })
+    .map((b) => b.question);
+  // the line is read beside the root's lead: one on a choice below names it
+  add("no-against", noAgainst, (n) =>
+    n > 1
+      ? `${n} leads with no case against`
+      : noAgainst[0] === root
+        ? "no case against the lead"
+        : `${named(nodes, noAgainst[0])}: no case against its lead`,
   );
   add(
     "no-premortem",
@@ -678,7 +700,18 @@ export const isStale = (s: ExploreState, nodes: Nodes, q: string): boolean => {
 
 // ---------------------------------------------------------------- Next
 
-const named = (nodes: Nodes, id: string) => `"${own(nodes, id)?.title ?? id}"`;
+// Next's label for one cell: the server knows an ask by it, so a second
+// press while that ask waits or runs pays for nothing
+export const checkLabel = (nodes: Nodes, option: string, want: string) =>
+  `Check ${named(nodes, option)} on ${own(nodes, want)?.title ?? want}`;
+
+// The checks still to run on a question (and under its options): Next names
+// them, so Claude picks one to run rather than adding one that repeats them.
+export const checksOn = (nodes: Nodes, q: string): MapNode[] =>
+  [...subtree(nodes, q)]
+    .map((id) => nodes[id])
+    .filter((n) => n && !n.dropped && isCheck(n))
+    .sort(byOrder);
 
 // What Next will do, and why: the board you are on first, then the map.
 export function nextGap(
@@ -717,7 +750,7 @@ export function nextGap(
         q,
         option: must.option,
         want: must.want,
-        label: `Check ${named(nodes, must.option)} on ${own(nodes, must.want)?.title ?? must.want}`,
+        label: checkLabel(nodes, must.option, must.want),
         reason: must.guess ? "a must, only a guess" : "a must, still empty",
       };
     const lead = liveLead(s, nodes, q);
@@ -738,7 +771,7 @@ export function nextGap(
         q,
         option: matters.option,
         want: matters.want,
-        label: `Check ${named(nodes, matters.option)} on ${own(nodes, matters.want)?.title ?? matters.want}`,
+        label: checkLabel(nodes, matters.option, matters.want),
         reason: "it matters, still empty",
       };
   }
@@ -772,16 +805,23 @@ export function nextGap(
     const likely = optionsOf(nodes, question.id).filter(
       (o) => o.status === "chosen",
     );
+    // with checks on the map, the deciding step is to run one of them, not
+    // to add another that repeats it
+    const checks = checksOn(nodes, question.id).length;
     if (question.shape === "causes")
       return {
         kind: "question",
         q: question.id,
         label: likely.length
           ? `Confirm ${named(nodes, likely[0].id)}, then settle it`
-          : `Tell the causes apart: ${question.title}`,
+          : checks
+            ? `Which check to run first: ${question.title}`
+            : `Tell the causes apart: ${question.title}`,
         reason: likely.length
           ? "you marked it likely; a fact that confirms it lets you settle the question"
-          : "Claude looks for the fact that best splits the causes",
+          : checks
+            ? `${plural(checks, "check")} on the map; Claude picks the one that best splits the causes`
+            : "Claude looks for the fact that best splits the causes",
       };
     return {
       kind: "question",
@@ -821,7 +861,8 @@ function boardOfRow(s: ExploreState, want: string, kept = true) {
 }
 
 // What a side thread may write: one pinned to an option writes that option's
-// column, its case against and takeaway, and its board's stand; one pinned to
+// column (and another column's cell that cites a fact filed under it), its
+// case against and takeaway, and its board's stand; one pinned to
 // a want writes that row and its board's stand; any other writes takeaways
 // and moves within its node. Framing and wants are never a thread's.
 function threadAllows(
@@ -836,8 +877,20 @@ function threadAllows(
   const isWant = !!boardOfRow(s, scope, false);
   const isOption = node.kind === "option";
   switch (op.op) {
-    case "cell":
-      return isOption ? op.option === scope : isWant && op.want === scope;
+    case "cell": {
+      if (isWant) return op.want === scope;
+      if (!isOption) return false;
+      if (op.option === scope) return true;
+      // what you tell an option's thread about yourself (budget, how long you
+      // stay) is filed there as a fact, and bears on every option: the thread
+      // may judge another column of its board on it, citing it
+      const other = own(nodes, String(op.option ?? ""));
+      return (
+        other?.kind === "option" &&
+        other.parent === node.parent &&
+        factsOf(nodes, op.facts).some((f) => f !== scope && inside.has(f))
+      );
+    }
     case "against":
       return isOption && op.option === scope;
     case "stand":
@@ -1444,8 +1497,14 @@ export function viewOf(
     };
   }
   const stand: ExploreView["stand"] = {};
-  for (const [q, st] of Object.entries(s.stand))
-    stand[q] = { ...st, stale: isStale(s, nodes, q) };
+  for (const [q, st] of Object.entries(s.stand)) {
+    const says = boardSays(s, nodes, q);
+    stand[q] = {
+      ...st,
+      stale: isStale(s, nodes, q),
+      ...(says ? { boardSays: says } : {}),
+    };
+  }
   const gapsOn = (q: string) => {
     const b = own(s.boards, q);
     if (!b || chosenHere(nodes, q)) return 0;
@@ -1503,6 +1562,29 @@ export function viewOf(
     wants: wantIds(s, nodes),
     outcomeDue,
   };
+}
+
+// Where the board disagrees with Claude's lead before you choose: the lead
+// fails a must, or another option meets more musts. Worked out from the
+// cells, so the stand line never backs a column the board scores lower
+// without saying so.
+export function boardSays(
+  s: ExploreState,
+  nodes: Nodes,
+  q: string,
+): string | null {
+  const b = own(s.boards, q);
+  const lead = liveLead(s, nodes, q);
+  if (!b || b.shape !== "choose" || b.commit || !lead) return null;
+  const t = tally(b, nodes);
+  const mine = t[lead.id];
+  if (!mine?.musts) return null;
+  if (mine.failsMust) return "the board has it failing a must";
+  const best = columnsOf(nodes, b)
+    .filter((o) => o.id !== lead.id && inPlay(o) && !t[o.id].failsMust)
+    .sort((a, c) => t[c.id].mustsMet - t[a.id].mustsMet)[0];
+  if (!best || t[best.id].mustsMet <= mine.mustsMet) return null;
+  return `the board has ${named(nodes, best.id)} meeting more musts (${t[best.id].mustsMet}/${mine.musts}, the lead ${mine.mustsMet}/${mine.musts})`;
 }
 
 // ---------------------------------------------------------------- summary

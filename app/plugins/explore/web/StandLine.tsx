@@ -60,6 +60,16 @@ export function StandLine({
   const commit = board?.commit;
   const causes = (point?.shape ?? board?.shape) === "causes";
   const lean = board?.lean;
+  // your own position on a cause list, as a lean is on a choice
+  const likely = causes
+    ? Object.values(nodes).filter(
+        (n) =>
+          n.parent === q &&
+          n.kind === "option" &&
+          n.status === "chosen" &&
+          !n.dropped,
+      )
+    : [];
   const chips = view.questions.filter(
     (p) => p.board && p.shape === "choose" && p.id !== q,
   );
@@ -132,6 +142,14 @@ export function StandLine({
             Claude has not said where it stands yet.
           </span>
         )}
+        {stand?.boardSays && !commit && (
+          <span
+            className="text-xs text-warning-strong"
+            title="Worked out from the cells, not from Claude's line"
+          >
+            · {stand.boardSays}
+          </span>
+        )}
         {stand?.stale && (
           <span
             className="text-xs text-faint"
@@ -143,6 +161,14 @@ export function StandLine({
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+        {likely.length > 0 && (
+          <span>
+            You marked likely{" "}
+            <b className="text-success-strong">
+              ✓ {likely.map((n) => n.title).join(", ")}
+            </b>
+          </span>
+        )}
         {lean && !commit && (
           <span className="flex items-center gap-1">
             You lean <b className="text-ink">● {title(lean.option)}</b>

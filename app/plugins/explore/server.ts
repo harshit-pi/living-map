@@ -9,10 +9,13 @@ import {
   addedBy,
   applyExploreOp,
   BOARD_OPS,
+  checkLabel,
+  checksOn,
   childrenOf,
   clip,
   dropCommit,
   ensureBoard,
+  fillCells,
   keptRows,
   live,
   nextGap,
@@ -56,8 +59,9 @@ const PROMPT = `You are the engine behind a DECISION BOARD. The user works throu
 - Keep scoring light: marks only, never weights, scores or totals.
 - For causes: never set a cause dropped. If a fact rules it out, start its summary "Ruled out:" and name the fact; the user sets it aside. The stand's lead is the cause you think likeliest so far, with how sure you are; its line is about the whole question, never only the cause you last worked on. With no likeliest cause yet, lead null and no sure.
 - A fact node states something known, with its source. A check not yet run is not a fact: start its summary "To check:" and say what it would show; once it is run, rewrite the summary with what it found.
-- When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node) and cite it, so the other options' cells are judged on it too; in a thread, say the rest of the board picks it up on the next move.
+- When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node) and cite it. In a thread, also rewrite each other option's cell it changes, citing that fact (a thread may write another option's cell only when the cell cites a fact under the thread's node), and say which you changed.
 - Only the user chooses, sets aside or settles. Never set a question answered while options under it are still proposed: give your lead in a stand op. Never write "Recommended:".
+- A stand agrees with the cells, yours and the ones you write in the same move: never claim a must result a cell contradicts, and if you lead an option that fails a must or meets fewer musts than another, say why in the line.
 - End every move that changes a board with a stand op for that board, and write a fresh one for any board whose last stand is marked "written before the last change". Never add fact nodes that sum up where things stand: that is what the stand op is for.
 - Cells land only on wants the user kept: your new wants are suggestions, and a cell on one is dropped. On a board with no kept wants, write no cells, and never describe marks in the caption that the board does not show.
 - Nodes marked (by user) are the user's: your update and remove ops on them are ignored. If asked to change or remove one, say so and point to the board (the user can rename or remove a want, set aside an option, or rate a cell); never claim you changed it.
@@ -77,7 +81,7 @@ The user's ratings, wants and answers are theirs: give your view beside them, ne
 // Each op names nodes by id, so it goes after the nodes it names.
 const START = `START: classify the question with a frame op on the root. choose: the root, 3-4 options (one of them "Keep things as they are" or "Wait"), and 4-6 want ops spread over the categories, at most 2 of them must; no cells. causes: the root, 3-5 possible causes as options, and up to 2 checks that would tell them apart (fact nodes whose summary starts "To check:"). open: the root and 3-4 sub-questions; a sub-question that is a choice gets its own frame. Then a stand op for the root, lead null, with a line saying what would decide it. Write each board op after the nodes it names. The caption is one sentence: keep or skip the suggested wants, add your own, then press Fill.`;
 
-const FILL = `FILL the board named in the ACTION: cell ops for every live option on every want the ACTION lists, must wants first, then matters, then nice; at most 24 cells. Pressing Fill kept every suggestion the user did not skip, so all of them are the user's wants now. Leave out a cell you cannot judge, or write unknown with what would tell. Add at most 3 facts when one decides a cell, and cite it. You may add one option if the wants point at one the board lacks (no cells for it yet). End with a stand op.`;
+const FILL = `FILL the board named in the ACTION: one cell op for each cell the ACTION lists (option × want), in its order, and no others. Pressing Fill kept every suggestion the user did not skip, so all of them are the user's wants now. Write unknown, with what would tell, for a cell you cannot judge. Add at most 3 facts when one decides a cell, and cite it. You may add one option if the wants point at one the board lacks (no cells for it yet). End with a stand op. In the caption, say what is still empty only as the ACTION says it.`;
 
 const WRAP = `{"op":"premortem","option":"option id","reasons":["at most 12 words"]}          // at most 3, likeliest first
 {"op":"assume","q":"question id","id":"a-short-id","text":"at most 14 words","breaksIf":"at most 14 words"}
@@ -196,35 +200,66 @@ function fillTurn(ctx: Ctx, q: MapNode, how: TurnHow = {}) {
     ctx.note(
       `Pressing Fill kept Claude's suggestions ${kept.map((r) => t(nodes[r.id])).join(", ")} as what you want.`,
     );
+  const { cells, left } = fillCells(s, nodes, b);
+  if (!cells.length)
+    return fail(
+      "Every cell has a mark already: ask on one to have Claude check it again.",
+    );
   b.filledAt = Date.now();
   ctx.say("Fill the board");
-  const order = WEIGHTS.flatMap((w) =>
-    b.rows.filter((r) => r.weight === w).map((r) => `[${r.id}] ${r.weight}`),
+  const weightOf = new Map(b.rows.map((r) => [r.id, r.weight]));
+  const list = cells.map(
+    (c) => `[${c.option}] × [${c.want}] ${weightOf.get(c.want)}`,
   );
+  const rest =
+    left > 0
+      ? ` ${left} more empty ${left === 1 ? "cell is" : "cells are"} left for later; say Next fills them.`
+      : " That is every empty cell.";
   return ctx.engine.turn(
     lead(
       how,
-      `FILL the board for [${q.id}] ${t(q)}. Fill every one of these wants: ${order.join(", ")}.`,
+      `FILL the board for [${q.id}] ${t(q)}. Write these ${cells.length} cells: ${list.join(", ")}.${rest}`,
     ),
     ctx.settings,
     { label: how.label ?? FILLING, sections: ["fill"], nodeId: q.id },
   );
 }
 
-function askTurn(ctx: Ctx, option: MapNode, want: MapNode, how: TurnHow = {}) {
+const askLabel = (option: MapNode, want: MapNode) =>
+  `Checking ${option.title} on ${want.title}`;
+
+function askTurn(
+  ctx: Ctx,
+  option: MapNode,
+  want: MapNode,
+  how: TurnHow = {},
+): ActionResult | Promise<ActionResult> {
+  // a second press while this cell's ask waits or runs would pay for the
+  // same answer again (and could flip the mark)
+  const nodes = ctx.map.nodes;
+  if (
+    ctx.engine.isQueuedOrRunning(option.id, askLabel(option, want)) ||
+    ctx.engine.isQueuedOrRunning(
+      option.id,
+      `Next: ${checkLabel(nodes, option.id, want.id)}`,
+    )
+  )
+    return {};
   const threadId = threadOn(ctx, option.id);
   ctx.say(`How does it do on ${t(want)}?`, threadId);
   return ctx.engine
     .turn(
       lead(
         how,
-        `ASK CELL: judge [${option.id}] ${t(option)} on the want [${want.id}] ${t(want)}. Write exactly one cell op for it: unknown with what would tell, or same with note "no real difference" if it does not separate the options. Cite a fact, or add at most 1. Reply in at most 60 words.`,
+        `ASK CELL: judge [${option.id}] ${t(option)} on the want [${want.id}] ${t(want)}. Write exactly one cell op for it: unknown with what would tell, or same with note "no real difference" if it does not separate the options. Cite a fact, or add at most 1. Then a stand op for [${option.parent}]. Reply in at most 60 words.`,
       ),
       ctx.settings,
       {
         threadId,
         view: "thread",
-        label: how.label ?? `Checking ${option.title} on ${want.title}`,
+        label: how.label ?? askLabel(option, want),
+        // by the option, so a second ask on it can be told apart
+        nodeId: option.id,
         sections: ["threads"],
       },
     )
@@ -236,7 +271,7 @@ function somethingTurn(ctx: Ctx, q: MapNode, how: TurnHow = {}) {
   return ctx.engine.turn(
     lead(
       how,
-      `SOMETHING ELSE for [${q.id}] ${t(q)}: add exactly one option the user has probably not thought of that could pass the musts. No cells.`,
+      `SOMETHING ELSE for [${q.id}] ${t(q)}: add exactly one option the user has probably not thought of that could pass the musts. No cells. Then a stand op for [${q.id}] that weighs it.`,
     ),
     ctx.settings,
     { label: how.label ?? ANOTHER, nodeId: q.id },
@@ -289,12 +324,18 @@ function gapTurn(ctx: Ctx, gap: Gap) {
     gap.kind === "question" &&
     q &&
     shapeOf(state(ctx), nodes, q.id) === "causes"
-  )
+  ) {
+    // a check that repeats one on the map is a move spent on nothing
+    const checks = checksOn(nodes, q.id);
+    const have = checks.length
+      ? ` Checks already on the map: ${checks.map((c) => `[${c.id}] ${t(c)}`).join(", ")}. Never add one that repeats them: if one of them best tells the causes apart, add nothing and say in the caption which to run first and what each result would mean.`
+      : "";
     return ctx.engine.turn(
-      `${how.prefix} CAUSES of [${q.id}] ${t(q)}: find the one fact that best tells the causes apart, starting with the cause the user marked likely, else your best guess. Add it under the cause it bears on, say in the caption what it shows and what is still unchecked, then a stand op for [${q.id}].`,
+      `${how.prefix} CAUSES of [${q.id}] ${t(q)}: find the one fact that best tells the causes apart, starting with the cause the user marked likely, else your best guess. Add it under the cause it bears on, say in the caption what it shows and what is still unchecked, then a stand op for [${q.id}].${have}`,
       ctx.settings,
       { label: how.label, nodeId: q.id },
     );
+  }
   if (gap.kind === "question" && q)
     return ctx.engine.turn(
       `${how.prefix} Make [${q.id}] ${t(q)} clearer or decidable, and say in the caption what you changed.`,

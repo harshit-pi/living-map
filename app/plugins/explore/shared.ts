@@ -234,7 +234,12 @@ export type BoardView = {
   looseFacts: { id: string; title: string }[];
 };
 
-export type StandView = Stand & { stale: boolean };
+export type StandView = Stand & {
+  stale: boolean;
+  // the board scores another option higher on the musts than Claude's lead
+  // (or has the lead failing one): said beside its line
+  boardSays?: string;
+};
 
 export type RootState = "decided" | "leaning" | "open";
 

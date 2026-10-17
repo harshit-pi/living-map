@@ -141,6 +141,8 @@ export function tagOf(
 ): string | undefined {
   if (!view || !n.parent) return undefined;
   if (n.dropped || n.status === "dropped") return undefined;
+  // a want is a fact node, but what you want is no fact
+  if (view.wants.includes(n.id)) return "want";
   if (isCheck(n)) return "to check";
   if (n.kind !== "option") return undefined;
   const shape =

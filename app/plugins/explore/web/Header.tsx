@@ -112,13 +112,15 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
         title={
           gap ? `${gap.label}: ${gap.reason}` : "Claude takes the next step"
         }
-        // one width whatever the label says, so the header never shifts
-        className="flex min-w-0 shrink-0 items-center whitespace-nowrap rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40 xl:w-[300px]"
+        // one width whatever the label says, so the header never shifts;
+        // narrower on a smaller window, where the header has less room
+        className="flex min-w-0 shrink-0 items-center whitespace-nowrap rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40 lg:w-[176px] xl:w-[300px]"
       >
         Next
-        {/* the label on a wide window; its reason is in the title */}
+        {/* the label wherever the header has room, cut short on a smaller
+            window; its reason is in the title */}
         {gap && (
-          <span className="hidden min-w-0 truncate xl:inline">
+          <span className="hidden min-w-0 truncate lg:inline">
             : {gap.label}
           </span>
         )}

@@ -41,6 +41,19 @@ export function Cell({
   if (!sc) {
     if (col.faded)
       return <div className={`px-2 py-2 text-xs text-faint ${fade}`}>—</div>;
+    // an ask on this cell waits or runs (from here or from Next): said in
+    // the cell, so it is not asked again
+    const { working, waiting } = here.ws.live;
+    const asking = [working, ...waiting].some(
+      (t) => t?.nodeId === col.id && t.label.endsWith(` on ${row.title}`),
+    );
+    if (asking)
+      return (
+        <div className="flex h-full items-start gap-1 border-l-2 border-dashed border-warning-line bg-warning-soft/50 px-2 py-2 text-xs text-muted">
+          <span className="h-2 w-2 shrink-0 translate-y-1 animate-pulse rounded-full bg-primary" />
+          Claude is checking…
+        </div>
+      );
     return (
       <div
         className="flex h-full items-start gap-1 border-l-2 border-dashed border-warning-line bg-warning-soft/50 px-2 py-2 text-xs text-warning-strong"

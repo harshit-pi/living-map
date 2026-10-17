@@ -533,7 +533,12 @@ test("a thread writes only its own column, its own row, or takeaways and moves u
   });
   // an option's thread
   assert.equal(op(cell("pg", "w-cost"), "pg"), 1);
-  assert.equal(op(cell("dyn", "w-cost"), "pg"), 0);
+  // another column only on a fact filed under the thread's option (what you
+  // told it about yourself), never on another board
+  assert.equal(op({ ...cell("dyn", "w-cost"), facts: [] }, "pg"), 0);
+  assert.equal(op({ ...cell("dyn", "w-cost"), facts: ["q2"] }, "pg"), 0);
+  assert.equal(op(cell("dyn", "w-cost"), "pg"), 1);
+  assert.equal(op(cell("h1", "w-cost"), "pg"), 0);
   assert.equal(op({ op: "against", option: "pg", text: "slow" }, "pg"), 1);
   assert.equal(op({ op: "against", option: "dyn", text: "slow" }, "pg"), 0);
   assert.equal(op({ op: "stand", q: "q", lead: "pg", line: "x" }, "pg"), 1);
@@ -1258,8 +1263,19 @@ test("Next on a cause list asks for the fact that tells the causes apart", async
   // the choice under it is made, so the cause list is what is open
   await run("commit", { option: "opt-resp-bofu" });
   await run("next", { q: "q-organic-cause" });
-  assert.match(turns.at(-1)!.action, /CAUSES of \[q-organic-cause\]/);
+  const last = turns.at(-1)!;
+  assert.match(last.action, /CAUSES of \[q-organic-cause\]/);
+  // the checks on the map are named, so none is added twice
+  assert.match(last.opts.label ?? "", /^Next: Which check to run first/);
+  assert.match(
+    last.action,
+    /Checks already on the map: \[fact-query-split\] "Split CTR by query intent", \[fact-serp-check\]/,
+  );
+  // with none, Claude looks for the fact that splits them
+  for (const id of ["fact-query-split", "fact-serp-check"]) delete m.nodes[id];
+  await run("next", { q: "q-organic-cause" });
   assert.match(turns.at(-1)!.opts.label ?? "", /^Next: Tell the causes apart/);
+  assert.doesNotMatch(turns.at(-1)!.action, /Checks already on the map/);
 });
 
 test("Claude's wants are refused on a cause list, and a suggestion says it is one", () => {
@@ -1406,7 +1422,7 @@ test("Fill says it kept the open suggestions, names every want, and runs once", 
   assert.equal(m.nodes["w-sugg"].summary, "What you want · nice");
   assert.match(
     turns[0].action,
-    /Fill every one of these wants: \[w-cost\] must, \[w-speed\] matters, \[w-sugg\] nice\./,
+    /Write these 9 cells: \[keep\] × \[w-cost\] must, \[pg\] × \[w-cost\] must, \[dyn\] × \[w-cost\] must, \[keep\] × \[w-speed\] matters,.* That is every empty cell\./,
   );
   // a second press while a fill is queued or running pays for nothing
   const m2 = storedMap(boardNodes());
@@ -1586,4 +1602,105 @@ test("a board's loose facts are its own: no checks, no wants, none from a questi
   assert.ok(isCheck(nodes["f-check"]));
   assert.ok(isCheck(node("x", null, "fact", "Split churn by cohort")));
   assert.ok(!isCheck(node("y", null, "fact", "TikTok ads started August")));
+});
+
+test("Fill lists every empty must before any matters cell, at most 24, and says what is left", async () => {
+  const nodes = boardNodes();
+  // 9 options and 2 musts: 18 must cells, then what matters
+  for (let i = 0; i < 6; i++)
+    nodes[`o${i}`] = node(`o${i}`, "q", "option", `Option ${i}`, {
+      order: 20 + i,
+    });
+  const m = storedMap(nodes);
+  const { s } = withWants(m.nodes);
+  m.data = { explore: s };
+  applyExploreOp(s, m.nodes, {
+    op: "want",
+    q: "q",
+    id: "w-safe",
+    title: "w-safe",
+    weight: "must",
+  });
+  s.boards.q.rows.at(-1)!.suggested = false;
+  // one must cell is filled already: Fill leaves it
+  applyExploreOp(s, m.nodes, {
+    op: "cell",
+    option: "pg",
+    want: "w-cost",
+    mark: "same",
+    facts: ["f-pg"],
+  });
+  const { run, turns } = stub(m);
+  await run("fill", { q: "q" });
+  const action = turns[0].action;
+  const cells = [...action.matchAll(/\[([\w-]+)\] × \[([\w-]+)\] (\w+)/g)];
+  assert.equal(cells.length, 24);
+  const weights = cells.map((c) => c[3]);
+  assert.equal(weights.filter((w) => w === "must").length, 17);
+  assert.ok(
+    weights.slice(0, 17).every((w) => w === "must"),
+    "musts first",
+  );
+  assert.ok(!cells.some((c) => c[1] === "pg" && c[2] === "w-cost"));
+  // 35 empty cells (4 wants, the suggestion kept): 11 left, and Claude is
+  // told so
+  assert.match(action, /11 more empty cells are left for later/);
+});
+
+test("an ask on a cell runs once while it waits, and its turn is by the option", async () => {
+  const m = storedMap(boardNodes());
+  m.data = { explore: withWants(m.nodes).s };
+  const { run, turns } = stub(m);
+  await run("ask", { option: "pg", want: "w-cost" });
+  assert.equal(turns[0].opts.nodeId, "pg");
+  assert.match(turns[0].action, /Then a stand op for \[q\]/);
+  const m2 = storedMap(boardNodes());
+  m2.data = { explore: withWants(m2.nodes).s };
+  const two = stub(m2, { busy: true });
+  await two.run("ask", { option: "pg", want: "w-cost" });
+  assert.equal(two.turns.length, 0);
+  assert.equal(Object.keys(m2.threads).length, 0, "no thread, no message");
+});
+
+test("the stand says when the board scores another option higher on the musts", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  const cell = (option: string, mark: string) =>
+    applyExploreOp(s, nodes, {
+      op: "cell",
+      option,
+      want: "w-cost",
+      mark,
+      facts: ["f-pg"],
+    });
+  cell("keep", "same");
+  cell("pg", "worse");
+  cell("dyn", "worse");
+  applyExploreOp(s, nodes, { op: "stand", q: "q", lead: "pg", line: "x" });
+  const says = () => viewOf(s, nodes, {}).stand.q.boardSays;
+  assert.equal(
+    says(),
+    'the board has "Keep the current DB" meeting more musts (1/1, the lead 0/1)',
+  );
+  cell("pg", "fails");
+  assert.equal(says(), "the board has it failing a must");
+  cell("pg", "better");
+  assert.equal(says(), undefined);
+});
+
+test("the open list names the board of a lead with no case against", () => {
+  const { map, s } = withWants(boardNodes());
+  applyExploreOp(s, map.nodes, { op: "frame", q: "q2", shape: "choose" });
+  applyExploreOp(s, map.nodes, { op: "stand", q: "q2", lead: "h1", line: "x" });
+  const item = () =>
+    openItems(s, map.nodes).find((o) => o.kind === "no-against");
+  assert.equal(item()?.label, '"Which host?": no case against its lead');
+  assert.equal(item()?.q, "q2");
+  applyExploreOp(s, map.nodes, {
+    op: "against",
+    option: "h1",
+    text: "costly",
+  });
+  applyExploreOp(s, map.nodes, { op: "stand", q: "q", lead: "pg", line: "x" });
+  assert.equal(item()?.label, "no case against the lead");
 });

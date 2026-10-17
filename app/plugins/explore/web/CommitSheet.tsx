@@ -27,8 +27,10 @@ export function CommitSheet({
   // the why is yours: Claude's line weighs the options (it may argue for
   // another), so it is a hint to start from, never your reason by default
   const [why, setWhy] = useState("");
+  // once a choice is made, Claude's line is about that choice, whatever it
+  // leads: it argues for this option only when nothing is chosen yet
   const hint =
-    stand?.lead === option && stand.line
+    stand?.lead === option && stand.line && !here.view.boards[q]?.commit
       ? `Claude: ${stand.line}`
       : "What tipped it, in your words";
   // how sure you said you were when you leaned this way

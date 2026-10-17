@@ -142,10 +142,13 @@ export function Tree({
   // The whole tree, or, when it cannot be read whole, the root and the
   // cards right under it (for a why-question, every cause): those are where
   // it stands. A fit at the smallest readable zoom would frame the middle of
-  // the bounds, which on a lopsided tree is no card in particular, and
-  // centring on the root cut its first children off at the top.
-  const frameWhole = async () => {
-    await fitView({ ...WHOLE, duration: 300 });
+  // the bounds, which on a lopsided tree is no card in particular. When the
+  // root and its children do not fit either, the root is centred, kept
+  // within them: their top would leave the root, which sits in their middle,
+  // far below the room. The first frame is instant, so the camera does not
+  // sweep from one frame to another as the tree opens.
+  const frameWhole = async (duration = 300) => {
+    await fitView({ ...WHOLE, duration });
     const root = laid.nodes.find((n) => !map.nodes[n.id]?.parent);
     if (!root || getViewport().zoom > READABLE + 0.001) return;
     const z = READABLE;
@@ -165,13 +168,19 @@ export function Tree({
         ? (width - all.w * z) / 2 - all.x * z
         : PAD - all.x * z;
     // down: the whole tree, else the root and its children, centred in the
-    // room above the message box; else those from the top
+    // room above the message box; else the root centred, within those
     const box = all.h * z <= room ? all : near;
+    const self = boundsOf(new Set([root.id]));
+    const span = room / z;
+    const top = Math.min(
+      Math.max(self.y + self.h / 2 - span / 2, near.y),
+      near.y + near.h - span,
+    );
     const y =
       box.h * z <= room
         ? PAD + (room - box.h * z) / 2 - box.y * z
-        : PAD - box.y * z;
-    await setViewport({ x, y, zoom: z }, { duration: 200 });
+        : PAD - top * z;
+    await setViewport({ x, y, zoom: z }, { duration: duration && 200 });
   };
 
   // The camera holds still: it frames the whole tree when the tree first
@@ -179,7 +188,9 @@ export function Tree({
   // what you were reading stays where you left it. New nodes light up a pill
   // instead, and the pill frames them.
   // the layout as it is when the fit runs, not when it was asked for
-  const frameNow = useEffectEvent(() => void frameWhole());
+  const frameNow = useEffectEvent(
+    (duration: number) => void frameWhole(duration),
+  );
   // once the cards are measured, or there is nothing to frame yet
   const measured = useNodesInitialized();
   const count = laid.nodes.length;
@@ -192,8 +203,9 @@ export function Tree({
   const fitted = useRef<string | null>(null);
   useEffect(() => {
     if (!measured || fitted.current === fitKey) return;
+    const first = fitted.current === null;
     fitted.current = fitKey;
-    requestAnimationFrame(() => frameNow());
+    requestAnimationFrame(() => frameNow(first ? 0 : 300));
   }, [measured, fitKey]);
   // the nodes you have been shown: every node the map had when the tree
   // opened, those of the first move (framed as they came), and those the
@@ -203,30 +215,42 @@ export function Tree({
     setSeen(new Set(Object.keys(map.nodes)));
   // The layout re-centres a parent on its children as they change, so the
   // card you are reading would jump: the camera follows it instead (the
-  // card you selected, else the root), so it stays where it was on screen.
-  const anchorAt = useRef<{ id: string; x: number; y: number } | null>(null);
+  // card you selected, else the one nearest the middle of what you see,
+  // where it was before the change), so it stays where it was on screen.
+  // The root alone moved the rest under a still camera.
+  const lastAt = useRef<Map<string, { x: number; y: number }> | null>(null);
   useLayoutEffect(() => {
-    const id =
-      selected.find((x) => laid.nodes.some((n) => n.id === x)) ??
-      laid.nodes.find((n) => !map.nodes[n.id]?.parent)?.id;
-    const now = laid.nodes.find((n) => n.id === id)?.position;
-    const was = anchorAt.current;
-    if (
-      !growing &&
-      id &&
-      now &&
-      was?.id === id &&
-      (was.x !== now.x || was.y !== now.y)
-    ) {
-      const v = getViewport();
+    const now = new Map(laid.nodes.map((n) => [n.id, n.position]));
+    const was = lastAt.current;
+    lastAt.current = now;
+    if (growing || !was) return;
+    const both = (id: string) => was.has(id) && now.has(id);
+    const v = getViewport();
+    let id = selected.find(both);
+    if (!id) {
+      const cx = (width / 2 - v.x) / v.zoom;
+      const cy = (Math.max(height - BELOW, 200) / 2 - v.y) / v.zoom;
+      let best = Infinity;
+      for (const [k, p] of was) {
+        if (!now.has(k)) continue;
+        const sz = sizes[k] ?? { width: 260, height: 120 };
+        const d =
+          (p.x + sz.width / 2 - cx) ** 2 + (p.y + sz.height / 2 - cy) ** 2;
+        if (d < best) {
+          best = d;
+          id = k;
+        }
+      }
+    }
+    const a = id ? was.get(id) : undefined;
+    const b = id ? now.get(id) : undefined;
+    if (a && b && (a.x !== b.x || a.y !== b.y))
       void setViewport({
-        x: v.x - (now.x - was.x) * v.zoom,
-        y: v.y - (now.y - was.y) * v.zoom,
+        x: v.x - (b.x - a.x) * v.zoom,
+        y: v.y - (b.y - a.y) * v.zoom,
         zoom: v.zoom,
       });
-    }
-    anchorAt.current = id && now ? { id, ...now } : null;
-  }, [laid, selected, map.nodes, growing, getViewport, setViewport]);
+  }, [laid, selected, growing, width, height, sizes, getViewport, setViewport]);
   const fresh = laid.nodes.filter((n) => !seen.has(n.id)).map((n) => n.id);
   const showNew = () => {
     const ids = new Set(fresh);
@@ -289,8 +313,6 @@ export function Tree({
         onPaneClick={() => onSelect([])}
         minZoom={0.2}
         proOptions={{ hideAttribution: true }}
-        fitView
-        fitViewOptions={{ maxZoom: 1, minZoom: 0.7, padding: FRAME }}
       >
         <Background color="var(--color-line-strong)" gap={22} />
         <Controls

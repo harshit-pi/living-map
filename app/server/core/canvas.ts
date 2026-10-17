@@ -114,7 +114,8 @@ export function applyOps(
     judge = false,
     // a plugin's handler for ops core does not know (null: not its op either)
     extra = undefined as ((op: Raw) => number | null) | undefined,
-    // nothing on the map may be removed (a mode switch: what you explored stays)
+    // nothing on the map may be removed or reworded (a mode switch: what you
+    // explored stays, and reads the same when you switch back)
     keep = false,
     // nodes you made, chose or settled are yours: the model may not change or
     // remove them (a plugin opts in; Explore does)
@@ -252,7 +253,8 @@ export function applyOps(
     } else if (cur) {
       if (allowed && !allowed.has(id)) continue;
       for (const k of ["title", "summary", "detail"] as const)
-        if (typeof op[k] === "string") cur[k] = op[k];
+        if (typeof op[k] === "string" && !(keep && k !== "detail"))
+          cur[k] = op[k];
       // only you choose
       if (
         op.status &&
