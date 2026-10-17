@@ -910,6 +910,25 @@ export function mixedOrder(ids: readonly string[], seed: number): string[] {
 const COL = 220;
 const ROW = 110;
 
+// The links with each one that closes a loop left out ("Antibody prevents
+// H1N1 virus" after the virus started the chain). Layered with a loop in,
+// every part on it climbs to the last layer and they all fall in one column.
+function acyclic(m: RefModel): RefLink[] {
+  const state = new Map<string, "open" | "done">();
+  const keep: RefLink[] = [];
+  const visit = (id: string) => {
+    state.set(id, "open");
+    for (const l of m.links.filter((x) => x.from === id)) {
+      if (state.get(l.to) === "open") continue;
+      keep.push(l);
+      if (!state.has(l.to)) visit(l.to);
+    }
+    state.set(id, "done");
+  };
+  for (const p of m.parts) if (!state.has(p.id)) visit(p.id);
+  return keep;
+}
+
 // What each help level gives before you start: L0 every part where the
 // worked case had it and every link but the key ones; L1 every part on a
 // plain grid in a shuffled order, no links; L2 and L3 nothing placed.
@@ -927,8 +946,9 @@ export function startBuild(m: RefModel, help: Help): Build {
   if (help === 0) {
     // layered left to right along the links, as the worked case is drawn
     const depth = new Map(m.parts.map((p) => [p.id, 0]));
+    const forward = acyclic(m);
     for (let i = 0; i < m.parts.length; i++)
-      for (const l of m.links)
+      for (const l of forward)
         depth.set(
           l.to,
           Math.max(
@@ -1502,8 +1522,16 @@ function stepView(
       st.stage === "see" && !st.predicted && !st.shownModel
         ? m.predict?.hides
         : undefined;
-    const hidden = hideLink
-      ? (m.links.find((l) => l.id === hideLink)?.to ?? null)
+    // the end that is the answer is the one drawn as "?": a predict can ask
+    // about either end ("which cell deals with the virus?" asks the from end)
+    const link = hideLink ? m.links.find((l) => l.id === hideLink) : undefined;
+    const answer = normAnswer(m.predict?.answer ?? "");
+    const label = (id: string) =>
+      normAnswer(m.parts.find((x) => x.id === id)?.label ?? "");
+    const hidden = link
+      ? label(link.from) === answer
+        ? link.from
+        : link.to
       : null;
     base.worked = {
       parts: m.parts.map((x) =>

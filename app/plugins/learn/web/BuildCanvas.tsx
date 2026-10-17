@@ -5,6 +5,7 @@ import {
   MarkerType,
   Position,
   ReactFlow,
+  useNodesInitialized,
   useReactFlow,
   type Edge,
   type Node,
@@ -321,11 +322,14 @@ export function BuildCanvas({
     return z ? [...rs, z] : rs;
   }, [frame, span, waiting]);
 
-  // a part placed out of sight brings the view round to show it
+  // a part placed out of sight brings the view round to show it. It waits
+  // until the cards are measured: fitView skips a card with no size, so a
+  // fit run on fresh cards (the build opening from See) frames nothing.
   const count = parts.length;
+  const ready = useNodesInitialized();
   useEffect(() => {
     const el = box.current;
-    if (!el || !count) return;
+    if (!el || !count || !ready) return;
     const { x, y, zoom } = rf.getViewport();
     const out = rf.getNodes().some((n) => {
       if (n.type !== "part") return false;
@@ -339,7 +343,7 @@ export function BuildCanvas({
       );
     });
     if (out) void rf.fitView({ ...FIT, duration: 200 });
-  }, [count, rf]);
+  }, [key, count, ready, rf]);
 
   const rawKey = (p: { x: number; y: number; slot?: string }) =>
     `${p.x},${p.y},${p.slot ?? ""}`;

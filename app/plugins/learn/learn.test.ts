@@ -559,6 +559,21 @@ test("fade: what each help level gives", () => {
   assert.ok(
     x(l0, "virus") < x(l0, "dendritic") && x(l0, "helpert") < x(l0, "bcell"),
   );
+  // a link that closes a loop does not stack every part in one column
+  const loop = startBuild(
+    model({
+      links: [
+        ...LINKS,
+        { id: "l7", from: "antibody", to: "virus", rel: "prevents" },
+      ],
+    }),
+    0,
+  );
+  assert.ok(
+    x(loop, "virus") < x(loop, "dendritic") &&
+      x(loop, "dendritic") < x(loop, "helpert"),
+    JSON.stringify(loop.placed),
+  );
   const l1 = startBuild(m, 1);
   assert.equal(l1.placed.length, 7);
   assert.equal(l1.links.length, 0);
@@ -810,6 +825,19 @@ test("view: no accept list, rubric, unasked hint, affected list, predict answer 
   assert.equal(see.predict?.right, null);
   assert.equal(at("build").steps[0].worked, null);
   assert.equal(at("why").steps[0].worked, null);
+  // a predict about the from end ("which cell becomes the Memory B cell?")
+  // hides that end, not the other one
+  mo.predict = {
+    ...mo.predict!,
+    ask: "Which cell turns into the one still there on day 60?",
+    choices: [{ text: "B cell" }, { text: "Plasma cell" }],
+    answer: "B cell",
+  };
+  const from = at("see").steps[0].worked!;
+  assert.equal(from.hidden, "bcell");
+  assert.equal(from.parts.find((p) => p.id === "bcell")?.label, "?");
+  assert.equal(from.parts.find((p) => p.id === "memb")?.label, "Memory B cell");
+  mo.predict = { ...mo.predict, ...PREDICT };
   // once you predicted, the whole worked case; a wrong pick shows its refutation
   s.steps.s1 = {
     ...s.steps.s1,
