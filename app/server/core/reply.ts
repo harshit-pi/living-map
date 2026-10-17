@@ -23,13 +23,16 @@ function scan(text: string): { ops: Raw[]; broken: number } {
   const at = text.indexOf("```map");
   if (at < 0) return { ops, broken };
   const body = text.slice(at + 6);
-  const arr = body.indexOf("[");
-  if (arr < 0) return { ops, broken };
+  // The block is {"ops":[...]}, a bare array, or bare op objects one per line.
+  // Only skip a leading "[" at the block's start: a "[" inside an op (a list in
+  // its spec) is not the ops array.
+  const head =
+    body.match(/^[^{[]*(?:\{\s*"ops"\s*:\s*)?\[/) ?? body.match(/^[^{[]*/);
   let depth = 0;
   let inStr = false;
   let esc = false;
   let op = "";
-  for (let i = arr + 1; i < body.length; i++) {
+  for (let i = head ? head[0].length : 0; i < body.length; i++) {
     const ch = body[i];
     if (inStr) {
       if (esc) esc = false;
