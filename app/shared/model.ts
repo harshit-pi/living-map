@@ -5,7 +5,8 @@
 export type Kind = "question" | "option" | "fact";
 export type Status =
   "open" | "answered" | "proposed" | "chosen" | "dropped" | "info";
-export type Purpose = "explore" | "learn";
+// "explore" and "learn" are built in; a plugin adds its own (e.g. "design")
+export type Purpose = "explore" | "learn" | (string & {});
 // How Claude should shape a reply: a caption for the canvas, or a short chat answer in a side thread
 export type View = "visual" | "thread";
 
@@ -149,6 +150,8 @@ export type MapDoc = {
   fills: Record<string, Fill>;
   scenes: Record<string, Scene>;
   usage: Usage;
+  // each plugin's own state, by plugin id, as the plugin chooses to show it
+  data?: Record<string, unknown>;
 };
 
 export type MapSummary = {
@@ -214,7 +217,14 @@ export type Action =
   | { type: "next" | "stop" }
   | { type: "open"; mapId: string }
   | { type: "focus"; anchor: string; label: string }
-  | { type: "play"; nodeId: string; key: string };
+  | { type: "play"; nodeId: string; key: string }
+  // an action a plugin defines: its id, the action's name and its arguments
+  | {
+      type: "plugin";
+      plugin: string;
+      name: string;
+      args?: Record<string, unknown>;
+    };
 
 export type ActionRequest = Action & { settings?: Partial<Settings> };
 export type ActionResult = {

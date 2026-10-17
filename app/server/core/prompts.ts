@@ -77,12 +77,23 @@ const THREADS =
 // diagram's rules, the playable-scene format, how to explain a node, and how to
 // stay on a side thread. Each move sends only what it needs; the rest would be
 // paid for on every call and never used.
-export type Section = "diagram" | "scene" | "explain" | "threads";
+// (a plugin adds its own section names)
+export type Section =
+  "diagram" | "scene" | "explain" | "threads" | (string & {});
 
 export function systemPrompt(
   purpose: Purpose,
   sections: readonly Section[] = [],
+  plugin?: { prompt: string; sections?: Record<string, string> },
 ): string {
+  if (plugin) {
+    const parts = [plugin.prompt, OPS];
+    for (const s of sections)
+      if (plugin.sections?.[s]) parts.push(plugin.sections[s]);
+    if (sections.includes("explain")) parts.push(EXPLAIN);
+    if (sections.includes("threads")) parts.push(THREADS);
+    return parts.join("\n\n");
+  }
   const parts = [PURPOSE[purpose] ?? PURPOSE.explore, OPS];
   const learn = purpose === "learn";
   if (learn && sections.includes("diagram")) parts.push(DIAGRAM);

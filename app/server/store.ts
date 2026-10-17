@@ -36,7 +36,13 @@ export function normalise(
   return {
     ...newMap(m.title ?? "Untitled", "explore"),
     ...m,
-    purpose: m.purpose === "learn" ? "learn" : "explore",
+    // a plugin's purpose is kept as is; one that is no longer installed opens as explore
+    purpose:
+      m.purpose &&
+      m.purpose !== "decide" &&
+      /^[a-z][a-z0-9-]{1,30}$/.test(m.purpose)
+        ? m.purpose
+        : "explore",
     threads: m.threads ?? {},
     fills: m.fills ?? {},
     diagram: m.diagram ?? null,

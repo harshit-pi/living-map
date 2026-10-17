@@ -6,19 +6,48 @@ import { MapRows } from "../components/MapList.tsx";
 import { Segmented } from "../components/Segmented.tsx";
 import { useMaps } from "../lib/api.ts";
 import { store, stored } from "../lib/storage.ts";
+import { PLUGINS } from "../plugins.ts";
 
-const EXAMPLES: Record<Purpose, string[]> = {
-  explore: [
-    "Which learning vertical should Living Map start with?",
-    "Postgres or DynamoDB for a new service?",
-  ],
-  learn: [
-    "How TCP opens a connection",
-    "What drives an option price (Black–Scholes)?",
-    "Why did World War I start?",
-    "LeetCode 146: LRU Cache",
-  ],
+type Mode = {
+  id: Purpose;
+  label: string;
+  heading: string;
+  blurb: string;
+  placeholder: string;
+  examples: string[];
 };
+
+// the built-in modes, then each plugin's
+const MODES: Mode[] = [
+  {
+    id: "explore",
+    label: "Explore",
+    heading: "What do you want to think through?",
+    blurb:
+      "A question to explore or a choice to make. Claude lays it out as a map; you steer by clicking and replying on the nodes.",
+    placeholder: "e.g. Which database for the new service?",
+    examples: [
+      "Which learning vertical should Living Map start with?",
+      "Postgres or DynamoDB for a new service?",
+    ],
+  },
+  {
+    id: "learn",
+    label: "Learn",
+    heading: "What do you want to understand?",
+    blurb:
+      "Any subject. Claude draws it in the shape that fits and leaves the key parts blank for you to fill.",
+    placeholder:
+      "e.g. a protocol, a theory, a period of history, a coding problem",
+    examples: [
+      "How TCP opens a connection",
+      "What drives an option price (Black–Scholes)?",
+      "Why did World War I start?",
+      "LeetCode 146: LRU Cache",
+    ],
+  },
+  ...PLUGINS,
+];
 
 export function StartScreen({
   error,
@@ -34,13 +63,14 @@ export function StartScreen({
   const [q, setQ] = useState("");
   const maps = useMaps(true);
   // an older browser may remember "decide", which is now "explore"
-  const [purpose, setPurpose] = useState<Purpose>(() =>
-    stored<string>("purpose", "explore") === "learn" ? "learn" : "explore",
-  );
+  const [purpose, setPurpose] = useState<Purpose>(() => {
+    const p = stored<string>("purpose", "explore");
+    return MODES.some((m) => m.id === p) ? p : "explore";
+  });
   const go = (text: string) => {
     if (text.trim()) onStart(text.trim(), purpose);
   };
-  const learn = purpose === "learn";
+  const mode = MODES.find((m) => m.id === purpose) ?? MODES[0];
   return (
     // scrolls when the window is short, instead of cutting off the top
     <div className="h-full overflow-y-auto bg-canvas">
@@ -51,10 +81,7 @@ export function StartScreen({
         <div className="mb-4 flex justify-center">
           <Segmented
             value={purpose}
-            options={[
-              ["explore", "Explore"],
-              ["learn", "Learn"],
-            ]}
+            options={MODES.map((m) => [m.id, m.label])}
             onChange={(p) => {
               setPurpose(p);
               store("purpose", p);
@@ -62,15 +89,9 @@ export function StartScreen({
           />
         </div>
         <h1 className="text-center font-serif text-3xl text-ink">
-          {learn
-            ? "What do you want to understand?"
-            : "What do you want to think through?"}
+          {mode.heading}
         </h1>
-        <p className="mt-2 text-center text-muted">
-          {learn
-            ? "Any subject. Claude draws it in the shape that fits and leaves the key parts blank for you to fill."
-            : "A question to explore or a choice to make. Claude lays it out as a map; you steer by clicking and replying on the nodes."}
-        </p>
+        <p className="mt-2 text-center text-muted">{mode.blurb}</p>
         <div className="mt-6 rounded-2xl border border-line-strong bg-surface shadow-xs focus-within:border-primary">
           <textarea
             value={q}
@@ -83,11 +104,7 @@ export function StartScreen({
                 go(q);
               }
             }}
-            placeholder={
-              learn
-                ? "e.g. a protocol, a theory, a period of history, a coding problem"
-                : "e.g. Which database for the new service?"
-            }
+            placeholder={mode.placeholder}
             className="block w-full resize-none border-0 bg-transparent px-4 pt-3 text-base outline-hidden focus:ring-0"
           />
           <div className="flex justify-end px-2 pb-2">
@@ -116,7 +133,7 @@ export function StartScreen({
           </div>
         )}
         <div className="mt-3 flex flex-wrap justify-center gap-2">
-          {EXAMPLES[purpose].map((e) => (
+          {mode.examples.map((e) => (
             <button
               key={e}
               onClick={() => go(e)}

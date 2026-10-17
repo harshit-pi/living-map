@@ -10,6 +10,7 @@ import { act } from "./lib/api.ts";
 import { useLiveMap } from "./lib/live.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
+import { pluginFor } from "./plugins.ts";
 import { ExploreScreen } from "./screens/ExploreScreen.tsx";
 import { LearnScreen } from "./screens/LearnScreen.tsx";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
@@ -118,6 +119,8 @@ export default function App() {
     roomy: isRoomy(),
   };
   const learn = map.purpose === "learn";
+  // a plugin's map has its own screen and a fixed mode
+  const plugin = pluginFor(map.purpose);
 
   return (
     <div className="flex h-full flex-col bg-canvas">
@@ -130,17 +133,23 @@ export default function App() {
         </div>
         <div />
         <div className="flex items-center justify-end gap-2">
-          <Segmented
-            value={map.purpose}
-            options={[
-              ["explore", "Explore"],
-              ["learn", "Learn"],
-            ]}
-            onChange={(purpose) => {
-              void run({ type: "purpose", purpose });
-            }}
-          />
-          {!learn && (
+          {plugin ? (
+            <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
+              {plugin.label}
+            </span>
+          ) : (
+            <Segmented
+              value={map.purpose}
+              options={[
+                ["explore", "Explore"],
+                ["learn", "Learn"],
+              ]}
+              onChange={(purpose) => {
+                void run({ type: "purpose", purpose });
+              }}
+            />
+          )}
+          {!learn && !plugin && (
             <label className="flex items-center gap-1 text-xs text-muted">
               <input
                 type="checkbox"
@@ -150,7 +159,7 @@ export default function App() {
               Set aside
             </label>
           )}
-          {!learn && (
+          {!learn && !plugin && (
             <button
               onClick={() => {
                 void run({ type: "next" });
@@ -192,7 +201,9 @@ export default function App() {
         </div>
       )}
       <main className="relative min-h-0 flex-1">
-        {learn ? (
+        {plugin ? (
+          <plugin.Screen ws={ws} />
+        ) : learn ? (
           <LearnScreen ws={ws} />
         ) : (
           <ExploreScreen ws={ws} showDropped={showDropped} />

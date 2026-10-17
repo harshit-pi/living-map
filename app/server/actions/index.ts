@@ -2,6 +2,7 @@
 
 import { safeId } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
+import { pluginFor } from "../plugins.ts";
 import * as canvas from "./canvas.ts";
 import { makeCtx } from "./context.ts";
 import * as learn from "./learn.ts";
@@ -53,6 +54,18 @@ export async function act(
   switch (req.type) {
     case "purpose":
       return maps.switchPurpose(ctx, req.purpose);
+    case "plugin": {
+      // only the map's own plugin answers, and only with an action it declares
+      const plugin = pluginFor(map.purpose);
+      const run =
+        plugin?.id === req.plugin
+          ? Object.hasOwn(plugin.actions ?? {}, req.name) &&
+            plugin.actions![req.name]
+          : null;
+      if (!run) return { error: "That action is not available on this map." };
+      const args = req.args && typeof req.args === "object" ? req.args : {};
+      return run(ctx, args as Record<string, unknown>);
+    }
     case "choose":
       return canvas.choose(ctx, req.nodeId);
     case "drop":
@@ -74,6 +87,11 @@ export async function act(
     case "next":
       return canvas.next(ctx);
     case "message":
+      // a plugin may answer the main conversation its own way
+      if (pluginFor(map.purpose)?.actions?.message)
+        return pluginFor(map.purpose)!.actions!.message(ctx, {
+          text: req.text,
+        });
       return canvas.message(
         ctx,
         req.text,

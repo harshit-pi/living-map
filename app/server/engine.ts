@@ -29,8 +29,9 @@ import {
   visiblePart,
 } from "./core/reply.ts";
 import { sceneOutline, sceneView } from "./core/scene.ts";
-import type { StoredMap } from "./core/types.ts";
+import type { Raw, StoredMap } from "./core/types.ts";
 import type { Hub } from "./events.ts";
+import { pluginFor } from "./plugins.ts";
 import type {
   ModelCall,
   ModelProvider,
@@ -95,6 +96,9 @@ export function createEngine({
           sceneView(sc, m.play[id]),
         ]),
       ),
+      ...(pluginFor(m.purpose)?.view
+        ? { data: { [m.purpose]: pluginFor(m.purpose)!.view!(m) } }
+        : {}),
     };
 
   const snapshot = (): ServerEvent => ({
@@ -144,8 +148,10 @@ export function createEngine({
     notes: string[],
   ) {
     const sceneId = scope ?? opts.nodeId;
+    const plugin = pluginFor(m.purpose);
     return [
-      `CANVAS (${m.purpose === "learn" ? "learning path" : "exploration map"}):\n${outline(m.nodes)}`,
+      `CANVAS (${plugin ? `${plugin.label.toLowerCase()} canvas` : m.purpose === "learn" ? "learning path" : "exploration map"}):\n${outline(m.nodes)}`,
+      plugin?.outline?.(m) ?? "",
       m.purpose === "learn"
         ? `TOPIC DIAGRAM:\n${diagramOutline(m.diagram, m.fills, m.answers)}`
         : "",
@@ -214,6 +220,11 @@ export function createEngine({
     const threadId = opts.threadId ?? null;
     const thread = threadId ? m.threads[threadId] : null;
     const scope = thread?.nodeId ?? null;
+    // ops core does not know go to the map's plugin
+    const plugin = pluginFor(m.purpose);
+    const opExtra = plugin?.applyOp
+      ? (op: Raw) => plugin.applyOp!(m, op, { scope })
+      : undefined;
     state.busy = true;
     stopped = false;
     state.working = {
@@ -251,7 +262,11 @@ export function createEngine({
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          system: systemPrompt(m.purpose, opts.sections ?? []),
+          system: systemPrompt(
+            m.purpose,
+            opts.sections ?? [],
+            pluginFor(m.purpose),
+          ),
           message: text,
           ...settings,
         },
@@ -268,7 +283,11 @@ export function createEngine({
           const ops = completeOps(soFar);
           if (ops.length > applied) {
             try {
-              applyOps(m, ops.slice(applied), { scope, judge: opts.judge });
+              applyOps(m, ops.slice(applied), {
+                scope,
+                judge: opts.judge,
+                extra: opExtra,
+              });
             } catch (e) {
               console.error("[move] an op could not be applied:", e);
             }
@@ -307,7 +326,11 @@ export function createEngine({
       }
       const ops = completeOps(reply.final);
       if (ops.length > applied)
-        applyOps(m, ops.slice(applied), { scope, judge: opts.judge });
+        applyOps(m, ops.slice(applied), {
+          scope,
+          judge: opts.judge,
+          extra: opExtra,
+        });
       // say so when some of the model's changes could not be read, rather than
       // dropping them silently
       const broken = unreadableOps(reply.final);

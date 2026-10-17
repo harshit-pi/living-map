@@ -13,6 +13,7 @@ Long AI answers are hard to hold in your head. Living Map turns the conversation
 - **Learn** any subject (a protocol, a theory, a period of history, a coding problem). Claude draws it in the shape that fits: a sequence, a concept map, a timeline, a structure, or a grid. The key parts are left blank for you to fill, and Claude checks each one.
 - **Play a step by hand** on a board, an array or a tree, move by move. Your clicks are checked instantly, with no model call. Coding problems end with **Write it**, where Claude traces your code on the example and tells you which line breaks.
 - **Click any part** of a diagram to have it explained in plain words, broken down further, or discussed in a side thread.
+- **Design** a system the way a system-design book teaches it: Claude writes the brief (requirements and scale), you build the high-level design from typed components (load balancer, cache, queue, database, …), and a rough load check shows what falls over as you wire it. **Check my design** gets Claude's review against a reference it keeps hidden, then you work through the deep dives (fan-out, sharding, hot keys) in their own threads.
 
 Everything runs on your machine. Living Map talks to the model through your own Claude Code (`claude -p`) and keeps your maps in `~/.living-map/`.
 

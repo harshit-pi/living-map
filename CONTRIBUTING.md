@@ -56,6 +56,10 @@ The full list is in [AGENTS.md](AGENTS.md). The main ones:
 - Colours come only from the roles in `app/web/brand.css`.
 - Text people read says "you", in plain words.
 
+## Writing a plugin
+
+A plugin adds a mode next to Explore and Learn. Copy the shape of `app/plugins/design/`: a server half that implements `ServerPlugin` (`app/server/plugin.ts`) and a screen that implements `WebPlugin` (`app/web/plugin.ts`), each registered in one line (`app/server/plugins.ts`, `app/web/plugins.ts`). Keep the logic in a pure, tested `core.ts`, clean every op the model writes, and send the browser only what the user should see.
+
 ## Issues
 
 Use the bug report or feature request form when you open an issue. For a bug, include what you did, what you expected, what happened, and the map if you can share it (maps are JSON files in `~/.living-map/maps/`). Security problems go through the private route in [SECURITY.md](SECURITY.md), not an issue.

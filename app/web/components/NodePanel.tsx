@@ -71,6 +71,7 @@ export function NodePanel({
   run,
   onSelect,
   onClose,
+  asSteps,
 }: {
   map: MapDoc;
   node: MapNode;
@@ -83,8 +84,10 @@ export function NodePanel({
   run: Run;
   onSelect: (id: string) => void;
   onClose: () => void;
+  // treat questions as steps to work out (hints, show answer), as Learn does
+  asSteps?: boolean;
 }) {
-  const learn = map.purpose === "learn";
+  const learn = asSteps ?? map.purpose === "learn";
   const threads = useMemo(
     () =>
       Object.values(map.threads ?? {})

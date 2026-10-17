@@ -69,6 +69,8 @@ export function applyOps(
     scope = null as string | null,
     // a scoped move may still judge the topic diagram's blanks (Show answer)
     judge = false,
+    // a plugin's handler for ops core does not know (null: not its op either)
+    extra = undefined as ((op: Raw) => number | null) | undefined,
     now = Date.now(),
   } = {},
 ): number {
@@ -129,6 +131,18 @@ export function applyOps(
       map.fills[id] = fill;
       changed++;
       continue;
+    }
+    if (
+      extra &&
+      op?.op !== "add" &&
+      op?.op !== "update" &&
+      op?.op !== "remove"
+    ) {
+      const n = extra(op);
+      if (n !== null) {
+        changed += n;
+        continue;
+      }
     }
     const id = String(op?.id ?? "").trim();
     if (!safeId(id)) continue;

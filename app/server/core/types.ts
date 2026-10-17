@@ -64,11 +64,15 @@ export type StoredMap = {
   // what you did on the canvas since Claude's last reply, sent with the next move
   notes: string[];
   usage: Usage;
+  // each plugin's state, by plugin id; the plugin decides what reaches the browser
+  data?: Record<string, unknown>;
 };
 
 // The part of a map that Claude's ops change.
 export type Canvas = Pick<StoredMap, "nodes" | "diagram" | "fills"> &
-  Partial<Pick<StoredMap, "diagramAt" | "scenes" | "play" | "answers">>;
+  Partial<
+    Pick<StoredMap, "diagramAt" | "scenes" | "play" | "answers" | "data">
+  >;
 
 export type BlankAnswer = { accept: string[]; why: string };
 
