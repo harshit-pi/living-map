@@ -111,8 +111,9 @@ export function slotsOf(frame: Frame): string[] {
 }
 
 // The order is what an axis frame is about (a play step's subgoals): a pair
-// out of order, or a part not on a tick, stops a pass. Where a part sits in
-// lanes, boxes or sort columns is marked and does not.
+// out of order, or a part not on a tick, stops a pass. On any frame a part
+// left outside it stops a pass too (core's placement); which lane, box or
+// sort column it sits in is marked and does not.
 export const orderStops = (f: Frame): boolean => f.kind === "axis";
 
 export type Layer = "parts" | "behaviour" | "function" | "failure";
@@ -280,6 +281,10 @@ export type StepView = {
   sure: Sure | null;
   hints: HintView[];
   canHint: boolean;
+  // the next hint is on where a part sits, not on a link: Show one place
+  hintOn?: "place";
+  // you changed a link or moved a part since the last check
+  changed?: boolean;
   // key links a reply of Claude's named while you built (Explain, the thread,
   // the message box): they count as hinted
   told: number;

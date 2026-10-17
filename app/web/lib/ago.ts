@@ -8,3 +8,8 @@ export function ago(ms: number) {
   const d = Math.round(h / 24);
   return d === 1 ? "yesterday" : `${d} days ago`;
 }
+
+// About how long a review of `steps` due steps takes: a step's rebuild took
+// two or three minutes. One rule for the Start screen and the map, which
+// said "about 2 min" and "about 3 minutes" for the same review.
+export const reviewMinutes = (steps: number) => Math.max(1, steps) * 2;

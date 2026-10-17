@@ -1,5 +1,6 @@
 import {
   Background,
+  BaseEdge,
   Controls,
   Handle,
   MarkerType,
@@ -8,6 +9,7 @@ import {
   useNodesInitialized,
   useReactFlow,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -25,12 +27,17 @@ import {
   looseZone,
   NODE_H,
   NODE_W,
+  nothingDrawn,
+  pathD,
+  pathOf,
   regions,
   route,
   slotAt,
   spanOf,
   tidy,
   type At,
+  type Box,
+  type Drawn,
   type Region,
 } from "./frame.ts";
 import { MARK, WAIT_TITLE, type Here } from "./view.ts";
@@ -161,6 +168,40 @@ function RegionNode({ data }: NodeProps<Node<RegionData>>) {
 
 const nodeTypes = { part: PartNode, region: RegionNode };
 
+// A link drawn on the line route (frame.ts) chose, with its label where the
+// route put it: React Flow's own step edges bend their own way, and a route
+// costed clear could be drawn through a part.
+type RoutedData = { path: string; lx: number; ly: number };
+function RoutedEdge({
+  id,
+  data,
+  label,
+  style,
+  markerEnd,
+  labelStyle,
+  labelBgStyle,
+  labelBgPadding,
+}: EdgeProps<Edge<RoutedData>>) {
+  if (!data) return null;
+  return (
+    <BaseEdge
+      id={id}
+      path={data.path}
+      labelX={data.lx}
+      labelY={data.ly}
+      label={label}
+      style={style}
+      markerEnd={markerEnd}
+      labelStyle={labelStyle}
+      labelShowBg
+      labelBgStyle={labelBgStyle}
+      labelBgPadding={labelBgPadding}
+    />
+  );
+}
+
+const edgeTypes = { routed: RoutedEdge };
+
 const TONE: Record<Mark | "plain" | "given" | "ghost", string> = {
   right: "var(--color-success)",
   reversed: "var(--color-warning)",
@@ -179,11 +220,13 @@ const DASH: Partial<Record<keyof typeof TONE, string>> = {
   ghost: "1.5 3.5",
 };
 
-// A link drawn the way route (frame.ts) finds clear: straight, or an arc
-// round the parts in between, its label off every card. A run through
-// another part read as linked to it ("Length mod 4 sends to Bucket 3").
-// `nth`: the how-many-th link on the same two parts. `aria`: what a screen
-// reader says, in the cards' own labels (by default it read out the ids).
+// A link drawn the way route (frame.ts) finds cheapest to read: straight,
+// or an arc round the parts in between, its label off every card and every
+// other label, its line off the links drawn before it (`seen`). A run
+// through another part read as linked to it ("Length mod 4 sends to Bucket
+// 3"). `nth`: the how-many-th link on the same two parts. `aria`: what a
+// screen reader says, in the cards' own labels (by default it read out the
+// ids). `within`: the slot both ends sit in, which the link stays inside.
 function edgeOf(
   id: string,
   from: string,
@@ -193,18 +236,15 @@ function edgeOf(
   at: Record<string, At>,
   nth: number,
   aria: string,
-): Edge {
-  const r = route(from, to, at, label, nth);
+  seen: Drawn,
+  within?: Box,
+): Edge<RoutedData> {
+  const r = route(from, to, at, label, nth, seen, within);
+  const { pts, label: c } = pathOf(at[from], at[to], r);
   const color = TONE[tone];
   return {
-    ...(r.type === "straight"
-      ? { type: "straight", sourceHandle: r.source, targetHandle: r.target }
-      : {
-          type: "smoothstep",
-          pathOptions: { offset: r.offset },
-          sourceHandle: r.side,
-          targetHandle: r.side,
-        }),
+    type: "routed",
+    data: { path: pathD(pts), lx: c.x, ly: c.y },
     id,
     source: from,
     target: to,
@@ -219,6 +259,18 @@ function edgeOf(
     labelStyle: { fontSize: 11, fill: "var(--color-body)" },
     labelBgStyle: { fill: "var(--color-surface)" },
     labelBgPadding: [4, 2],
+  };
+}
+
+// Where a slot's own label sits, which a link's label keeps off: the top
+// left of a box or column, the left of a lane (its words wrap there).
+function labelMark(r: Region, frame: StepView["frame"]): Box {
+  if (frame.kind === "lanes") return { x: r.x, y: r.y, w: 120, h: 46 };
+  return {
+    x: r.x,
+    y: r.y,
+    w: Math.min(r.w, r.label.length * 7 + 24),
+    h: 22,
   };
 }
 
@@ -294,6 +346,8 @@ export function BuildCanvas({
   const fit = worked ? FIT_WHOLE : FIT;
   const step = st.step;
 
+  // every part of the step, placed or not: the waiting zone holds them all
+  const all = st.placed.length + st.trayCount;
   // the parts on the canvas and where they are drawn
   const parts = useMemo(() => {
     if (worked) {
@@ -307,9 +361,10 @@ export function BuildCanvas({
     const at = drawn(
       frame,
       st.placed.map((p) => ({ ...p, id: p.id })),
+      all,
     );
     return st.placed.map((p) => ({ ...p, ...at[p.id] }));
-  }, [worked, frame, st.placed]);
+  }, [worked, frame, st.placed, all]);
   // the frame grows to hold the parts in it, where they are drawn
   const span = spanOf(
     frame,
@@ -324,35 +379,44 @@ export function BuildCanvas({
   const zones: Region[] = useMemo(() => {
     const rs = regions(frame, span);
     const z = waiting
-      ? looseZone(frame, span)
+      ? looseZone(frame, span, undefined, all)
       : hiddenOut
         ? looseZone(frame, span, "The hidden part")
         : null;
     return z ? [...rs, z] : rs;
-  }, [frame, span, waiting, hiddenOut]);
+  }, [frame, span, waiting, hiddenOut, all]);
 
-  // a part placed out of sight brings the view round to show it, and so
+  // A part placed out of sight brings the view round to show it, and so
   // does a layout that moved (the predict answered, the worked case redrawn
-  // whole: its revealed part sat behind the side card). It waits until the
-  // cards are measured: fitView skips a card with no size, so a fit run on
-  // fresh cards (the build opening from See) frames nothing.
+  // whole: its revealed part sat behind the side card). A canvas opened, or
+  // turned from your passed build to a rebuild of it, fits its whole frame
+  // (a quick rebuild opened at the passed build's zoom, a box under the side
+  // card). Nothing moves while all is in view: a refit on every placement
+  // moved the next drop target. It waits until the cards are measured:
+  // fitView skips a card with no size, so a fit run on fresh cards (the
+  // build opening from See) frames nothing.
   const count = parts.length;
   const shape = parts.map((p) => `${p.id}@${p.x},${p.y}`).join(";");
   const ready = useNodesInitialized();
+  const opened = useRef("");
   useEffect(() => {
     const el = box.current;
     if (!el || !count || !ready) return;
+    const fresh = opened.current !== `${canvas}:${mode}`;
+    opened.current = `${canvas}:${mode}`;
     const refit = () => {
       const { x, y, zoom } = rf.getViewport();
       const out = rf.getNodes().some((n) => {
-        if (n.type !== "part") return false;
+        if (n.type !== "part" && !fresh) return false;
+        const w = (n.type === "part" ? NODE_W : (n.width ?? 0)) * zoom;
+        const h = (n.type === "part" ? NODE_H : (n.height ?? 0)) * zoom;
         const sx = n.position.x * zoom + x;
         const sy = n.position.y * zoom + y;
         return (
-          sx < 0 ||
-          sy < 0 ||
-          sx + NODE_W * zoom > el.clientWidth ||
-          sy + NODE_H * zoom > el.clientHeight - 100
+          sx < -1 ||
+          sy < -1 ||
+          sx + w > el.clientWidth + 1 ||
+          sy + h > el.clientHeight - (n.type === "part" ? 100 : 40)
         );
       });
       if (out) void rf.fitView({ ...fit, duration: 200 });
@@ -369,7 +433,7 @@ export function BuildCanvas({
     });
     seen.observe(el);
     return () => seen.disconnect();
-  }, [canvas, count, shape, ready, rf, fit]);
+  }, [canvas, mode, count, shape, ready, rf, fit]);
 
   const rawKey = (p: { x: number; y: number; slot?: string }) =>
     `${p.x},${p.y},${p.slot ?? ""}`;
@@ -447,7 +511,7 @@ export function BuildCanvas({
             mode === "build" && wrongSlot.has(p.id)
               ? `⚠ ${word}`
               : tone === "missed"
-                ? "◌ missed: it stops too"
+                ? "◌ missed: affected too"
                 : undefined,
           onOut:
             mode === "build" && pick === p.id && st.help >= 2
@@ -462,6 +526,21 @@ export function BuildCanvas({
   ];
 
   const edges: Edge[] = [];
+  // what is drawn so far, which each next link keeps off
+  const seen = nothingDrawn(zones.map((r) => labelMark(r, frame)));
+  // the slot a link's two ends both sit in, if they do
+  const slotOf = (id: string) => {
+    const p = at[id];
+    if (!p) return undefined;
+    const c = { x: p.x + NODE_W / 2, y: p.y + NODE_H / 2 };
+    return zones.find(
+      (r) => c.x >= r.x && c.x <= r.x + r.w && c.y >= r.y && c.y <= r.y + r.h,
+    );
+  };
+  const withinOf = (a: string, b: string): Box | undefined => {
+    const r = slotOf(a);
+    return r && r === slotOf(b) ? r : undefined;
+  };
   // a second link between the same two parts (yours the wrong way, a ghost
   // hint beside it) arcs out further, so each label is its own
   const pairs = new Map<string, number>();
@@ -491,6 +570,8 @@ export function BuildCanvas({
         at,
         nthOf(from, to),
         `${named(from)} ${rel} ${named(to)}`,
+        seen,
+        withinOf(from, to),
       ),
     );
   if (worked)
@@ -601,6 +682,7 @@ export function BuildCanvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         connectionMode={"loose" as never}
         fitView
         fitViewOptions={fit}

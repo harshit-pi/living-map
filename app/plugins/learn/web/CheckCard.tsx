@@ -71,7 +71,15 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           hints open after your first check.
         </p>
       ) : (
-        <Counts st={st} />
+        <>
+          {/* the counts and marks are of the build as it was checked */}
+          {st.changed && (
+            <div className="text-[11.5px] text-muted">
+              Your build changed since this check: check again to mark it.
+            </div>
+          )}
+          <Counts st={st} />
+        </>
       )}
 
       <CheckFindings here={here} st={st} />
@@ -101,10 +109,14 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           </SmallBtn>
           <SmallBtn
             disabled={!st.canHint}
-            title="Draws one link for you; it counts as shown"
+            title={
+              st.hintOn === "place"
+                ? "Puts one part where it goes; it counts as shown"
+                : "Draws one link for you; it counts as shown"
+            }
             onClick={() => void act("showLink", { step })}
           >
-            Show one link
+            {st.hintOn === "place" ? "Show one place" : "Show one link"}
           </SmallBtn>
           {!st.reviewing && !st.recall && (
             <SmallBtn
@@ -241,10 +253,15 @@ function Counts({ st }: { st: StepView }) {
           {c.restNeed > 0
             ? `, and ${c.restNeed} of the ${c.rest} other links (you have ${c.restGot})`
             : ""}
-          {order ? ", with every part on a tick, in order" : ""}.
+          {order
+            ? ", with every part on a tick, in order"
+            : st.frame.kind !== "free"
+              ? `, with every part in a ${word}`
+              : ""}
+          .
           {!order &&
-            (wrongSlots > 0 || loose > 0) &&
-            " Where the parts sit is marked, but does not stop a pass."}
+            wrongSlots > 0 &&
+            ` Which ${word} a part sits in is marked, but does not stop a pass.`}
         </div>
       )}
     </div>
@@ -417,6 +434,15 @@ export function CheckFindings({
               </span>{" "}
               “{labelOf(a.from)}” {a.rel} “{labelOf(a.to)}”.{" "}
               <span className="text-muted">{a.say}</span>
+              {/* an accepted link is one of yours, right; it never stands
+                  in for a key link, which the card still counts missing */}
+              {a.holds && c.keyRight < c.keys && (
+                <span className="text-muted">
+                  {" "}
+                  It counts as a right link of yours, not as a key link: a key
+                  link is still missing.
+                </span>
+              )}
             </div>
           ))}
         </div>

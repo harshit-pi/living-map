@@ -59,6 +59,10 @@ export function switchPurpose(
           ? "This map's mode is fixed; start a new map for another mode."
           : "A map switches only between Explore and Learn.",
     };
+  // not while a move runs or waits: it would land on the other mode's
+  // screen, and the browser keeps the switch off then too
+  if (engine.state.busy || engine.state.waiting.length)
+    return { error: "Claude is working on this map: switch once it is done." };
   const from = map.purpose;
   map.purpose = purpose;
   ctx.note(`Switched the canvas to ${map.purpose} mode.`);

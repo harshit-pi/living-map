@@ -157,10 +157,15 @@ export type Build = {
   help: Help;
   placed: { part: string; x: number; y: number; slot?: string }[];
   links: BuildLink[];
-  hints: { link: string; rung: 1 | 2 | 3 }[];
+  // a hint on a link, or on where a part sits ("place:<part id>"); a
+  // first rung names the link's `to` end when you had already linked its
+  // `from` end elsewhere
+  hints: { link: string; rung: 1 | 2 | 3; end?: "to" }[];
   shown: string[];
   checks: number;
   last: CheckResult | null;
+  // your build as it was at the last check (buildKey)
+  checked?: string;
   sure?: Sure;
   // how each key link stood at the first check, and how sure you were then
   first?: Record<string, boolean>;
@@ -380,6 +385,13 @@ export function cleanModel(op: Raw): RefModel | null {
     const c = cleanPart(p, frame);
     if (c && !parts.some((x) => x.id === c.id)) parts.push(c);
   }
+  // A role that names another part says what it links to, so it is left
+  // out (the card shows the label alone). Refused instead, a new case was
+  // sent back twice for "the outcome of one test run" beside a part "Test
+  // run", and broke: three paid moves for one plain phrase.
+  for (const a of parts)
+    if (parts.some((b) => b !== a && phrase(a.role).includes(phrase(b.label))))
+      a.role = "";
   const of = safe(op?.of);
   const allowed = verbsFor(frame.kind);
   const verbs = [
@@ -707,10 +719,6 @@ export function validate(
   for (const l of keys)
     for (const k of ["hint", "ask", "rubric"] as const)
       if (!l[k]) p.push(`the key link ${linkWords(m, l)} has no ${k}`);
-  for (const a of m.parts)
-    for (const b of m.parts)
-      if (a !== b && phrase(a.role).includes(phrase(b.label)))
-        p.push(`the role of "${a.label}" names another part, "${b.label}"`);
   if (m.predict) {
     if (
       !m.predict.choices.some(
@@ -777,12 +785,30 @@ export function scrub(
   }
   let summary: string | null = null;
   const leaks = (t: string) =>
-    givesAway(m, t).length > 0 || paraphrases(m, t).length > 0;
+    givesAway(m, t).length > 0 ||
+    paraphrases(m, t).length > 0 ||
+    tellsOrder(m, t);
   if (step.summary && leaks(step.summary)) {
     const cut = firstClause(step.summary);
     summary = leaks(cut) ? "" : cut;
   }
   return { summary, hints, predict };
+}
+
+// Whether a text lists two or more of an axis's parts in their order: on an
+// axis the order is what you build, and a play step's summary "Play one
+// round: pick a middle, compare, shrink the window" was its ticks 2 to 4.
+// Read clause by clause, each part where it is first named.
+export function tellsOrder(m: RefModel, text: string): boolean {
+  if (!orderStops(m.frame)) return false;
+  const seen: number[] = [];
+  for (const clause of text.split(/[,;:.!?→]+|\bthen\b|\band\b/i)) {
+    m.parts.forEach((p, i) => {
+      const r = rankOf(m, p, i);
+      if (!seen.includes(r) && mentions(clause, p.label, m)) seen.push(r);
+    });
+  }
+  return seen.length >= 2 && seen.every((r, i) => i === 0 || r > seen[i - 1]);
 }
 
 // ---------------------------------------------------------------- grading
@@ -822,7 +848,10 @@ export function grade(
   }
   for (const l of b.links) {
     if (l.given) continue;
-    if (exact.has(l.id)) {
+    // a second copy of a right link (a build saved before relink merged
+    // them) is right, and counted once: graded as a near verb, the same
+    // verb was marked "~"
+    if (exact.has(l.id) || refs.some((r) => sameLink(r, l))) {
       marks.push({ link: l.id, mark: "right" });
       continue;
     }
@@ -873,12 +902,18 @@ export function grade(
   const got = (r: RefLink) => right.has(r.id) || given.has(r.id);
   const keys = counted.filter((r) => r.key);
   const rest = counted.filter((r) => !r.key);
-  const restGot = rest.filter(got).length;
+  // a link you argued for, Claude accepted and you drew is one of the
+  // reference's other links, right: the headline counted it and the pass
+  // did not ("6 of 8 links ✓" beside "you have 2")
+  const arguedGot = refs.filter((r) => r.argued && right.has(r.id)).length;
+  const restAll = rest.length + (keyOnly ? 0 : arguedGot);
+  const restGot = rest.filter(got).length + (keyOnly ? 0 : arguedGot);
   // the other links a pass needs: 70% of them, rounded up
-  const restNeed = keyOnly ? 0 : Math.ceil(rest.length * PASS_SHARE - 1e-9);
+  const restNeed = keyOnly ? 0 : Math.ceil(restAll * PASS_SHARE - 1e-9);
   const where = placement(m, b);
   const ordered =
-    !orderStops(m.frame) || (where.outOfOrder === 0 && where.loose === 0);
+    where.stray === 0 &&
+    (!orderStops(m.frame) || (where.outOfOrder === 0 && where.loose === 0));
   const pass =
     keys.length > 0 && keys.every(got) && restGot >= restNeed && ordered;
   const half = counted.filter((r) => halves.has(r.id) && !got(r)).length;
@@ -890,8 +925,8 @@ export function grade(
     total: counted.length,
     right: rightN,
     // links you argued for that Claude accepted, drawn: right, on top of total
-    argued: refs.filter((r) => r.argued && right.has(r.id)).length,
-    rest: keyOnly ? 0 : rest.length,
+    argued: arguedGot,
+    rest: keyOnly ? 0 : restAll,
     restGot: keyOnly ? 0 : restGot,
     restNeed,
     given: counted.filter((r) => given.has(r.id)).length,
@@ -905,7 +940,9 @@ export function grade(
     extra,
     score: counted.length ? (rightN + half / 2) / counted.length : 0,
     marks,
-    ...where,
+    slots: where.slots,
+    outOfOrder: where.outOfOrder,
+    loose: where.loose,
     refutes,
     pass,
   };
@@ -914,7 +951,10 @@ export function grade(
 // Lanes, boxes and sort: is each part placed in a slot one of its slots?
 // Axis: how many pairs of parts on its ticks sit in the wrong order (two on
 // one tick that the model has apart count too). A part placed outside the
-// frame is loose: not placed yet, which is not the wrong slot.
+// frame is loose: not placed yet, which is not the wrong slot. `stray`: the
+// loose parts the model has a slot for, which stop a pass on every frame (a
+// sort step passed with six of its eight explanations in no column: sorting
+// them is the step).
 export function placement(
   m: RefModel,
   b: Build,
@@ -922,29 +962,33 @@ export function placement(
   slots: { part: string; ok: boolean }[];
   outOfOrder: number;
   loose: number;
+  stray: number;
 } {
   const ref = new Map(m.parts.map((p, i) => [p.id, { p, i }]));
   const valid = slotsOf(m.frame);
   const placed = b.placed.filter((x) => ref.has(x.part));
   const inFrame = placed.filter((x) => !!x.slot && valid.includes(x.slot));
   const loose = valid.length ? placed.length - inFrame.length : 0;
+  const stray = valid.length
+    ? placed.filter(
+        (x) => !inFrame.includes(x) && !!ref.get(x.part)!.p.slot?.length,
+      ).length
+    : 0;
   if (m.frame.kind === "axis") {
     const ticks = m.frame.ticks;
-    const rank = (p: Part, i: number) => {
-      const t = p.slot ? ticks.indexOf(p.slot[0]) : -1;
-      return t >= 0 ? t : i;
-    };
     const at = (x: (typeof placed)[number]) => ticks.indexOf(x.slot!);
     let out = 0;
     for (const a of inFrame)
       for (const c of inFrame) {
         const ra = ref.get(a.part)!;
         const rc = ref.get(c.part)!;
-        if (rank(ra.p, ra.i) < rank(rc.p, rc.i) && at(a) >= at(c)) out++;
+        if (rankOf(m, ra.p, ra.i) < rankOf(m, rc.p, rc.i) && at(a) >= at(c))
+          out++;
       }
-    return { slots: [], outOfOrder: out, loose };
+    return { slots: [], outOfOrder: out, loose, stray };
   }
-  if (m.frame.kind === "free") return { slots: [], outOfOrder: 0, loose: 0 };
+  if (m.frame.kind === "free")
+    return { slots: [], outOfOrder: 0, loose: 0, stray: 0 };
   return {
     slots: inFrame
       .filter((x) => ref.get(x.part)?.p.slot?.length)
@@ -954,8 +998,16 @@ export function placement(
       })),
     outOfOrder: 0,
     loose,
+    stray,
   };
 }
+
+// a part's place in an axis's order: its own tick, or its place in the model
+const rankOf = (m: RefModel, p: Part, i: number) => {
+  const ticks = m.frame.kind === "axis" ? m.frame.ticks : [];
+  const t = p.slot ? ticks.indexOf(p.slot[0]) : -1;
+  return t >= 0 ? t : i;
+};
 
 // ---------------------------------------------------------------- typed names
 
@@ -1316,6 +1368,10 @@ export function startBuild(m: RefModel, help: Help): Build {
           m.parts.filter((q) => depth.get(q.id) === depth.get(p.id)).length,
       ),
     );
+    const slotted = inSlots(
+      m,
+      [...m.parts].sort((a, b) => depth.get(a.id)! - depth.get(b.id)!),
+    );
     for (const p of m.parts) {
       const d = depth.get(p.id)!;
       const r = rows.get(d)!;
@@ -1326,8 +1382,10 @@ export function startBuild(m: RefModel, help: Help): Build {
       const col = fold % 2 ? 3 - (d % 4) : d % 4;
       b.placed.push({
         part: p.id,
-        x: col * COL,
-        y: r * ROW + fold * (tall * ROW + 40),
+        ...(slotted.get(p.id) ?? {
+          x: col * COL,
+          y: r * ROW + fold * (tall * ROW + 40),
+        }),
         ...(p.slot ? { slot: p.slot[0] } : {}),
       });
     }
@@ -1342,16 +1400,51 @@ export function startBuild(m: RefModel, help: Help): Build {
         });
   } else if (help === 1) {
     const slotted = !orderStops(m.frame);
-    shuffled(m.parts, seedOf(m.id)).forEach((p, i) =>
+    const order = shuffled(m.parts, seedOf(m.id));
+    const at = slotted ? inSlots(m, order) : new Map<string, Spot>();
+    order.forEach((p, i) =>
       b.placed.push({
         part: p.id,
-        x: (i % 3) * COL,
-        y: Math.floor(i / 3) * ROW,
+        ...(at.get(p.id) ?? {
+          x: (i % 3) * COL,
+          y: Math.floor(i / 3) * ROW,
+        }),
         ...(p.slot && slotted ? { slot: p.slot[0] } : {}),
       }),
     );
   }
   return b;
+}
+
+type Spot = { x: number; y: number };
+
+// Parts given their slot, one after another in it, in the order given:
+// along a lane, down a column. Laid out by depth, a step of four lanes ran
+// four columns wide however few parts each lane held, and the canvas opened
+// at half size with its words at 7px. Boxes place their parts themselves,
+// and a free map has no slots, so neither is here.
+function inSlots(m: RefModel, order: readonly Part[]): Map<string, Spot> {
+  const out = new Map<string, Spot>();
+  if (
+    m.frame.kind !== "lanes" &&
+    m.frame.kind !== "axis" &&
+    m.frame.kind !== "sort"
+  )
+    return out;
+  const k = new Map<string, number>();
+  for (const p of order) {
+    const slot = p.slot?.[0];
+    if (!slot) continue;
+    const i = k.get(slot) ?? 0;
+    k.set(slot, i + 1);
+    out.set(
+      p.id,
+      m.frame.kind === "lanes"
+        ? { x: 16 + i * COL, y: 0 }
+        : { x: 0, y: 8 + i * ROW },
+    );
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- your moves on a build
@@ -1376,7 +1469,7 @@ export function placePart(
   const spot = nextSpot(b);
   const num = (v: unknown, d: number) =>
     typeof v === "number" && Number.isFinite(v) ? Math.round(v) : d;
-  const slot = cleanSlot(at?.slot, m.frame)?.[0];
+  const slot = cleanSlot(slotFrom(m.frame, at?.slot), m.frame)?.[0];
   b.placed.push({
     part,
     x: num(at?.x, spot.x),
@@ -1397,7 +1490,7 @@ export function movePart(
   if (typeof at.x === "number" && Number.isFinite(at.x)) p.x = Math.round(at.x);
   if (typeof at.y === "number" && Number.isFinite(at.y)) p.y = Math.round(at.y);
   if (at.slot !== undefined) {
-    const slot = cleanSlot(at.slot, m.frame)?.[0];
+    const slot = cleanSlot(slotFrom(m.frame, at.slot), m.frame)?.[0];
     if (slot) p.slot = slot;
     else delete p.slot;
   }
@@ -1432,6 +1525,12 @@ export function linkParts(
   return link;
 }
 
+// Change one of your links: its verb, or its direction. A change that makes
+// it the same as a link already drawn merges the two (reversed onto a hint's
+// link you had accepted, the same link was drawn twice and one copy was
+// marked a near verb). The last check's mark on it goes: it was about the
+// link as it was (a reversed link kept its "points the wrong way" row, now
+// reworded about the right one).
 export function relinkParts(
   m: RefModel,
   b: Build,
@@ -1440,12 +1539,17 @@ export function relinkParts(
 ): string | null {
   const l = b.links.find((x) => x.id === id);
   if (!l || l.given) return "That link is not yours to change.";
+  const next = { from: l.from, to: l.to, rel: l.rel };
   if (change.rel !== undefined) {
     if (!isVerb(change.rel) || !verbsOf(m).includes(change.rel))
       return "That verb is not one this frame uses.";
-    l.rel = change.rel;
+    next.rel = change.rel;
   }
-  if (change.reverse === true) [l.from, l.to] = [l.to, l.from];
+  if (change.reverse === true) [next.from, next.to] = [next.to, next.from];
+  forget(b, id);
+  if (b.links.some((x) => x !== l && sameLink(x, next)))
+    b.links = b.links.filter((x) => x !== l);
+  else Object.assign(l, next);
   return null;
 }
 
@@ -1453,60 +1557,172 @@ export function unlinkParts(b: Build, id: string): string | null {
   const l = b.links.find((x) => x.id === id);
   if (!l || l.given) return "That link is not yours to remove.";
   b.links = b.links.filter((x) => x !== l);
+  forget(b, id);
   return null;
 }
 
-// Only the key links are graded at L0 and in a quick rebuild.
-export const keyOnlyFor = (b: Build, st?: { recall?: boolean }): boolean =>
-  b.help === 0 || !!st?.recall;
+// the last check's mark on a link you changed or took away
+function forget(b: Build, id: string) {
+  if (b.last) b.last.marks = b.last.marks.filter((x) => x.link !== id);
+}
+
+// your links and where your parts sit, to tell whether you changed them
+// since the last check
+export const buildKey = (b: Build): string =>
+  [
+    ...b.links.map((l) => `${l.from}|${l.rel}|${l.to}`),
+    ...b.placed.map((p) => `${p.part}@${p.slot ?? ""}`),
+  ]
+    .sort()
+    .join(";");
+
+// Only the key links are graded at L0, in a quick rebuild and in a review:
+// a rebuild from memory is what the schedule's items are, and they are the
+// key links (a review at L1 still wanted 3 of 4 other links, while its
+// headline counted key links only, and a step left open by it stayed open).
+export const keyOnlyFor = (
+  b: Build,
+  st?: { recall?: boolean; reviewing?: boolean },
+): boolean => b.help === 0 || !!st?.recall || !!st?.reviewing;
 
 // What hints aim at: a key link you do not have yet, in the model's order;
 // once every key link is there, one of the other links a pass still needs
 // (with all key links right and help off, a review could be passed only by
-// guessing verbs for links it never asked about).
+// guessing verbs for links it never asked about); then where a part sits,
+// when that is what stops the pass (openPlace: an order wrong on an axis
+// had Hint and Show one link both off, and Show the model was the only help
+// left); then any other link you do not have.
+export function openAid(
+  m: RefModel,
+  b: Build,
+  keyOnly = false,
+): { link: RefLink } | { part: string } | undefined {
+  const have = (r: RefLink) => b.links.some((l) => sameLink(l, r));
+  const missing = m.links.filter((r) => !r.argued && !have(r));
+  const key = missing.find((r) => r.key);
+  if (key) return { link: key };
+  const rest = m.links.filter((r) => !r.key && !r.argued);
+  const need = Math.ceil(rest.length * PASS_SHARE - 1e-9);
+  const other = keyOnly ? undefined : missing.find((r) => !r.key);
+  if (other && rest.length - missing.filter((r) => !r.key).length < need)
+    return { link: other };
+  const part = openPlace(m, b);
+  if (part) return { part };
+  return other ? { link: other } : undefined;
+}
+
 export function openLink(
   m: RefModel,
   b: Build,
   keyOnly = false,
 ): RefLink | undefined {
-  const have = (r: RefLink) => b.links.some((l) => sameLink(l, r));
-  return (
-    m.links.find((r) => r.key && !r.argued && !have(r)) ??
-    (keyOnly ? undefined : m.links.find((r) => !r.argued && !have(r)))
-  );
+  const aid = openAid(m, b, keyOnly);
+  return aid && "link" in aid ? aid.link : undefined;
 }
 
-// The next hint rung on the first link you do not have (openLink): where
-// (one end), then Claude's question, then the link as a ghost with its verb
-// hidden. Only after a first check. A rung whose text gave the link away is
-// skipped.
+// The part whose place stops a pass: on an axis, the first in the model's
+// order of the parts out of order or off the ticks; on another frame, the
+// first left outside it that the model has a slot for.
+export function openPlace(m: RefModel, b: Build): string | undefined {
+  const valid = slotsOf(m.frame);
+  if (!valid.length) return undefined;
+  const ref = new Map(m.parts.map((p, i) => [p.id, { p, i }]));
+  const placed = b.placed.filter((x) => ref.has(x.part));
+  const on = (x: { slot?: string }) => !!x.slot && valid.includes(x.slot);
+  const rank = (id: string) => {
+    const r = ref.get(id)!;
+    return rankOf(m, r.p, r.i);
+  };
+  const byRank = [...placed].sort((a, c) => rank(a.part) - rank(c.part));
+  if (m.frame.kind === "axis") {
+    const tick = (x: { slot?: string }) => valid.indexOf(x.slot!);
+    const wrong = byRank.find(
+      (a) =>
+        !on(a) ||
+        placed.some(
+          (c) =>
+            on(c) &&
+            c !== a &&
+            ((rank(a.part) < rank(c.part) && tick(a) >= tick(c)) ||
+              (rank(c.part) < rank(a.part) && tick(c) >= tick(a))),
+        ),
+    );
+    return wrong?.part;
+  }
+  return byRank.find((x) => !on(x) && !!ref.get(x.part)!.p.slot?.length)?.part;
+}
+
+// the slot a part belongs in, as Show one place puts it there: its own, or
+// on an axis with none, the tick of its place in the order
+function homeOf(m: RefModel, part: string): string | undefined {
+  const i = m.parts.findIndex((p) => p.id === part);
+  const p = m.parts[i];
+  if (!p) return undefined;
+  if (p.slot?.length) return p.slot[0];
+  return m.frame.kind === "axis" ? m.frame.ticks[i] : undefined;
+}
+
+// The next hint rung on what openAid aims at. On a link: where (one end),
+// then Claude's question, then the link as a ghost with its verb hidden. On
+// where a part sits: one rung, the part named. Only after a first check. A
+// rung whose text gave the link away is skipped. Where names the end you
+// have not linked yet: you had linked "Commit history" to the wrong part,
+// and "Look at Commit history" pointed back at it.
 export function nextHint(
   m: RefModel,
   b: Build,
   keyOnly = false,
-): { link: string; rung: 1 | 2 | 3 } | string {
+): { link: string; rung: 1 | 2 | 3; end?: "to" } | string {
   if (!b.checks) return "Check once first; hints come after a first try.";
-  const target = openLink(m, b, keyOnly);
-  if (!target) return "Every link is already there.";
+  const aid = openAid(m, b, keyOnly);
+  if (!aid) return "Every link is already there.";
+  if ("part" in aid) {
+    const id = `place:${aid.part}`;
+    if (b.hints.some((h) => h.link === id))
+      return "No hints left on this part: Show one place.";
+    return { link: id, rung: 1 };
+  }
+  const target = aid.link;
   const used = b.hints.filter((h) => h.link === target.id).map((h) => h.rung);
   const rungs = ([1, 2, 3] as const).filter(
     (r) => !used.includes(r) && (r !== 2 || !!target.hint),
   );
   if (!rungs.length) return "No hints left on this link: Show one link.";
-  return { link: target.id, rung: rungs[0] };
+  const tried = b.links.some(
+    (l) =>
+      !l.given &&
+      (l.from === target.from || l.to === target.from) &&
+      l.from !== target.to &&
+      l.to !== target.to,
+  );
+  return {
+    link: target.id,
+    rung: rungs[0],
+    ...(rungs[0] === 1 && tried ? { end: "to" as const } : {}),
+  };
 }
 
-// Show one link: a link you do not have (openLink), drawn for you and
-// marked shown. It takes the place of your tries on the same two parts that
-// are not right (a near verb, the wrong way round): drawn beside them, the
-// two read as one.
+// Show one link: what openAid aims at, shown and marked so. A link you do
+// not have is drawn for you; it takes the place of your tries on the same
+// two parts that are not right (a near verb, the wrong way round): drawn
+// beside them, the two read as one. A part whose place stops the pass is
+// put in its slot.
 export function showOneLink(
   m: RefModel,
   b: Build,
   keyOnly = false,
-): RefLink | string {
-  const target = openLink(m, b, keyOnly);
-  if (!target) return "Every link is already there.";
+): { link: RefLink } | { part: string } | string {
+  const aid = openAid(m, b, keyOnly);
+  if (!aid) return "Every link is already there.";
+  if ("part" in aid) {
+    const slot = homeOf(m, aid.part);
+    const p = b.placed.find((x) => x.part === aid.part);
+    if (!slot || !p) return "Every part is in its place.";
+    p.slot = slot;
+    b.shown.push(`place:${aid.part}`);
+    return aid;
+  }
+  const target = aid.link;
   const pair = (l: Triple) => [l.from, l.to].sort().join("|");
   b.links = b.links.filter(
     (l) =>
@@ -1524,7 +1740,7 @@ export function showOneLink(
   for (const p of [target.from, target.to])
     if (!placedHas(b, p)) placePart(m, b, p);
   b.shown.push(target.id);
-  return target;
+  return aid;
 }
 
 // ---------------------------------------------------------------- credit
@@ -1800,7 +2016,11 @@ export const bareSay = (say: string): string =>
     .replace(/^./, (c) => c.toUpperCase());
 
 // End the open review (I'm done today, or a new day): what you checked is
-// logged, what you did not stays due, and the visit's score is kept.
+// logged, at the time you checked it, what you did not stays due, and the
+// visit's score is kept. Logged at the time it was ended, a rebuild checked
+// on day 1 and closed on day 16 counted as day 16's answer: it moved its
+// items up and out of due, and the review the map had offered would not
+// start.
 export function endReview(
   s: LearnState,
   now: number,
@@ -1812,7 +2032,7 @@ export function endReview(
     const m = own(s.models, own(s.stepModel, step) ?? "");
     if (!st?.reviewing || !m) continue;
     const b = own(s.builds, m.id);
-    if (b?.checks) logOutcomes(s, m, b, now);
+    if (b?.checks) logOutcomes(s, m, b, Math.min(now, b.last?.at || now));
     st.reviewing = false;
     st.stage = "built";
   }
@@ -1882,7 +2102,7 @@ export function ideaCards(
 export function outlineOf(
   s: LearnState,
   nodes: Record<string, MapNode>,
-  { full = true }: { full?: boolean } = {},
+  { full = true, at: about }: { full?: boolean; at?: string | null } = {},
 ): string {
   const path = pathSteps(nodes);
   const title = (id: string) => own(nodes, id)?.title ?? id;
@@ -1901,7 +2121,7 @@ export function outlineOf(
       }${st ? ` · ${st.stage} · help L${st.help}` : ""}`,
     );
   }
-  const at = s.at && own(s.steps, s.at) ? s.at : undefined;
+  const at = [about, s.at].find((x) => !!x && own(s.steps, x)) ?? undefined;
   const st = at ? s.steps[at] : undefined;
   const main = at ? own(s.models, own(s.stepModel, at) ?? "") : undefined;
   const m = st?.onCase && st.caseModel ? own(s.models, st.caseModel) : main;
@@ -1965,6 +2185,20 @@ export function outlineOf(
       );
   }
   return lines.join("\n");
+}
+
+// The step on the path a node is, or sits under (a fact Claude added to a
+// step, a thread's node), if any.
+export function stepOf(
+  nodes: Record<string, MapNode>,
+  nodeId: string | null | undefined,
+): string | null {
+  const path = new Set(pathSteps(nodes).map((p) => p.id));
+  for (let n = nodeId ? own(nodes, nodeId) : undefined; n;) {
+    if (path.has(n.id)) return n.id;
+    n = n.parent ? own(nodes, n.parent) : undefined;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------- the view
@@ -2083,6 +2317,8 @@ function stepView(
     itemsDue: items.filter((i) => rebuilt(i) && i.due <= now).length,
   };
   if (!m || !ready) return base;
+  // what the frame's own labels must not say (maskFrame)
+  let hide: { names: string[]; answer: string } | null = null;
 
   // the worked case: while you see it, or after Show the model (with the
   // links you argued for and Claude accepted: they joined it); before you
@@ -2139,6 +2375,10 @@ function stepView(
         mentions(t, m.parts.find((x) => x.id === hidden)?.label ?? "", m);
       if (tells(base.case)) base.case = "";
       if (tells(base.caseTitle)) base.caseTitle = "";
+      hide = {
+        names: [m.parts.find((x) => x.id === hidden)?.label ?? ""],
+        answer: m.predict?.answer ?? "",
+      };
     }
   }
   if (st.stage === "see" && m.predict && !st.shownModel) {
@@ -2194,11 +2434,25 @@ function stepView(
     base.typed = b.typed ?? null;
     base.argued = b.argued ?? [];
     base.hints = b.hints.flatMap((h): HintView[] => {
+      if (h.link.startsWith("place:")) {
+        const p = m.parts.find((x) => `place:${x.id}` === h.link);
+        return p
+          ? [
+              {
+                rung: 1 as const,
+                text: `Look at where "${p.label}" sits${m.frame.kind === "axis" ? " along the axis" : ""}.`,
+              },
+            ]
+          : [];
+      }
       const l = m.links.find((x) => x.id === h.link);
       if (!l) return [];
       if (h.rung === 1)
         return [
-          { rung: 1 as const, text: `Look at "${label(l.from).label}".` },
+          {
+            rung: 1 as const,
+            text: `Look at "${label(h.end === "to" ? l.to : l.from).label}".`,
+          },
         ];
       if (h.rung === 2)
         return l.hint ? [{ rung: 2 as const, text: l.hint }] : [];
@@ -2211,11 +2465,20 @@ function stepView(
         },
       ];
     });
-    base.canHint =
-      st.stage === "build" &&
-      b.checks > 0 &&
-      !!openLink(m, b, keyOnlyFor(b, st));
+    const aid =
+      st.stage === "build" && b.checks > 0
+        ? openAid(m, b, keyOnlyFor(b, st))
+        : undefined;
+    base.canHint = !!aid;
+    if (aid && "part" in aid) base.hintOn = "place";
+    // your links or places changed since the last check: its marks are of
+    // what was there then
+    base.changed =
+      !!b.last && b.checked !== undefined && b.checked !== buildKey(b);
     base.told = (b.told ?? []).length;
+    // at L3 you type the names: a lane named for a part spells it
+    if (st.stage === "build" && b.help === 3)
+      hide = { names: m.parts.map((x) => x.label), answer: "" };
     // a quick rebuild waiting: the build it rebuilds stays out of view until
     // it is done (it opened beside the quick rebuild card, every link on it)
     if (st.stage === "built" && st.recallDue) {
@@ -2262,7 +2525,86 @@ function stepView(
         : null,
     };
   }
+  if (hide) maskFrame(base, m, hide);
   return base;
+}
+
+// whether a text holds a name whole: its phrase, or every one of its own words
+function namesAll(text: string, name: string): boolean {
+  const w = wordsOf(name)
+    .filter((x) => x.length >= 3 && !STOP.has(x))
+    .map(root);
+  const said = new Set(wordsOf(text).map(root));
+  return (
+    (!!name.trim() && phrase(text).includes(phrase(name))) ||
+    (w.length > 0 && w.every((x) => said.has(x)))
+  );
+}
+
+const SLOT_WORD: Record<Frame["kind"], string> = {
+  free: "Slot",
+  lanes: "Lane",
+  axis: "Tick",
+  boxes: "Box",
+  sort: "Column",
+};
+
+// The frame as you see it: a lane, tick, column or box whose label says
+// what you are to work out goes out by its number ("Lane 3"), and so does
+// its slot in every part. While the predict is open, a label that names the
+// hidden part or the answer (an empty lane "Left heart side" answered "where
+// does it go next?"; a box "Inside order 1042" answered "where are its line
+// items stored?"); at L3, one that holds a part's name ("Right heart side").
+// The server takes the number back (slotFrom).
+function maskFrame(
+  base: StepView,
+  m: RefModel,
+  hide: { names: string[]; answer: string },
+): void {
+  const f = m.frame;
+  const labels = f.kind === "boxes" ? f.boxes.map((x) => x.label) : slotsOf(f);
+  const ids = slotsOf(f);
+  const tells = (label: string) =>
+    hide.names.some((n) => namesAll(label, n)) ||
+    (!!hide.answer && mentions(label, hide.answer, m));
+  const rename = new Map<string, string>();
+  labels.forEach((l, i) => {
+    if (tells(l)) rename.set(ids[i], `${SLOT_WORD[f.kind]} ${i + 1}`);
+  });
+  if (!rename.size) return;
+  const to = (x: string) => rename.get(x) ?? x;
+  base.frame =
+    f.kind === "boxes"
+      ? {
+          kind: "boxes",
+          boxes: f.boxes.map((x) =>
+            rename.has(x.id) ? { id: to(x.id), label: to(x.id) } : x,
+          ),
+        }
+      : f.kind === "lanes"
+        ? { kind: "lanes", lanes: f.lanes.map(to) }
+        : f.kind === "axis"
+          ? { kind: "axis", ticks: f.ticks.map(to) }
+          : f.kind === "sort"
+            ? { kind: "sort", columns: f.columns.map(to) }
+            : f;
+  base.placed = base.placed.map((p) =>
+    p.slot ? { ...p, slot: to(p.slot) } : p,
+  );
+  if (base.worked)
+    base.worked.parts = base.worked.parts.map((p) =>
+      p.slot ? { ...p, slot: to(p.slot) } : p,
+    );
+}
+
+// A slot the browser sends: the frame's own, or one it was shown by its
+// number (maskFrame).
+export function slotFrom(frame: Frame, raw: unknown): unknown {
+  if (typeof raw !== "string") return raw;
+  const valid = slotsOf(frame);
+  if (valid.includes(raw)) return raw;
+  const x = /^(?:Lane|Tick|Box|Column) (\d+)$/.exec(raw);
+  return x ? (valid[Number(x[1]) - 1] ?? raw) : raw;
 }
 
 function reviewView(

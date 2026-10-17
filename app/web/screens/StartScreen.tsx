@@ -4,7 +4,7 @@ import type { Purpose } from "../../shared/model.ts";
 import { Logo } from "../components/Logo.tsx";
 import { MapRows } from "../components/MapList.tsx";
 import { Segmented } from "../components/Segmented.tsx";
-import { ago } from "../lib/ago.ts";
+import { ago, reviewMinutes } from "../lib/ago.ts";
 import { useMaps } from "../lib/api.ts";
 import { store, stored } from "../lib/storage.ts";
 import { PLUGINS } from "../plugins.ts";
@@ -147,7 +147,7 @@ export function StartScreen({
                         {/* steps due, as the map's own review counts them; a
                             step's rebuild takes two or three minutes */}
                         {m.due!.now} {m.due!.now === 1 ? "step" : "steps"} due ·
-                        about {m.due!.now * 2} min · last seen{" "}
+                        about {reviewMinutes(m.due!.now)} min · last seen{" "}
                         {m.current ? "now" : ago(m.updatedAt)}
                       </span>
                     </span>

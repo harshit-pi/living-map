@@ -315,8 +315,10 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
       />
       {/* a narrow window stacks the parts, the canvas and the side card,
           so the canvas keeps its width (at 1024 side by side, the canvas
-          was 394 wide and the worked case shrank to 4px words) */}
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-visible">
+          was 394 wide and the worked case shrank to 4px words); from 1024
+          the parts go over the canvas and the side card stays beside it
+          (stacked at 1024×700, Check sat below the fold) */}
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-visible">
         {landing ? (
           <div className="relative min-w-0 flex-1">
             <ReviewStart here={here} onPath={() => setOnPath(true)} />
@@ -478,9 +480,18 @@ function StepArea({
   const verdicts: Record<string, string> = {};
   for (const c of map.chat) if (c.blankId) verdicts[c.blankId] = c.text;
 
+  // a review whose rebuilds are all done says so first: under the step's
+  // old Why and its extras, its result sat below the fold
+  const reviewDone = !!review && !view.steps.some((s) => s.reviewing);
+
   const side = (
-    <aside className="flex max-h-[45%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 xl:max-h-none xl:w-[280px] xl:border-t-0 xl:border-l 2xl:w-[300px]">
+    <aside className="flex max-h-[45%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 lg:max-h-none lg:w-[260px] lg:border-t-0 lg:border-l xl:w-[280px] 2xl:w-[300px]">
       <div className="space-y-4">
+        {review && reviewDone && (
+          <div className="border-b border-line pb-3">
+            <ReviewPanel here={here} review={review} />
+          </div>
+        )}
         {ready && st.stage === "see" && (
           <PredictCard key={st.step} here={here} st={st} />
         )}
@@ -513,7 +524,7 @@ function StepArea({
             onNext={onNext}
           />
         )}
-        {review && (
+        {review && !reviewDone && (
           <div className="border-t border-line pt-3">
             <ReviewPanel here={here} review={review} />
           </div>
@@ -645,122 +656,124 @@ function StepArea({
 
   return (
     <>
-      {ready && mode === "build" && centre === "step" && (
-        <Tray here={here} st={st} />
-      )}
-      {/* stacked (under 1280 wide), the canvas keeps a height of its own
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
+        {ready && mode === "build" && centre === "step" && (
+          <Tray here={here} st={st} />
+        )}
+        {/* stacked (under 1024 wide), the canvas keeps a height of its own
           and the side card follows below it: squeezed to fit, the build had
           about 170px between its header and the message box */}
-      <div className="relative flex min-h-[540px] min-w-0 flex-1 flex-col xl:min-h-[360px]">
-        <div className="space-y-2 border-b border-line px-4 pt-3 pb-2">
-          {review && (
-            <ReviewStrip
-              view={view}
-              review={review}
-              current={st.step}
-              onPick={onPick}
-            />
-          )}
-          {first &&
-            !review &&
-            (view.level === null || st.stage !== "built") && (
-              <LevelChooser here={here} level={view.level} />
-            )}
-          <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[15px] font-semibold text-ink">
-                <span className="mr-1.5 text-muted">
-                  {stepNumber(view, st.step)}
-                </span>
-                {st.title}
-              </div>
-            </div>
-            {st.mode === "play" && (
-              <Toggle
-                value={centre === "play" ? "play" : "step"}
-                options={[
-                  ["play", "▶ Play it"],
-                  ["step", "◇ Build the order"],
-                ]}
-                onChange={setCentre}
+        <div className="relative flex min-h-[540px] min-w-0 flex-1 flex-col lg:min-h-[360px]">
+          <div className="space-y-2 border-b border-line px-4 pt-3 pb-2">
+            {review && (
+              <ReviewStrip
+                view={view}
+                review={review}
+                current={st.step}
+                onPick={onPick}
               />
             )}
-            {/* the old diagram may draw the links you are rebuilding: it
+            {first &&
+              !review &&
+              (view.level === null || st.stage !== "built") && (
+                <LevelChooser here={here} level={view.level} />
+              )}
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[15px] font-semibold text-ink">
+                  <span className="mr-1.5 text-muted">
+                    {stepNumber(view, st.step)}
+                  </span>
+                  {st.title}
+                </div>
+              </div>
+              {st.mode === "play" && (
+                <Toggle
+                  value={centre === "play" ? "play" : "step"}
+                  options={[
+                    ["play", "▶ Play it"],
+                    ["step", "◇ Build the order"],
+                  ]}
+                  onChange={setCentre}
+                />
+              )}
+              {/* the old diagram may draw the links you are rebuilding: it
                 stays out of view while you build */}
-            {view.topic && st.stage !== "build" && (
-              <Toggle
-                value={centre === "topic" ? "topic" : "step"}
-                options={[
-                  ["step", "This step"],
-                  ["topic", "◧ Topic diagram"],
-                ]}
-                onChange={setCentre}
+              {view.topic && st.stage !== "build" && (
+                <Toggle
+                  value={centre === "topic" ? "topic" : "step"}
+                  options={[
+                    ["step", "This step"],
+                    ["topic", "◧ Topic diagram"],
+                  ]}
+                  onChange={setCentre}
+                />
+              )}
+              <button
+                onClick={onThread}
+                className="rounded-lg border border-line-strong px-2.5 py-1 text-xs text-body hover:border-primary"
+              >
+                💬 Thread
+              </button>
+            </div>
+            {ready && (
+              <StageStrip
+                st={st}
+                skippedSee={
+                  // the chooser, or Practise this as builds on a step you had
+                  // worked out, starts it past See
+                  (view.level === "some" ||
+                    view.level === "cold" ||
+                    view.topic) &&
+                  st.help > 0
+                }
               />
             )}
-            <button
-              onClick={onThread}
-              className="rounded-lg border border-line-strong px-2.5 py-1 text-xs text-body hover:border-primary"
-            >
-              💬 Thread
-            </button>
-          </div>
-          {ready && (
-            <StageStrip
-              st={st}
-              skippedSee={
-                // the chooser, or Practise this as builds on a step you had
-                // worked out, starts it past See
-                (view.level === "some" ||
-                  view.level === "cold" ||
-                  view.topic) &&
-                st.help > 0
-              }
-            />
-          )}
-          {ready &&
-            st.worked &&
-            centre === "step" &&
-            (st.caseTitle || st.case) && (
-              <div className="text-[11.5px] text-muted">
-                <span className="font-semibold tracking-wide text-faint uppercase">
-                  Worked case
-                </span>{" "}
-                · {[st.caseTitle, st.case].filter(Boolean).join(", ")}
-              </div>
-            )}
-          {ready &&
-            mode === "build" &&
-            centre === "step" &&
-            st.help < 3 &&
-            st.checks === 0 &&
-            !st.reviewing &&
-            !st.recall &&
-            !st.onCase && (
+            {ready &&
+              st.worked &&
+              centre === "step" &&
+              (st.caseTitle || st.case) && (
+                <div className="text-[11.5px] text-muted">
+                  <span className="font-semibold tracking-wide text-faint uppercase">
+                    Worked case
+                  </span>{" "}
+                  · {[st.caseTitle, st.case].filter(Boolean).join(", ")}
+                </div>
+              )}
+            {ready &&
+              mode === "build" &&
+              centre === "step" &&
+              st.help < 3 &&
+              st.checks === 0 &&
+              !st.reviewing &&
+              !st.recall &&
+              !st.onCase && (
+                <button
+                  onClick={() => void act("showModel", { step: st.step })}
+                  className="text-[11.5px] text-muted hover:text-ink"
+                  title="It counts as shown"
+                >
+                  Peek at the worked case
+                </button>
+              )}
+            {ready && st.onCase && st.stage === "build" && (
               <button
-                onClick={() => void act("showModel", { step: st.step })}
+                onClick={() => void act("onCase", { step: st.step, on: false })}
                 className="text-[11.5px] text-muted hover:text-ink"
-                title="It counts as shown"
+                title="The new case is optional: it waits here for you"
               >
-                Peek at the worked case
+                ← Back to my build (the new case waits)
               </button>
             )}
-          {ready && st.onCase && st.stage === "build" && (
-            <button
-              onClick={() => void act("onCase", { step: st.step, on: false })}
-              className="text-[11.5px] text-muted hover:text-ink"
-              title="The new case is optional: it waits here for you"
-            >
-              ← Back to my build (the new case waits)
-            </button>
-          )}
+          </div>
+          <div className="relative min-h-0 flex-1">{body}</div>
+          <FloatingComposer
+            ws={ws}
+            beside={false}
+            sticky
+            placeholder="Ask anything about the topic, or tell Claude where you are stuck…"
+          />
         </div>
-        <div className="relative min-h-0 flex-1">{body}</div>
-        <FloatingComposer
-          ws={ws}
-          beside={false}
-          sticky
-          placeholder="Ask anything about the topic, or tell Claude where you are stuck…"
-        />
       </div>
       {side}
     </>

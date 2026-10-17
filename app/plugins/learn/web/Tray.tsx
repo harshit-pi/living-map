@@ -13,7 +13,8 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
   const { act } = here;
   const [text, setText] = useState("");
   const step = st.step;
-  const spot = () => nextSpot(st.frame, st.placed);
+  const spot = () =>
+    nextSpot(st.frame, st.placed, st.placed.length + st.trayCount);
   const typing = st.help === 3;
 
   const send = async () => {

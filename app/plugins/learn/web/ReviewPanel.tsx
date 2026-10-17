@@ -1,5 +1,6 @@
 import { SmallBtn } from "./BuildCanvas.tsx";
-import { minutesFor, stepNumber, type Here } from "./view.ts";
+import { stepNumber, type Here } from "./view.ts";
+import { reviewMinutes } from "../../../web/lib/ago.ts";
 import type { How, LearnView, ReviewView } from "../shared.ts";
 
 const HOW: Record<How, string> = {
@@ -42,9 +43,8 @@ export function ReviewStart({
         </div>
         <div className="mt-1 text-[13px] text-muted">
           {links} key {links === 1 ? "link" : "links"} to rebuild from memory,
-          about {minutesFor(links)}{" "}
-          {minutesFor(links) === 1 ? "minute" : "minutes"}. Each step comes back
-          with a little less help than last time
+          about {reviewMinutes(steps.length)} min. Each step comes back with a
+          little less help than last time
           {steps.length > 1 ? ", in a mixed order" : ""}.
         </div>
         {view.last && (
@@ -135,6 +135,11 @@ export function ReviewPanel({
   ).length;
   return (
     <div className="space-y-3">
+      {left === 0 && (
+        <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] font-medium text-success-strong">
+          ✓ Review done · today, unaided {review.unaided} of {review.of}
+        </div>
+      )}
       <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
         Last time → today
       </div>

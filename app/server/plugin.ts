@@ -29,8 +29,12 @@ export type ServerPlugin = {
   };
   // what the model is told about the plugin's state on every move; the
   // move's sections say what it is for (Learn shows a hidden model only to
-  // the moves that work on it)
-  outline?: (map: StoredMap, move?: { sections: readonly string[] }) => string;
+  // the moves that work on it), and `nodeId` the node it is about (its
+  // thread's, or the one it was asked on)
+  outline?: (
+    map: StoredMap,
+    move?: { sections: readonly string[]; nodeId?: string | null },
+  ) => string;
   // an op from the model's reply that core does not know; return how many
   // things it changed, or null when it is not this plugin's op either. The
   // model's output is untrusted: clean every field before it reaches the map.

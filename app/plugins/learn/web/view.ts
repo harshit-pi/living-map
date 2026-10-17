@@ -112,12 +112,14 @@ export const helpLine = (st: StepView): string => {
     return `Quick rebuild · L1 · ${HELP[1].name}: ${order ? "put the parts in order; " : ""}only the key links are checked`;
   // a new case is always built at L2 (build.ts), whatever the step's help
   if (st.onCase) return `New case · L2 · ${HELP[2].name}: ${st.caseTitle}`;
-  const pre = st.reviewing ? "Review · " : "";
+  // a review checks only the key links, as a quick rebuild does
+  if (st.reviewing)
+    return `Review · L${st.help} · ${HELP[st.help].name}: ${order ? "put the parts in order along the axis" : HELP[st.help].says.toLowerCase()}; only the key links are checked`;
   if (st.help === 0)
-    return `${pre}L0 · ${HELP[0].name}: draw the key links that are missing`;
+    return `L0 · ${HELP[0].name}: draw the key links that are missing`;
   if (order)
-    return `${pre}L1 · ${HELP[1].name}: put the parts in order along the axis, then link them`;
-  return `${pre}L${st.help} · ${HELP[st.help].name}: ${HELP[st.help].says.toLowerCase()}`;
+    return `L1 · ${HELP[1].name}: put the parts in order along the axis, then link them`;
+  return `L${st.help} · ${HELP[st.help].name}: ${HELP[st.help].says.toLowerCase()}`;
 };
 
 // a mark is a symbol and a word, never colour alone
@@ -145,10 +147,6 @@ export const creditCls = (c: Credit | null): string =>
         : "text-line-strong";
 
 const DAY = 86_400_000;
-
-// About a minute per key link: the rebuilds took one to two and a half
-// minutes a step, and a step has two or three key links.
-export const minutesFor = (keyLinks: number) => Math.max(1, keyLinks);
 
 // "in 4 days", "tomorrow", "later today"
 export function inDays(at: number, now: number): string {

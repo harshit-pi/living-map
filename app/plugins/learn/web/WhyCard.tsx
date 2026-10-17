@@ -186,7 +186,9 @@ export function BuiltCard({
       {wi && (
         <div className="space-y-1.5 border-t border-line pt-2">
           <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-            What if · {wi.due && !wi.result ? "due for review" : "optional"}
+            {/* asked again once its item falls due, but never part of a
+                review's count: "due for review" sat beside "Due: nothing" */}
+            What if · {wi.due && !wi.result ? "try it again" : "optional"}
           </div>
           <div className="text-[13px] leading-snug text-ink">{wi.ask}</div>
           {wi.result ? (
@@ -208,7 +210,9 @@ export function BuiltCard({
           ) : whatif.on ? (
             <>
               <div className="text-[12px] text-muted">
-                Click every part on your build that stops working (
+                {/* the question asks what is affected, and the answer can
+                    be a part that works harder, not one that stops */}
+                Click every part on your build that this affects (
                 {whatif.picked.length} picked).
               </div>
               <HowSure value={whatif.sure} onPick={whatif.setSure} />

@@ -28,6 +28,7 @@ import {
   outlineOf,
   pathSteps,
   peek,
+  stepOf,
   viewOf,
 } from "./core.ts";
 import * as canvas from "../../server/actions/canvas.ts";
@@ -162,8 +163,10 @@ function buildScene(
 ): Promise<ActionResult> | ActionResult {
   const found = ctx.node(nodeId);
   if (!found) return { error: "No such step." };
+  // on a build map the scene is played on the step's own case, which its
+  // model, its Why and its feedback are about (it was played on another)
   return ctx.engine.turn(
-    `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), on the same tiny example as the diagram where it fits.`,
+    `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), ${isBuildMap(ctx.map) ? "on the step's own case (the CURRENT STEP's case and parts above): the same list, numbers and target, move for move as its parts say" : "on the same tiny example as the diagram where it fits"}.`,
     ctx.settings,
     { label: "Building a playable scene", nodeId, sections: ["scene"] },
   );
@@ -259,7 +262,12 @@ export const learn: ServerPlugin = {
     const s = peek(map.data);
     if (s?.mode !== "build") return classicOutline(map);
     const full = !!move?.sections.some((x) => ON_MODEL.has(x));
-    const text = outlineOf(s, map.nodes, { full });
+    // the step the move is about (a scene asked on step 2 was written on
+    // step 1's case, the step last worked on), else the one worked on
+    const text = outlineOf(s, map.nodes, {
+      full,
+      at: stepOf(map.nodes, move?.nodeId),
+    });
     // a map practised as builds after the topic diagram keeps it in view
     return map.diagram ? `${text}\n\n${classicOutline(map)}` : text;
   },

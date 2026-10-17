@@ -134,6 +134,7 @@ export default function App() {
   };
   // every mode is a plugin with its own screen
   const plugin = modeOf(map.purpose);
+  const switching = live.busy || !!live.working || live.waiting.length > 0;
   // the modes this map can switch between (Explore and Learn share their map)
   const switches = PLUGINS.filter(
     (p) =>
@@ -166,11 +167,20 @@ export default function App() {
         </div>
         <div className="flex items-center justify-end gap-2">
           {modes.length > 1 ? (
+            // off while a move runs or waits: switched late, the screen
+            // changed under the pointer and the next click landed on
+            // Explore's Next, a paid move
             <Segmented
               value={map.purpose}
               options={modes}
+              disabled={switching}
+              title={
+                switching
+                  ? "Claude is working: switch once the map settles"
+                  : undefined
+              }
               onChange={(purpose) => {
-                void run({ type: "purpose", purpose });
+                if (!switching) void run({ type: "purpose", purpose });
               }}
             />
           ) : (

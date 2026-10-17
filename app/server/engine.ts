@@ -169,7 +169,10 @@ export function createEngine({
     const plugin = modeOf(m.purpose);
     return [
       `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${outline(m.nodes)}`,
-      plugin.outline?.(m, { sections: opts.sections ?? [] }) ?? "",
+      plugin.outline?.(m, {
+        sections: opts.sections ?? [],
+        nodeId: scope ?? opts.nodeId ?? null,
+      }) ?? "",
       scope
         ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(
             m.nodes,

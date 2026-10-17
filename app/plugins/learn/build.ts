@@ -8,6 +8,7 @@
 import {
   acceptArgued,
   addLinks,
+  buildKey,
   addMiscon,
   bareSay,
   caseShape,
@@ -48,6 +49,7 @@ import {
   showOneLink,
   staleReview,
   startBuild,
+  stepOf,
   unlinkParts,
   unplacePart,
   validate,
@@ -113,7 +115,7 @@ const MODEL = `MODEL OPS (in the same map block as node ops; write the model op 
 FRAMES: {"kind":"free"} | {"kind":"lanes","lanes":["…"]} (each part has a "slot": its lane) | {"kind":"axis","ticks":["…"]} (order matters; each part's "slot" is its tick) | {"kind":"boxes","boxes":[{"id":"…","label":"…"}]} (each part's "slot" is the box it sits in) | {"kind":"sort","columns":["strong evidence","weak","against"]} (a part's "slot" may be a list when more than one column is fair).
 VERBS ("rel"), by family: ${verbList}. Each frame takes only some families: ${frameVerbs}.
 LAYERS ("layer"): parts · behaviour · function · failure. For a system, the first step is its parts and what each is for, the next how they interact; the why questions are its function and the what-if is its failure.
-RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it).`;
+RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. A lane, tick, box or column label never holds a part's label or the predict answer ("Right heart side" spells the part "Right heart"). At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it).`;
 
 const WHY = `WHY on a key link: judge the learner's answer against that link's rubric (in the outline). The words do not have to match; the idea does. Write one op: {"op":"why","model":"<model id>","link":"<link id>","state":"right|partial|wrong","say":"at most 30 words"}. If partial or wrong, "say" asks ONE question that leads them on, never the fix. The caption is one short sentence.`;
 
@@ -289,10 +291,15 @@ const state = (map: StoredMap): LearnState | null => {
 
 // The map's state for an action you took: a review left open from an
 // earlier day ends first, so the next one opens fresh for today (its gap,
-// its levels, its count) rather than carrying on yesterday's.
-const today = (map: StoredMap): LearnState | null => {
-  const s = state(map);
-  if (s && staleReview(s, clock())) endReview(s, clock());
+// its levels, its count) rather than carrying on yesterday's. It is saved at
+// once: an action that then refused (Nothing is due) left the ended review
+// in memory only, and the map and the maps list told two stories.
+const today = (ctx: Ctx): LearnState | null => {
+  const s = state(ctx.map);
+  if (s && staleReview(s, clock())) {
+    endReview(s, clock());
+    ctx.engine.push();
+  }
   return s;
 };
 
@@ -317,7 +324,7 @@ type At = {
 
 // The step an action is about, its state and its model, or why not.
 function at(ctx: Ctx, a: Raw, stages?: Stage[]): At | string {
-  const s = today(ctx.map);
+  const s = today(ctx);
   if (!s) return "This map is not practised as builds.";
   const step = id(a?.step ?? a?.nodeId);
   if (!pathSteps(ctx.map.nodes).some((p) => p.id === step))
@@ -564,11 +571,14 @@ const err = (error: string): ActionResult => ({ error });
 // What the first move says, written here rather than by Claude: that move
 // writes step 1's model, and its streamed caption said the case outright
 // ("'cat' and 'dog' both hash to bucket 3") before the predict asked it.
+// It goes out as a note of the app's, not a reply: a reply to the message
+// box stays on the canvas until clicked away, and this one sat over the
+// parts for minutes while you built.
 function pathCaption(ctx: Ctx, entered = false) {
   const path = topPath(ctx.map);
   if (!path.length) return;
   ctx.map.chat.push({
-    role: "claude",
+    role: "system",
     text: `${entered ? "What you explored is now a path" : "Your path"}: ${path.length} ${path.length === 1 ? "step" : "steps"}, in the order to learn them. Step 1 is “${ctx.map.nodes[path[0]].title}”.`,
     ts: Date.now(),
   });
@@ -666,7 +676,7 @@ const level: Act = (ctx, a) => {
 };
 
 const open: Act = (ctx, a) => {
-  const s = today(ctx.map);
+  const s = today(ctx);
   if (!s) return err("This map is not practised as builds.");
   const step = id(a?.step ?? a?.nodeId);
   if (!pathSteps(ctx.map.nodes).some((p) => p.id === step))
@@ -769,6 +779,7 @@ const check: Act = (ctx, a) => {
   }
   b.checks++;
   b.last = result;
+  b.checked = buildKey(b);
   delete b.typed;
   ctx.note(
     `Checked the build of "${ctx.map.nodes[x.step].title}": ${result.right} of ${result.total} right${result.pass ? ", passed" : ""}.`,
@@ -794,7 +805,11 @@ const showLink: Act = (ctx, a) => {
   if (!b.checks) return err("Check once first.");
   const l = showOneLink(x.m, b, keyOnlyFor(b, x.st));
   if (typeof l === "string") return err(l);
-  ctx.note(`Was shown the link ${linkWords(x.m, l)}.`);
+  ctx.note(
+    "link" in l
+      ? `Was shown the link ${linkWords(x.m, l.link)}.`
+      : `Was shown where "${x.m.parts.find((p) => p.id === l.part)?.label ?? l.part}" goes.`,
+  );
   return ok(ctx);
 };
 
@@ -883,7 +898,7 @@ const whatif: Act = (ctx, a) => {
   const clicked = Array.isArray(a?.parts)
     ? a.parts.map(id).filter(Boolean)
     : [];
-  if (!clicked.length) return err("Click the parts that stop working first.");
+  if (!clicked.length) return err("Click the parts it affects first.");
   const r = whatIf(x.main, clicked);
   x.st.whatif = r;
   const perfect = !r.missed.length && !r.extra.length;
@@ -1025,7 +1040,7 @@ const recall: Act = (ctx, a) => {
 // Review: the due steps in mixed order, each at the help its weakest item
 // earns. A second press while one is open keeps it.
 const review: Act = (ctx) => {
-  const s = today(ctx.map);
+  const s = today(ctx);
   if (!s) return err("This map is not practised as builds.");
   if (s.review) return ok(ctx);
   const t = clock();
@@ -1161,15 +1176,7 @@ function building(
 ): { s: LearnState; m: RefModel; b: Build | undefined } | null {
   const s = state(map);
   if (!s) return null;
-  const path = new Set(pathSteps(map.nodes).map((p) => p.id));
-  let step: string | undefined;
-  for (let n = nodeId ? own(map.nodes, nodeId) : undefined; n;) {
-    if (path.has(n.id)) {
-      step = n.id;
-      break;
-    }
-    n = n.parent ? own(map.nodes, n.parent) : undefined;
-  }
+  const step = stepOf(map.nodes, nodeId);
   const at = [step, s.at].find(
     (x): x is string => !!x && own(s.steps, x)?.stage === "build",
   );
