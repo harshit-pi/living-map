@@ -56,7 +56,8 @@ export async function open(
   return {};
 }
 
-// Switch between Explore and Learn. A map with no topic diagram gets one.
+// Switch between Explore and Learn. A map with no topic diagram gets one;
+// nothing on the map is removed on the way, so switching back finds it all.
 export function switchPurpose(
   ctx: Ctx,
   purpose: Purpose,
@@ -75,9 +76,14 @@ export function switchPurpose(
   engine.push();
   if (map.purpose === "learn" && !map.diagram && !engine.state.busy)
     return engine.turn(
-      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order (keep useful existing nodes, set the rest aside by removing them only if they are options), and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first.",
+      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order, and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first. Remove nothing: every node already on the map stays where it is (the learner explored it, and it is listed under what they looked into); a useful existing question can be one of the steps.",
       ctx.settings,
-      { label: "Turning this into a learning path", sections: ["diagram"] },
+      // what you explored stays, with its threads, for when you switch back
+      {
+        label: "Turning this into a learning path",
+        sections: ["diagram"],
+        keep: true,
+      },
     );
   return {};
 }

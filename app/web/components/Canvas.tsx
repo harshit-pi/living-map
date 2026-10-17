@@ -1,4 +1,10 @@
-import { Background, Controls, ReactFlow, useReactFlow } from "@xyflow/react";
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  useReactFlow,
+  useStore,
+} from "@xyflow/react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { NodeCard } from "./NodeCard.tsx";
@@ -18,6 +24,9 @@ const nodeTypes = { map: NodeCard };
 
 // the whole tree, above the message box: on first load and from the fit button
 const WHOLE = { padding: FRAME, maxZoom: 1, minZoom: 0.2 };
+// the node panel (420px wide, 12px from the edge) covers the right of the
+// canvas: new work is framed to its left, unless the canvas is too narrow
+const PANEL_W = 420 + 12;
 
 // The app owns the selection: a click selects one node, Shift-click adds or
 // removes, a click on empty canvas clears.
@@ -27,6 +36,7 @@ export function Canvas({
   selected,
   busy,
   workingId,
+  panelOpen,
   onSelect,
 }: {
   map: MapDoc;
@@ -34,8 +44,22 @@ export function Canvas({
   selected: string[];
   busy: boolean;
   workingId: string | null;
+  panelOpen: boolean;
   onSelect: (ids: string[]) => void;
 }) {
+  const width = useStore((s) => s.width);
+  const frame = useMemo(
+    () =>
+      panelOpen && width > PANEL_W * 2
+        ? { ...FRAME, right: `${PANEL_W + 24}px` as const }
+        : FRAME,
+    [panelOpen, width],
+  );
+  // read when a fit runs: the panel opening is no reason to frame again
+  const framing = useRef(frame);
+  useEffect(() => {
+    framing.current = frame;
+  }, [frame]);
   const visible = useMemo(
     () =>
       Object.values(map.nodes).filter(
@@ -96,7 +120,7 @@ export function Canvas({
     const t = setTimeout(() => {
       void fitView({
         nodes: focus,
-        padding: FRAME,
+        padding: framing.current,
         duration: 500,
         maxZoom: 1,
         minZoom: 0.55,
@@ -119,7 +143,7 @@ export function Canvas({
         const t = setTimeout(() => {
           void fitView({
             nodes: [...ids].map((id) => ({ id })),
-            padding: FRAME,
+            padding: framing.current,
             duration: 500,
             maxZoom: 1,
             minZoom: 0.35,

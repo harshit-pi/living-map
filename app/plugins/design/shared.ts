@@ -269,12 +269,21 @@ export type Comp = {
   writeShare?: number;
 };
 
+// the four dots on a card a wire can run between
+export type Side = "top" | "right" | "bottom" | "left";
+export const SIDES: Side[] = ["top", "right", "bottom", "left"];
+export const isSide = (s: unknown): s is Side =>
+  typeof s === "string" && (SIDES as string[]).includes(s);
+
 export type Wire = {
   id: string;
   from: string;
   to: string;
   carries: Carries;
   times: number; // fan-out: each request becomes this many calls (e.g. one per follower)
+  // the dots you dragged it between (Claude's wires have none: the canvas picks)
+  fromSide?: Side;
+  toSide?: Side;
 };
 
 export type Brief = {

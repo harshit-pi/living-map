@@ -192,6 +192,37 @@ export function cleanSpecWithAnswers(
   return { diagram: d, answers };
 }
 
+// A comparison grid's row sets a blank beside the cells it is compared with,
+// and the model sometimes names the answer there ("No GROUP BY" next to "Which
+// SQL clause gives counts per user?"). Any accepted answer of 3 letters or more
+// written in another cell of the blank's row, or in the row's label, is hidden.
+export function hideGiveaways(
+  spec: Diagram,
+  answers: Record<string, BlankAnswer>,
+) {
+  if (spec.form !== "grid") return;
+  const esc = (a: string) =>
+    a
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+");
+  for (const row of spec.rows) {
+    const said = row.cells
+      .filter((c) => c.blank)
+      .flatMap((c) => answers[c.id]?.accept ?? [])
+      .filter((a) => (a.match(/\p{L}/gu)?.length ?? 0) >= 3)
+      .sort((a, b) => b.length - a.length);
+    if (!said.length) continue;
+    const re = new RegExp(
+      `(?<![\\p{L}\\p{N}])(?:${said.map(esc).join("|")})(?![\\p{L}\\p{N}])`,
+      "giu",
+    );
+    row.label = row.label.replace(re, "…");
+    for (const c of row.cells)
+      if (!c.blank && !c.filled) c.text = c.text.replace(re, "…");
+  }
+}
+
 export function elementsOf(spec: Diagram): Element[] {
   switch (spec.form) {
     case "sequence":

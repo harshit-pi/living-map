@@ -18,6 +18,7 @@ import {
   type DesignState,
 } from "./core.ts";
 import { named } from "./web/format.ts";
+import { route, type Box } from "./web/route.ts";
 
 const brief = {
   title: "Twitter",
@@ -420,4 +421,66 @@ test("the model's ops are cleaned: unknown kinds, bad ids and stray points are d
     { level: "fix", text: "Add a cache", on: ["app"] },
   ]);
   assert.match(outlineOf(s), /REFERENCE DESIGN \(yours, hidden/);
+});
+
+test("a wire keeps the dots you dragged it between", () => {
+  const s = build(
+    [
+      ["app", "client"],
+      ["lb", "lb"],
+    ],
+    [],
+  );
+  const w = connect(s, "app", "lb", "both", 1, "top", "right");
+  assert.deepEqual([w?.fromSide, w?.toSide], ["top", "right"]);
+  // a stray side is not kept, and half a pair is no pair
+  const x = connect(s, "lb", "app", "both", 1, "middle", "left");
+  assert.equal(x?.fromSide, undefined);
+  assert.equal(x?.toSide, undefined);
+  const boxes = new Map<string, Box>([
+    ["app", { x: 400, y: 300 }],
+    ["lb", { x: 0, y: 0 }],
+  ]);
+  assert.deepEqual(route(s.wires, boxes).get(w!.id), ["top", "right"]);
+});
+
+test("wires keep off a dot that carries one the other way, and off other cards", () => {
+  // the news feed reference as laid out: the gateway's wire into the feed
+  // service and the feed service's wire to its cache once shared a dot, and
+  // the post service's wire to its store ran under the media store
+  const at: [string, number, number][] = [
+    ["gw", 232, 260],
+    ["post-svc", 500, 380],
+    ["feed-svc", 20, 380],
+    ["media", 444, 500],
+    ["post-cache", 20, 500],
+    ["fanout-q", 242, 500],
+    ["post-db", 399, 620],
+    ["feed-cache", 131, 740],
+  ];
+  const boxes = new Map<string, Box>(
+    at.map(([id, x, y]) => [id, { x, y, w: 172, h: 56 }]),
+  );
+  const wires = [
+    ["gw", "post-svc"],
+    ["gw", "feed-svc"],
+    ["post-svc", "post-db"],
+    ["post-svc", "media"],
+    ["post-svc", "fanout-q"],
+    ["feed-svc", "feed-cache"],
+    ["feed-svc", "post-cache"],
+    ["post-cache", "post-db"],
+  ].map(([from, to]) => ({ id: `${from}>${to}`, from, to }));
+  const r = route(wires, boxes);
+  const ways = new Map<string, Set<string>>();
+  for (const w of wires) {
+    const [a, b] = r.get(w.id)!;
+    for (const [k, way] of [
+      [`${w.from}:${a}`, "out"],
+      [`${w.to}:${b}`, "in"],
+    ])
+      ways.set(k, (ways.get(k) ?? new Set()).add(way));
+  }
+  for (const [dot, w] of ways) assert.ok(w.size === 1, `${dot} runs both ways`);
+  assert.notDeepEqual(r.get("post-svc>post-db"), ["bottom", "top"]);
 });

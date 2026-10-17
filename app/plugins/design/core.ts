@@ -3,6 +3,7 @@
 
 import {
   isKind,
+  isSide,
   KINDS,
   type Brief,
   type Carries,
@@ -342,6 +343,9 @@ export function connect(
   to: unknown,
   carries: unknown = "both",
   times: unknown = 1,
+  // the dots you dragged between: kept only as a pair
+  fromSide?: unknown,
+  toSide?: unknown,
 ): Wire | null {
   const a = findComp(s, from);
   const b = findComp(s, to);
@@ -353,6 +357,7 @@ export function connect(
     to: b.id,
     carries: carriesOf(carries),
     times: num(times, 1, 10_000, 1),
+    ...(isSide(fromSide) && isSide(toSide) && { fromSide, toSide }),
   };
   s.wires.push(wire);
   return wire;

@@ -32,6 +32,7 @@ export function ExploreScreen({
           selected={selection}
           busy={live.busy}
           workingId={live.working?.nodeId ?? null}
+          panelOpen={!!one}
           onSelect={setSelection}
         />
       </ReactFlowProvider>

@@ -716,6 +716,38 @@ test("a mode switch accepts only Explore and Learn, and a Design map keeps its m
   );
 });
 
+test("switching an explored map to Learn keeps every node and thread", async () => {
+  const { engine, calls } = setup();
+  const started = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(ROOT);
+  await started;
+  const m = engine.state.map!;
+  m.nodes.deep = { ...m.nodes.pg, id: "deep", parent: "pg", kind: "fact" };
+  m.threads.t1 = {
+    id: "t1",
+    nodeId: "deep",
+    title: "Deep",
+    createdAt: 1,
+    messages: [],
+  };
+  const switched = act(engine, { type: "purpose", purpose: "learn" });
+  await settled(calls, 2);
+  // the model sets the options aside by removing them, as it used to
+  calls[1].release(
+    'Here is your path.\n```map\n{"ops":[\n{"op":"remove","id":"pg"},\n{"op":"add","id":"s1","parent":"q","kind":"question","title":"What do you store?"}\n]}\n```',
+  );
+  await switched;
+  assert.ok(m.nodes.s1, "the step is added");
+  assert.ok(m.nodes.pg && m.nodes.deep, "what you explored stays");
+  assert.equal(m.threads.t1.nodeId, "deep");
+  assert.match(calls[1].req.message, /Remove nothing/);
+});
+
 test("a second Check my design while one runs asks for no second review", async () => {
   const { engine, calls } = setup(designMap());
   const first = act(engine, design("check"));

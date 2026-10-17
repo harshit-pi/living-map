@@ -51,6 +51,8 @@ function Design({ ws }: { ws: Workspace }) {
   const [folded, setFolded] = useState<number | null>(null);
   // set from the click until the review is back, so a second click asks nothing
   const [checking, setChecking] = useState(false);
+  // the stopped check whose notice you hid (by where it is in the chat)
+  const [hidStopped, setHidStopped] = useState(-1);
   // what you just removed, with Undo (also Cmd/Ctrl+Z) for a few seconds
   const [undo, setUndo] = useState<{ what: string; at: number } | null>(null);
   useEffect(() => {
@@ -301,13 +303,27 @@ function Design({ ws }: { ws: Workspace }) {
                 Claude's review ▾
               </button>
             )}
-            {checkStopped && !showReference && (
-              <div className="pointer-events-auto max-w-[300px] rounded-lg bg-warning-soft px-3 py-1.5 text-[12.5px] text-warning-strong ring-1 ring-warning-line">
-                Your last check was stopped before Claude finished
-                {view.review ? ": the review is the one before it" : ""}. Check
-                again for a new one.
-              </div>
-            )}
+            {/* with the review open, the notice sits at its top instead */}
+            {checkStopped &&
+              hidStopped !== lastCheck &&
+              !showReference &&
+              !reviewOpen && (
+                <div className="pointer-events-auto flex max-w-[300px] items-start gap-2 rounded-lg bg-warning-soft px-3 py-1.5 text-[12.5px] text-warning-strong ring-1 ring-warning-line">
+                  <span>
+                    Your last check was stopped before Claude finished
+                    {view.review ? ": the review is the one before it" : ""}.
+                    Check again for a new one.
+                  </span>
+                  <button
+                    onClick={() => setHidStopped(lastCheck)}
+                    className="shrink-0 hover:text-ink"
+                    title="Hide this notice"
+                    aria-label="Hide this notice"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
           </div>
         </div>
 
@@ -319,6 +335,7 @@ function Design({ ws }: { ws: Workspace }) {
                 text: named(p.text, view.comps),
               }))}
               summary={named(view.review.summary, view.comps)}
+              stale={checkStopped}
               onHover={setHover}
               onFold={() => setFolded(view.review!.at)}
             />
@@ -556,11 +573,14 @@ const LEVEL: Record<ReviewPoint["level"], { mark: string; tone: string }> = {
 function ReviewCard({
   summary,
   points,
+  stale,
   onHover,
   onFold,
 }: {
   summary: string;
   points: ReviewPoint[];
+  // the last check was stopped: this review is the one before it
+  stale: boolean;
   onHover: (ids: string[]) => void;
   onFold: () => void;
 }) {
@@ -578,6 +598,12 @@ function ReviewCard({
           ▴ Fold
         </button>
       </div>
+      {stale && (
+        <div className="mt-1.5 rounded-md bg-warning-soft px-2 py-1 text-[12px] text-warning-strong ring-1 ring-warning-line">
+          Your last check was stopped before Claude finished: this is the review
+          before it. Check again for a new one.
+        </div>
+      )}
       {summary && (
         <div className="mt-1 text-[13.5px] font-medium text-ink">{summary}</div>
       )}
@@ -892,10 +918,13 @@ function NumberField({
         inputMode="numeric"
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {
-          // anything that is not a count in range snaps back
+          // past the most it takes, it takes the most; anything else that is
+          // not a count in range snaps back
           if (String(current) === text.trim()) send(current);
+          else if (Number.isFinite(typed) && typed > max) send(max);
           else setText(String(value));
         }}
+        title={`${min} to ${max.toLocaleString("en-US")}`}
         onKeyDown={(e) =>
           e.key === "Enter" && (e.target as HTMLInputElement).blur()
         }

@@ -146,7 +146,7 @@ export const design: ServerPlugin = {
     },
     connect(ctx, a): ActionResult {
       const s = state(ctx.map);
-      const w = connect(s, a.from, a.to, a.carries);
+      const w = connect(s, a.from, a.to, a.carries, 1, a.fromSide, a.toSide);
       if (!w)
         return {
           error:

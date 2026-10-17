@@ -26,94 +26,21 @@ import {
 } from "../shared.ts";
 import { fmt, GROUP_TONE, STATUS_TONE, utilText } from "./format.ts";
 import { Icon } from "./Icon.tsx";
+import { NODE_H, NODE_W, route, type At, type Box } from "./route.ts";
 
 export type Picked = { type: "comp" | "wire"; id: string } | null;
 type Act = (name: string, args: Record<string, unknown>) => void;
 
-export const NODE_W = 172;
-const NODE_H = 84;
+export { NODE_W };
 const DRAG_TYPE = "application/x-living-map-kind";
-const FIT = { padding: 0.25, maxZoom: 1 };
 // the message box covers the bottom of the canvas: new parts land above it
 export const COMPOSER_H = 96;
-
-type Side = "top" | "right" | "bottom" | "left";
-type At = { x: number; y: number };
-
-// A wire runs between the facing sides of its two parts: side to side when
-// they sit next to each other, top to bottom when one is above the other.
-// When that would draw it over another part (a second client stacked under
-// the first), it leaves by the sides that cross the fewest cards. The second of two
-// opposite wires between the same parts loops round instead, so the two can
-// be told apart.
-function sides(a: At, b: At, back: boolean, others: At[]): [Side, Side] {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const across = Math.abs(dx) - NODE_W > Math.abs(dy) - NODE_H;
-  if (back) return across ? ["bottom", "bottom"] : ["right", "right"];
-  const sideways: [Side, Side] = dx > 0 ? ["right", "left"] : ["left", "right"];
-  const upright: [Side, Side] = dy > 0 ? ["bottom", "top"] : ["top", "bottom"];
-  const [first, second] = across ? [sideways, upright] : [upright, sideways];
-  const options: [Side, Side][] = [
-    first,
-    second,
-    [first[0], second[1]],
-    [second[0], first[1]],
-  ];
-  let best = first;
-  let least = Infinity;
-  for (const o of options) {
-    const n = overlap(a, b, o, others);
-    if (n < least) [best, least] = [o, n];
-    if (n === 0) break;
-  }
-  return best;
-}
-
-const dot = (p: At, side: Side): At =>
-  side === "top"
-    ? { x: p.x + NODE_W / 2, y: p.y }
-    : side === "bottom"
-      ? { x: p.x + NODE_W / 2, y: p.y + NODE_H }
-      : side === "left"
-        ? { x: p.x, y: p.y + NODE_H / 2 }
-        : { x: p.x + NODE_W, y: p.y + NODE_H / 2 };
-
-// where React Flow puts a bezier's control point for a dot on this side
-function control(side: Side, from: At, to: At): At {
-  const off = (d: number) => (d >= 0 ? 0.5 * d : 0.25 * 25 * Math.sqrt(-d));
-  if (side === "left") return { x: from.x - off(from.x - to.x), y: from.y };
-  if (side === "right") return { x: from.x + off(to.x - from.x), y: from.y };
-  if (side === "top") return { x: from.x, y: from.y - off(from.y - to.y) };
-  return { x: from.x, y: from.y + off(to.y - from.y) };
-}
-
-// how much of the wire's curve passes over (or brushes) other parts' cards
-function overlap(a: At, b: At, [sa, sb]: [Side, Side], others: At[]) {
-  const p0 = dot(a, sa);
-  const p3 = dot(b, sb);
-  const p1 = control(sa, p0, p3);
-  const p2 = control(sb, p3, p0);
-  let n = 0;
-  for (let i = 1; i < 24; i++) {
-    const t = i / 24;
-    const u = 1 - t;
-    const k = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
-    const x = k[0] * p0.x + k[1] * p1.x + k[2] * p2.x + k[3] * p3.x;
-    const y = k[0] * p0.y + k[1] * p1.y + k[2] * p2.y + k[3] * p3.y;
-    if (
-      others.some(
-        (o) =>
-          x > o.x - 8 &&
-          x < o.x + NODE_W + 8 &&
-          y > o.y - 8 &&
-          y < o.y + NODE_H + 8,
-      )
-    )
-      n++;
-  }
-  return n;
-}
+// framed clear of the buttons and warnings along the top and of the message
+// box at the bottom, from the first view and from the Fit button alike
+const FIT = {
+  padding: { top: "72px", bottom: `${COMPOSER_H + 24}px`, x: "8%" },
+  maxZoom: 1,
+} as const;
 
 type CompData = { comp: Comp; load?: Load; flagged: boolean; ghost: boolean };
 
@@ -289,21 +216,21 @@ export function DesignCanvas({
     const wires = ref
       ? ref.wires.map((w, i) => ({ ...w, id: `ref-${i}` }))
       : view.wires;
-    const at = new Map(nodes.map((n) => [n.id, n.position]));
-    const pairs = new Set(wires.map((w) => `${w.from}>${w.to}`));
+    const boxes = new Map<string, Box>(
+      nodes.map((n) => [
+        n.id,
+        { ...n.position, w: n.measured?.width, h: n.measured?.height },
+      ]),
+    );
+    const routes = route(wires, boxes);
     return wires.map((w) => {
       const to = ref ? undefined : view.load[w.to];
       const hot = to && (to.status === "over" || to.status === "backlog");
       const color = hot ? "var(--color-danger)" : "var(--color-line-strong)";
-      const back = pairs.has(`${w.to}>${w.from}`) && w.from > w.to;
-      const [sourceHandle, targetHandle] = sides(
-        at.get(w.from) ?? { x: 0, y: 0 },
-        at.get(w.to) ?? { x: 0, y: 0 },
-        back,
-        nodes
-          .filter((n) => n.id !== w.from && n.id !== w.to)
-          .map((n) => n.position),
-      );
+      const [sourceHandle, targetHandle] = routes.get(w.id) ?? [
+        "right",
+        "left",
+      ];
       return {
         id: w.id,
         source: w.from,
@@ -497,9 +424,15 @@ export function DesignCanvas({
           onConnectEnd={() => {
             wiredAt.current = Date.now();
           }}
+          // the dots you dragged between are kept: the wire runs between them
           onConnect={(c) => {
             if (c.source && c.target)
-              act("connect", { from: c.source, to: c.target });
+              act("connect", {
+                from: c.source,
+                to: c.target,
+                fromSide: c.sourceHandle,
+                toSide: c.targetHandle,
+              });
           }}
           onNodeClick={(_, n) => {
             if (!ref && Date.now() - wiredAt.current > 300)
@@ -514,6 +447,7 @@ export function DesignCanvas({
               on the left, clear of the review on a narrow window */}
           <Controls
             showInteractive={false}
+            fitViewOptions={FIT}
             position="bottom-left"
             style={{ marginBottom: COMPOSER_H }}
           />

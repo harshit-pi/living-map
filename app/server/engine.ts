@@ -49,6 +49,7 @@ export type TurnOptions = {
   view?: View;
   // the instructions this move needs beyond the canvas's job (see prompts.ts)
   sections?: readonly Section[];
+  keep?: boolean; // may add and change nodes, never remove one
 };
 
 export type Engine = ReturnType<typeof createEngine>;
@@ -287,6 +288,7 @@ export function createEngine({
                 scope,
                 judge: opts.judge,
                 extra: opExtra,
+                keep: opts.keep,
               });
             } catch (e) {
               console.error("[move] an op could not be applied:", e);
@@ -330,6 +332,7 @@ export function createEngine({
           scope,
           judge: opts.judge,
           extra: opExtra,
+          keep: opts.keep,
         });
       // say so when some of the model's changes could not be read, rather than
       // dropping them silently
