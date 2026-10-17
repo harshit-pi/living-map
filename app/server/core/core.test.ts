@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "vitest";
 
-import { applyOps, choose, outline, pathTo } from "./canvas.ts";
+import { applyOps, choose, makeNode, outline, pathTo } from "./canvas.ts";
 import {
   accepts,
   cleanSpec,
@@ -226,7 +226,7 @@ test("outline and prompts", () => {
     lean.length < learn.length / 2,
     "a move that needs no extras sends far less",
   );
-  assert.match(systemPrompt("explore", [], explore), /EXPLORATION CANVAS/);
+  assert.match(systemPrompt("explore", [], explore), /DECISION BOARD/);
   assert.doesNotMatch(
     systemPrompt("explore", ["diagram"], explore),
     /TOPIC DIAGRAM/,
@@ -596,7 +596,7 @@ test("a grid row never names its blank's answer in the cell beside it", () => {
   ]);
 });
 
-test("a move told to keep the map removes nothing", () => {
+test("a move told to keep the map removes and rewords nothing", () => {
   const m: Canvas = {
     nodes: {
       q: { id: "q", parent: null, kind: "question", title: "Q?" } as never,
@@ -607,6 +607,14 @@ test("a move told to keep the map removes nothing", () => {
   };
   applyOps(m, [{ op: "remove", id: "o" }], { keep: true });
   assert.ok(m.nodes.o);
+  // nor rewords what is there: the other mode reads it as it was
+  applyOps(
+    m,
+    [{ op: "update", id: "o", title: "Step 4", summary: "Step 4: pick" }],
+    { keep: true },
+  );
+  assert.equal(m.nodes.o.title, "O");
+  assert.equal(m.nodes.o.summary, undefined);
   applyOps(m, [{ op: "remove", id: "o" }]);
   assert.equal(m.nodes.o, undefined);
 });
@@ -620,4 +628,100 @@ test("the same answer typed differently still matches", () => {
     !accepts({ accept: [""], why: "" }, ""),
     "an empty answer never matches",
   );
+});
+
+test("an add op makes the same node makeNode does, cleaned the same way", () => {
+  const m = fresh();
+  applyOps(m, completeOps(FULL), { now: 5 });
+  applyOps(
+    m,
+    [
+      {
+        op: "add",
+        id: "f",
+        parent: "nope",
+        kind: "weird",
+        title: "x".repeat(100),
+        status: "chosen",
+      },
+    ],
+    { now: 5 },
+  );
+  assert.deepEqual(m.nodes.f, {
+    id: "f",
+    parent: "q",
+    kind: "fact",
+    title: "x".repeat(80),
+    summary: "",
+    detail: "",
+    status: "info",
+    by: "claude",
+    updatedAt: 5,
+    order: 2,
+    fresh: true,
+  });
+  const nodes = structuredClone(m.nodes);
+  delete nodes.f;
+  assert.deepEqual(
+    makeNode(
+      nodes,
+      {
+        id: "f",
+        parent: "nope",
+        kind: "weird",
+        title: "x".repeat(100),
+        status: "chosen",
+      },
+      5,
+    ),
+    m.nodes.f,
+  );
+  assert.equal(
+    makeNode(nodes, { id: "y", kind: "option", by: "you" }).by,
+    "you",
+    "a plugin may make a node of yours",
+  );
+});
+
+test("keepYours keeps the model off your nodes; without it nothing changes", () => {
+  const m = fresh();
+  applyOps(m, completeOps(FULL));
+  choose(m.nodes, "pg");
+  m.nodes.f = { ...m.nodes.pg, id: "f", parent: "q", kind: "fact" };
+  const ops = [
+    { op: "update", id: "pg", summary: "Rewritten", status: "dropped" },
+    { op: "add", id: "pg", title: "Hijacked" },
+    { op: "remove", id: "pg" },
+    { op: "update", id: "q", summary: "Claude's own" },
+  ];
+  assert.equal(applyOps(m, ops, { keepYours: true }), 1);
+  assert.equal(m.nodes.pg.title, "Postgres");
+  assert.equal(m.nodes.pg.status, "chosen");
+  assert.equal(
+    m.nodes.q.summary,
+    "Claude's own",
+    "Claude's nodes still change",
+  );
+  applyOps(m, [{ op: "update", id: "pg", title: "X", detail: "Why it fits" }], {
+    keepYours: true,
+  });
+  assert.equal(m.nodes.pg.detail, "Why it fits", "Explain still reaches it");
+  assert.equal(m.nodes.pg.title, "Postgres");
+  applyOps(m, ops.slice(0, 1));
+  assert.equal(
+    m.nodes.pg.summary,
+    "Rewritten",
+    "off by default (Learn, Design)",
+  );
+});
+
+test("a move op with no step goes to the plugin, and is ignored without one", () => {
+  const m = fresh();
+  applyOps(m, completeOps(FULL));
+  const seen: unknown[] = [];
+  const move = { op: "move", id: "pg", parent: "q" };
+  assert.equal(applyOps(m, [move], { extra: (op) => (seen.push(op), 1) }), 1);
+  assert.deepEqual(seen, [move]);
+  assert.equal(applyOps(m, [{ ...move, title: "Changed" }]), 0);
+  assert.equal(m.nodes.pg.title, "Postgres", "not read as an update");
 });

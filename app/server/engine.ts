@@ -50,7 +50,16 @@ export type TurnOptions = {
   // the instructions this move needs beyond the canvas's job (see prompts.ts)
   sections?: readonly Section[];
   keep?: boolean; // may add and change nodes, never remove one
+  // what the working bar says once the move's ops show what it is doing
+  // (null: keep the label): the first move's label is a guess from the
+  // question's words until the model frames it
+  relabel?: (m: StoredMap) => string | null;
 };
+
+// where a change a side thread may not make can be asked for: a move on the
+// whole map is scoped to no node
+const ELSEWHERE =
+  "To have them made, ask in the main message box, with nothing selected.";
 
 export type Engine = ReturnType<typeof createEngine>;
 
@@ -223,8 +232,15 @@ export function createEngine({
     const scope = thread?.nodeId ?? null;
     // ops core does not know go to the map's plugin
     const plugin = pluginFor(m.purpose);
+    // a side thread may change only what its node allows: an op the plugin
+    // refused there is said under the reply, which may still name it as made
+    let refused = 0;
     const opExtra = plugin?.applyOp
-      ? (op: Raw) => plugin.applyOp!(m, op, { scope })
+      ? (op: Raw) => {
+          const n = plugin.applyOp!(m, op, { scope });
+          if (n === 0 && scope) refused++;
+          return n;
+        }
       : undefined;
     state.busy = true;
     stopped = false;
@@ -289,11 +305,14 @@ export function createEngine({
                 judge: opts.judge,
                 extra: opExtra,
                 keep: opts.keep,
+                keepYours: plugin?.keepUserNodes,
               });
             } catch (e) {
               console.error("[move] an op could not be applied:", e);
             }
             applied = ops.length;
+            const label = opts.relabel?.(m);
+            if (label && state.working) state.working.label = label;
             const now = Date.now();
             if (now - lastPush > 120) {
               lastPush = now;
@@ -333,6 +352,7 @@ export function createEngine({
           judge: opts.judge,
           extra: opExtra,
           keep: opts.keep,
+          keepYours: plugin?.keepUserNodes,
         });
       // say so when some of the model's changes could not be read, rather than
       // dropping them silently
@@ -358,6 +378,17 @@ export function createEngine({
         ...(opts.blankId ? { blankId: opts.blankId } : {}),
         ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
       });
+      // it says how to have them made: told only that they were not, you
+      // were left with a reply naming changes the map did not show
+      if (refused)
+        messages.push({
+          role: "system",
+          text:
+            refused === 1
+              ? `1 of Claude's changes was not made: it reaches past what this side thread may change. ${ELSEWHERE}`
+              : `${refused} of Claude's changes were not made: they reach past what this side thread may change. ${ELSEWHERE}`,
+          ts: Date.now(),
+        });
       void reply.usage.then((u) =>
         recordUsage(m, u, reply.firstMs, reply.endMs),
       );

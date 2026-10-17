@@ -1,6 +1,6 @@
 # Living Map
 
-A local web app that drives a model (your own Claude Code by default) from a visual canvas. **Explore**: a question as a tree of options and facts. **Learn**: any subject as a path of steps, a topic diagram with blanks you fill, and steps you play by hand.
+A local web app that drives a model (your own Claude Code by default) from a visual canvas. **Explore**: a question as a decision board of options against what you want, with a tree view. **Learn**: any subject as a path of steps, a topic diagram with blanks you fill, and steps you play by hand.
 
 The app lives in `app/`; run every npm command there.
 
@@ -43,6 +43,7 @@ For a UI change, also run `npm start` and try it in the browser: Explore and Lea
 - `app/web/`: `App.tsx` is the shell; `screens/` (Start, Loading, Learn), `components/`, `hooks/`, `lib/` (live connection, API client, storage, step navigation).
 - `app/eval/forms.ts`: the diagram-fit eval, through the same provider.
 - Plugins add a mode of their own (Design is the first). The contract is `app/server/plugin.ts` and `app/web/plugin.ts`; the registries are `app/server/plugins.ts` and `app/web/plugins.ts`. Explore and Design are plugins; Learn is still built in. A plugin can name modes it switches with (`switchesWith`: Explore and Learn share one map) and add header controls (`Header`). A plugin lives in `app/plugins/<id>/`: `shared.ts` (types both sides use), `core.ts` (pure logic, tested), `server.ts` (prompt, ops, actions, browser view), `web/` (its screen). Its state is `map.data[<id>]`.
+- Explore's board keeps its options, questions and wants as ordinary nodes (a want is a fact), so Learn and the Tree still read them; everything else (rows, cells, the stand, commits) is `map.data.explore`. `reconcile` in `app/plugins/explore/core.ts` prunes it against the nodes; `view` and `outline` run it on a copy, so opening a map writes nothing.
 
 ## Releases
 

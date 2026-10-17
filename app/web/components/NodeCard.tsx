@@ -9,10 +9,12 @@ export type CardData = {
   purpose: Purpose;
   threads: number;
   working: boolean;
+  // a plugin's own word for the card's kind (Explore's "possible cause")
+  tag?: string;
 };
 
 export function NodeCard({ data, selected }: NodeProps) {
-  const { node: n, purpose, threads, working } = data as CardData;
+  const { node: n, purpose, threads, working, tag } = data as CardData;
   const l = lookOf(n, purpose);
   const recommended = n.summary.startsWith("Recommended:");
   const gone = n.dropped || n.status === "dropped";
@@ -26,7 +28,7 @@ export function NodeCard({ data, selected }: NodeProps) {
         <span
           className={`text-[10px] font-semibold uppercase tracking-wide ${l.tagCls}`}
         >
-          {l.tag}
+          {tag ?? l.tag}
         </span>
         <span className="flex items-center gap-1">
           {recommended && !gone && (
@@ -42,7 +44,7 @@ export function NodeCard({ data, selected }: NodeProps) {
           {threads > 0 && (
             <span
               className="rounded-full bg-panel px-1.5 text-[10px] text-muted ring-1 ring-line"
-              title="Side threads"
+              title="Messages in its side threads"
             >
               💬 {threads}
             </span>

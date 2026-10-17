@@ -105,7 +105,9 @@ export function listMaps(currentId: string | null): MapSummary[] {
         ? steps.length - done
         : steps.filter((n) => n.status === "open").length,
       done,
-      form: m.diagram?.form ?? null,
+      // the topic diagram's form is Learn's word: a map Learn once opened
+      // keeps its diagram, and an Explore row read "· grid"
+      form: learn ? (m.diagram?.form ?? null) : null,
       current: m.id === currentId,
       ...(summary ? { summary } : {}),
     });

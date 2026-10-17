@@ -105,8 +105,8 @@ test("a move streams the model reply onto the canvas, through the provider only"
     purpose: "explore",
   });
   await settled(calls, 1);
-  assert.match(calls[0].req.system, /EXPLORATION CANVAS/);
-  assert.match(calls[0].req.message, /ACTION: start/);
+  assert.match(calls[0].req.system, /DECISION BOARD/);
+  assert.match(calls[0].req.message, /ACTION: START EXPLORE/);
   calls[0].release(ROOT);
   await done;
   const m = engine.state.map;
@@ -115,6 +115,38 @@ test("a move streams the model reply onto the canvas, through the provider only"
   assert.equal(m.chat.at(-1)?.text, "Laid out.");
   await tick();
   assert.equal(m.usage.turns, 1, "usage recorded when the provider reports it");
+});
+
+test("the first move's label follows the shape Claude frames, not the question's first word", async () => {
+  const { engine, calls, events } = setup();
+  const done = act(engine, {
+    type: "new",
+    text: "What happened to our AWS costs last month?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  assert.equal(engine.state.working?.label, "Laying out the board");
+  calls[0].release(
+    'Laid out.\n```map\n{"ops":[\n{"op":"add","id":"q","parent":null,"kind":"question","title":"What could explain it?"},\n{"op":"add","id":"c1","parent":"q","kind":"option","title":"Orphaned volumes"},\n{"op":"frame","q":"q","shape":"causes"}\n]}\n```',
+  );
+  await done;
+  const labels = events.flatMap((e) =>
+    e.type === "map" && e.working ? [e.working.label] : [],
+  );
+  assert.equal(labels.at(-1), "Laying out the causes");
+});
+
+test("a question worded as asking for causes is laid out as causes from the start", async () => {
+  const { engine, calls } = setup();
+  const done = act(engine, {
+    type: "new",
+    text: "What could explain a sudden rise in AWS costs?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  assert.equal(engine.state.working?.label, "Laying out the causes");
+  calls[0].release(ROOT);
+  await done;
 });
 
 test("moves asked while the model is busy wait their turn instead of being refused", async () => {
@@ -917,4 +949,114 @@ test("Undo on a Design map puts back a removed wire", async () => {
       .error ?? "",
     /already wired/,
   );
+});
+
+test("a plugin answers the core actions it names its own way; others go to core", async () => {
+  // Explore: Choose records the choice on its board and asks for a pre-mortem
+  const { engine, calls } = setup();
+  const started = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(
+    'Laid out.\n```map\n{"ops":[\n{"op":"add","id":"q","parent":null,"kind":"question","title":"Which DB?"},\n{"op":"add","id":"pg","parent":"q","kind":"option","title":"Postgres"},\n{"op":"add","id":"keep","parent":"q","kind":"option","title":"Keep the current DB"},\n{"op":"frame","q":"q","shape":"choose","keepAsIs":"keep"},\n{"op":"want","q":"q","id":"w-cost","title":"Cost","weight":"must"}\n]}\n```',
+  );
+  await started;
+  const m = engine.state.map!;
+  const board = () =>
+    (m.data?.explore as { boards: Record<string, Record<string, unknown>> })
+      .boards.q;
+  assert.equal(board().keepAsIs, "keep");
+  const chose = act(engine, { type: "choose", nodeId: "pg" });
+  await settled(calls, 2);
+  assert.match(calls[1].req.message, /ACTION: WRAP: \[pg\]/);
+  assert.match(calls[1].req.system, /premortem/);
+  // the model may not rewrite what you chose
+  calls[1].release(
+    'Done.\n```map\n{"ops":[{"op":"update","id":"pg","title":"Mongo","status":"dropped"},{"op":"premortem","option":"pg","reasons":["Joins get slow"]}]}\n```',
+  );
+  await chose;
+  assert.equal(m.nodes.pg.title, "Postgres");
+  assert.equal(m.nodes.pg.status, "chosen");
+  assert.deepEqual(
+    (board().commit as { premortem: { claude: string[] } }).premortem.claude,
+    ["Joins get slow"],
+  );
+  // the selection a message names reaches the plugin, cleaned
+  const asked = act(engine, {
+    type: "message",
+    text: "Where does it stand?",
+    selection: ["pg", "__proto__", 7 as never],
+  });
+  await settled(calls, 3);
+  assert.match(calls[2].req.message, /SELECTED NODES: \[pg\] Postgres$/m);
+  assert.match(calls[2].req.message, /write a stand op/);
+  calls[2].release("Postgres.");
+  await asked;
+
+  // Design: its message action gets the text; its Choose is core's
+  const d = setup(designMap());
+  const dm = d.engine.state.map!;
+  dm.nodes.root = { ...m.nodes.q, id: "root" };
+  dm.nodes.o1 = { ...m.nodes.keep, id: "o1", parent: "root" };
+  dm.nodes.o2 = { ...m.nodes.keep, id: "o2", parent: "root" };
+  assert.deepEqual(await act(d.engine, { type: "choose", nodeId: "o1" }), {});
+  assert.equal(dm.nodes.o2.status, "dropped");
+  assert.equal(dm.data?.explore, undefined, "no board state on a Design map");
+  const said = act(d.engine, {
+    type: "message",
+    text: "Is the cache right?",
+    selection: [],
+  });
+  await settled(d.calls, 1);
+  assert.match(d.calls[0].req.message, /USER SAYS: Is the cache right\?/);
+  d.calls[0].release("Mostly.");
+  await said;
+});
+
+test("an empty message is refused before it costs a move", async () => {
+  const { engine, calls } = setup(newMap("Rust lifetimes", "learn"));
+  for (const text of ["", "   ", 123 as unknown as string])
+    assert.match(
+      (await act(engine, { type: "message", text, selection: [] })).error ?? "",
+      /Say something/,
+    );
+  await tick();
+  assert.equal(calls.length, 0);
+  assert.deepEqual(engine.state.map?.chat, []);
+});
+
+test("a side thread's reply says which of its changes the thread could not make", async () => {
+  const { engine, calls } = setup();
+  const started = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(
+    'Laid out.\n```map\n{"ops":[\n{"op":"add","id":"q","parent":null,"kind":"question","title":"Which DB?"},\n{"op":"add","id":"pg","parent":"q","kind":"option","title":"Postgres"},\n{"op":"add","id":"keep","parent":"q","kind":"option","title":"Keep the current DB"},\n{"op":"frame","q":"q","shape":"choose","keepAsIs":"keep"}\n]}\n```',
+  );
+  await started;
+  const m = engine.state.map!;
+  const asked = act(engine, {
+    type: "thread",
+    nodeId: "pg",
+    text: "We already run Postgres",
+  });
+  await settled(calls, 2);
+  // keep-as-is's case against is not this thread's to write; the stand is
+  calls[1].release(
+    'Noted; I changed keep as is too.\n```map\n{"ops":[{"op":"against","option":"keep","text":"Old"},{"op":"stand","q":"q","lead":null,"line":"Open"}]}\n```',
+  );
+  await asked;
+  const thread = Object.values(m.threads).find((t) => t.nodeId === "pg")!;
+  assert.equal(thread.messages.at(-2)?.role, "claude");
+  assert.deepEqual(thread.messages.at(-1), {
+    role: "system",
+    text: "1 of Claude's changes was not made: it reaches past what this side thread may change. To have them made, ask in the main message box, with nothing selected.",
+    ts: thread.messages.at(-1)!.ts,
+  });
 });

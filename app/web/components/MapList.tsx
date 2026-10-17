@@ -70,14 +70,25 @@ export function MapsMenu({ onOpen }: { onOpen: (id: string) => void }) {
     const close = (e: MouseEvent) => {
       if (!box.current?.contains(e.target as Node)) setOpen(false);
     };
+    // Esc closes the menu, as it does a popover: heard first and kept from
+    // the app's own Esc, which would also close the panel under it
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+    };
     window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey, true);
+    };
   }, [open]);
   return (
     <div ref={box} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
+        className="whitespace-nowrap rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
       >
         Maps ▾
       </button>

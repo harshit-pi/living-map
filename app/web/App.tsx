@@ -151,7 +151,9 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-canvas">
-      <header className="grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_auto] items-center gap-3 border-b border-line px-4 py-2">
+      {/* the title keeps some room while the working pill shows: the pill
+          truncates first */}
+      <header className="grid grid-cols-[minmax(min(160px,20%),1fr)_minmax(0,auto)_auto] items-center gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Mark size={22} className="shrink-0" />
           <div className="truncate text-[15px] font-semibold text-ink">

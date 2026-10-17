@@ -187,8 +187,11 @@ export function message(
   ctx: Ctx,
   text: string,
   selection: string[],
-): Promise<ActionResult> {
-  ctx.say(String(text ?? ""));
+): Promise<ActionResult> | ActionResult {
+  // an empty message would still be a whole (paid) move
+  if (typeof text !== "string" || !text.trim())
+    return { error: "Say something first." };
+  ctx.say(text);
   return ctx.engine.turn(
     "the user typed in the main conversation (selected nodes, if any, are its context).",
     ctx.settings,
