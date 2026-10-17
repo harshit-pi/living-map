@@ -844,13 +844,15 @@ test("Next takes the first gap, rule by rule", () => {
   nodes.keep.dropped = true;
   assert.equal(gap().kind, "something");
   delete nodes.keep.dropped;
-  // 3: an empty must, the lead's column first
+  // 3: a must still a guess or empty, the lead's column first (Claude
+  // leads only an option it has judged on every must, so a guess there)
+  op({ op: "cell", option: "dyn", want: "w-cost", mark: "better" });
   op({ op: "stand", q: "q", lead: "dyn", line: "x" });
   let g = gap();
   assert.equal(g.kind, "ask");
   assert.equal(g.option, "dyn");
   assert.equal(g.want, "w-cost");
-  assert.equal(g.reason, "a must, still empty");
+  assert.equal(g.reason, "a must, only a guess");
   op({
     op: "cell",
     option: "dyn",
@@ -858,6 +860,9 @@ test("Next takes the first gap, rule by rule", () => {
     mark: "better",
     facts: ["f-pg"],
   });
+  g = gap();
+  assert.equal(g.option, "pg");
+  assert.equal(g.reason, "a must, still empty");
   op({ op: "cell", option: "pg", want: "w-cost", mark: "better" });
   g = gap();
   assert.equal(g.option, "pg");
@@ -1583,6 +1588,12 @@ test("after you choose, Claude's lead stays its own until the board changes", as
   const m = storedMap(boardNodes());
   m.data = { explore: withWants(m.nodes).s };
   applyExploreOp(live(m), m.nodes, {
+    op: "cell",
+    option: "dyn",
+    want: "w-cost",
+    mark: "same",
+  });
+  applyExploreOp(live(m), m.nodes, {
     op: "stand",
     q: "q",
     lead: "dyn",
@@ -1783,6 +1794,12 @@ test("the open list names the board of a lead with no case against", () => {
     op: "against",
     option: "h1",
     text: "costly",
+  });
+  applyExploreOp(s, map.nodes, {
+    op: "cell",
+    option: "pg",
+    want: "w-cost",
+    mark: "same",
   });
   applyExploreOp(s, map.nodes, { op: "stand", q: "q", lead: "pg", line: "x" });
   assert.equal(item()?.label, "no case against the lead");
@@ -2634,4 +2651,269 @@ test("a column counts the messages in its threads, as its panel does", () => {
     (c) => c.id === "pg",
   );
   assert.equal(col?.threads, 4);
+});
+
+// ---------------------------------------------------------------- round 8
+
+// An auth choice after a Fill: Claude can't tell keep-as-is and DynamoDB on
+// the cost must, checked in their threads; Postgres, its lead, is a guess.
+function toldBoard() {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  const cell = (option: string, want: string, o: Raw, scope?: string) =>
+    applyExploreOp(
+      s,
+      nodes,
+      { op: "cell", option, want, ...o },
+      { now: 60, ...(scope ? { scope } : {}) },
+    );
+  for (const o of ["keep", "pg", "dyn"])
+    cell(o, "w-speed", { mark: "same", facts: ["f-pg"] });
+  cell("keep", "w-cost", { mark: "unknown", facts: ["f-pg"] }, "keep");
+  cell("dyn", "w-cost", { mark: "unknown", facts: ["f-pg"] }, "dyn");
+  cell("pg", "w-cost", { mark: "same" });
+  applyExploreOp(s, nodes, { op: "stand", q: "q", lead: "pg", line: "x" });
+  return { map, s, nodes };
+}
+
+test("once you told a want's thread what you know, Next moves on from 'Say what you know'", () => {
+  const { s, nodes } = toldBoard();
+  let g = nextGap(s, nodes, "q");
+  assert.equal(g.kind, "tell");
+  assert.equal(g.label, "Say what you know: w-cost");
+  // you tell the want's thread; Claude files it under the want and judges
+  // the row on it, and still can't tell DynamoDB
+  nodes["f-mine"] = node("f-mine", "w-cost", "fact", "Current login", {
+    updatedAt: 70,
+    order: 60,
+  });
+  applyExploreOp(
+    s,
+    nodes,
+    {
+      op: "cell",
+      option: "dyn",
+      want: "w-cost",
+      mark: "unknown",
+      facts: ["f-mine"],
+    },
+    { scope: "w-cost", now: 70 },
+  );
+  assert.equal(s.boards.q.rows[0].told, 70);
+  g = nextGap(s, nodes, "q");
+  assert.deepEqual(
+    [g.kind, g.option, g.want, g.reason],
+    ["ask", "pg", "w-cost", "a must, only a guess"],
+    "the lead's guess, which a move can settle",
+  );
+  // the Ask on it ends "can't tell" too: Next still does not send you back
+  applyExploreOp(
+    s,
+    nodes,
+    {
+      op: "cell",
+      option: "pg",
+      want: "w-cost",
+      mark: "unknown",
+      facts: ["f-pg"],
+    },
+    { scope: "pg", now: 80 },
+  );
+  g = nextGap(s, nodes, "q");
+  assert.notEqual(g.kind, "tell");
+  assert.equal(g.kind, "against");
+});
+
+test("a want's thread may write another want's cell only when it cites a fact filed under the want", () => {
+  const { s, nodes } = toldBoard();
+  nodes["f-mine"] = node("f-mine", "w-cost", "fact", "Current login", {
+    order: 60,
+  });
+  const other = { op: "cell", option: "keep", want: "w-speed", mark: "worse" };
+  assert.equal(applyExploreOp(s, nodes, other, { scope: "w-cost" }), 0);
+  assert.equal(
+    applyExploreOp(
+      s,
+      nodes,
+      { ...other, facts: ["f-mine"] },
+      { scope: "w-cost" },
+    ),
+    1,
+  );
+  assert.equal(s.boards.q.cells["keep|w-speed"].claude?.mark, "worse");
+  // only the thread's own row counts as told
+  assert.equal(s.boards.q.rows[1].told, undefined);
+});
+
+test("Claude leads only an option it has judged itself on every must", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  // your rating is yours, not Claude's evidence
+  s.boards.q.cells["pg|w-cost"] = {
+    you: { mark: "better", note: "", facts: [], sure: "high", at: 1 },
+  };
+  applyExploreOp(s, nodes, {
+    op: "stand",
+    q: "q",
+    lead: "pg",
+    line: "Only option rated on cost",
+    sure: 45,
+  });
+  assert.equal(s.stand.q.lead, null);
+  assert.equal(s.stand.q.sure, undefined);
+  assert.equal(s.stand.q.line, "Only option rated on cost");
+  applyExploreOp(s, nodes, {
+    op: "cell",
+    option: "pg",
+    want: "w-cost",
+    mark: "same",
+    facts: ["f-pg"],
+  });
+  applyExploreOp(s, nodes, {
+    op: "stand",
+    q: "q",
+    lead: "pg",
+    line: "Fits",
+    sure: 60,
+  });
+  assert.deepEqual([s.stand.q.lead, s.stand.q.sure], ["pg", 60]);
+});
+
+test("a must on your choice that turned 'can't tell' stays open", () => {
+  const { s, nodes } = toldBoard();
+  nodes.pg.status = "chosen";
+  nodes.keep.status = "dropped";
+  nodes.dyn.status = "dropped";
+  s.boards.q.commit = {
+    option: "pg",
+    why: "",
+    at: 90,
+    premortem: { claude: [] },
+  };
+  const unsure = () =>
+    openItems(s, nodes).find((o) => o.kind === "chosen-unsure")?.label;
+  assert.equal(unsure(), "1 must unsure on your choice", "a guess");
+  applyExploreOp(
+    s,
+    nodes,
+    {
+      op: "cell",
+      option: "pg",
+      want: "w-cost",
+      mark: "unknown",
+      note: "Meets only once MFA is on",
+      facts: ["f-pg"],
+    },
+    { scope: "pg", now: 100 },
+  );
+  assert.equal(unsure(), "1 must unsure on your choice", "now can't tell");
+});
+
+test("Next on a must that waits on a check names the check it opens", () => {
+  const { s, nodes } = budgetBoard();
+  const g = nextGap(s, nodes, "q");
+  assert.equal(g.kind, "tell");
+  assert.equal(g.check, "k-budget");
+});
+
+// a cause list whose deciding check Claude picked, then you ran
+function checkedCauses() {
+  const nodes: Nodes = Object.fromEntries(
+    [
+      node("root", null, "question", "Why do tickets take twice as long?"),
+      node("c-proc", "root", "option", "Process or tool change"),
+      node("c-meas", "root", "option", "Measurement changed"),
+      node("k-split", "root", "fact", "Split time by stage", {
+        summary: "Where the time goes",
+        updatedAt: 10,
+      }),
+      node("k-review", "root", "fact", "Time in pending review", {
+        summary: "To check: hours per ticket in pending internal review",
+        updatedAt: 10,
+      }),
+      node("f-other", "root", "fact", "Volume is flat", { updatedAt: 10 }),
+    ].map((n, i) => [n.id, { ...n, order: i }]),
+  );
+  const map = { nodes, data: {} as Record<string, unknown> };
+  const s = live(map);
+  applyExploreOp(
+    s,
+    nodes,
+    { op: "takeaway", node: "k-split", text: "Run first: splits the causes" },
+    { now: 20 },
+  );
+  return { map, s, nodes };
+}
+
+test("a check whose result is written in is a fact: no RUN FIRST, and Next moves on", () => {
+  const { s, nodes } = checkedCauses();
+  assert.ok(isCheck(nodes["k-split"]), "an instruction for a title");
+  assert.equal(nextGap(s, nodes).kind, "run");
+  // you report the result in its thread; Claude writes it in
+  nodes["k-split"].summary = "Found: the gap between touches tripled";
+  nodes["k-split"].updatedAt = 30;
+  applyExploreOp(
+    s,
+    nodes,
+    { op: "stand", q: "root", lead: "c-proc", line: "Waiting", sure: 85 },
+    { scope: "k-split", now: 31 },
+  );
+  assert.ok(!isCheck(nodes["k-split"]));
+  const v = viewOf(s, nodes, {});
+  assert.equal(v.questions.find((p) => p.id === "root")?.runFirst, undefined);
+  const g = nextGap(s, nodes);
+  assert.notEqual(g.kind, "run");
+  assert.match(g.reason, /^1 check on the map/);
+  // the thread names the next check to run: it may pick it there
+  assert.equal(
+    applyExploreOp(
+      s,
+      nodes,
+      { op: "takeaway", node: "k-review", text: "Run first: is it review?" },
+      { scope: "k-split", now: 32 },
+    ),
+    1,
+  );
+  assert.deepEqual(
+    [nextGap(s, nodes).kind, nextGap(s, nodes).option],
+    ["run", "k-review"],
+  );
+  // never a fact that is no check
+  assert.equal(
+    applyExploreOp(
+      s,
+      nodes,
+      { op: "takeaway", node: "f-other", text: "x" },
+      { scope: "k-split" },
+    ),
+    0,
+  );
+});
+
+test("a sub-choice under a middle cause is laid narrower, so the causes after it stay on the first row", () => {
+  // QA round 8: the fix sub-choice grew under 'Process or tool change', and
+  // 'Measurement changed', after it, wrapped below the frame
+  const list = awsTree();
+  list.push(
+    node("k-root", "root", "fact", "To check: where the time goes", {
+      order: 1,
+    }),
+    // a check on the sub-choice itself, which took a column beside its
+    // options however narrow it was laid
+    node("k-fix", "q-fix", "fact", "To check: why review exists", {
+      order: 400,
+    }),
+  );
+  const t = treeLayout(list, { maxW: WIDE, heightOf: () => H });
+  for (const id of ["c0", "c1", "c2", "c3", "c4", "k-root"])
+    assert.equal(t.boxes[id].y, t.boxes.c0.y, `${id} on the first row`);
+  // the sub-choice's check sits under its options, its line down the left
+  assert.ok(t.boxes["k-fix"].y > t.boxes.fix3.y);
+  const e = t.edges.find((x) => x.target === "k-fix");
+  assert.equal(e?.kind, "stack");
+  assert.ok(e!.spine! < t.boxes["q-fix"].x);
+  const right = Math.max(...Object.values(t.boxes).map((b) => b.x + b.w));
+  const left = Math.min(...Object.values(t.boxes).map((b) => b.x));
+  assert.ok(right - left <= WIDE + 1, "within the room at a readable zoom");
+  overlapFree(t.boxes);
 });

@@ -625,7 +625,12 @@ function Strip({
       title={`${col.title}: fails a must (${fails.join(", ") || "a must"})`}
       className="flex h-full w-full items-start justify-center py-2 text-[12px] text-muted opacity-70 hover:text-ink"
     >
-      <span className="[writing-mode:vertical-rl]">{col.title} ✕</span>
+      {/* a long name is cut short down the strip (the title has it
+          whole): written out in full, it made the sticky header row as
+          tall as the name and buried the rows under it */}
+      <span className="max-h-36 overflow-hidden text-ellipsis whitespace-nowrap [writing-mode:vertical-rl]">
+        ✕ {col.title}
+      </span>
     </button>
   );
 }

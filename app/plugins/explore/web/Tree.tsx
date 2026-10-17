@@ -375,6 +375,11 @@ export function Tree({
   // you see, where it was before the change), so it stays where it was on
   // screen.
   const lastAt = useRef<Map<string, { x: number; y: number }> | null>(null);
+  // the card the camera followed last: kept while it is on both layouts, so
+  // a change and its undoing (hiding the set-aside cards and showing them
+  // again) follow the same card and cancel out. Picked afresh each time, the
+  // two picks differed and the round trip left the tree 119px off.
+  const anchor = useRef<string | null>(null);
   useLayoutEffect(() => {
     const now = new Map(laid.nodes.map((n) => [n.id, n.position]));
     const was = lastAt.current;
@@ -382,7 +387,17 @@ export function Tree({
     if (growing || !was) return;
     const both = (id: string) => was.has(id) && now.has(id);
     const v = getViewport();
-    let id = selected.find(both);
+    // still in view: one you panned away from is no card you are reading
+    const inView = (k: string) => {
+      const p = was.get(k)!;
+      const sx = p.x * v.zoom + v.x;
+      const sy = p.y * v.zoom + v.y;
+      return sx >= 0 && sx <= width && sy >= 0 && sy <= height;
+    };
+    const last = anchor.current;
+    let id =
+      selected.find(both) ??
+      (last && both(last) && inView(last) ? last : undefined);
     if (!id) {
       const cx = (width / 2 - v.x) / v.zoom;
       const cy = (Math.max(height - FRAME.bottom, 200) / 2 - v.y) / v.zoom;
@@ -398,6 +413,7 @@ export function Tree({
         }
       }
     }
+    anchor.current = id ?? null;
     const a = id ? was.get(id) : undefined;
     const b = id ? now.get(id) : undefined;
     if (a && b && (a.x !== b.x || a.y !== b.y))
@@ -407,6 +423,38 @@ export function Tree({
         zoom: v.zoom,
       });
   }, [laid, selected, growing, width, height, sizes, getViewport, setViewport]);
+  // A card opened from elsewhere (Next, a link in a panel) or clicked where
+  // the panel then covers it: the camera brings it into the room beside the
+  // panel, at the zoom you had. Next opened a check whose card stayed under
+  // the panel, so you could not see which card it was or where it sat.
+  const one = selected.length === 1 ? selected[0] : null;
+  const reveal = useEffectEvent((id: string) => {
+    const box = tree.boxes[id];
+    if (!box) return;
+    const v = getViewport();
+    const room = roomOf(framing.current);
+    const x = box.x * v.zoom + v.x;
+    const y = box.y * v.zoom + v.y;
+    const w = box.w * v.zoom;
+    const h = Math.min(box.h * v.zoom, room.h);
+    const inX = x >= room.left && x + w <= room.left + room.w;
+    const inY = y >= room.top && y + h <= room.top + room.h;
+    if (inX && inY) return;
+    void setViewport(
+      {
+        x: inX ? v.x : room.left + (room.w - w) / 2 - box.x * v.zoom,
+        y: inY ? v.y : room.top + (room.h - h) / 3 - box.y * v.zoom,
+        zoom: v.zoom,
+      },
+      { duration: 300 },
+    );
+  });
+  useEffect(() => {
+    if (!one || !panelOpen) return;
+    // after the layout and the follow above have moved the camera
+    const raf = requestAnimationFrame(() => reveal(one));
+    return () => cancelAnimationFrame(raf);
+  }, [one, panelOpen]);
   const fresh = laid.nodes.filter((n) => !seen.has(n.id)).map((n) => n.id);
   const showNew = () => {
     const ids = new Set(fresh);

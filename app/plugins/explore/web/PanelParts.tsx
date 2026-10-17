@@ -419,7 +419,52 @@ function AgainstLines({ col }: { col: ColumnView }) {
   );
 }
 
+// Next sent you here for what only you know: said where you answer it, and
+// which cell it is about. The want panel opened bare, with the ask only in
+// Next's hover title.
+function TellHint({ here, node }: { here: Here; node: MapNode }) {
+  const { view } = here;
+  const nodes = here.ws.map.nodes;
+  const gap = [
+    view.next,
+    ...Object.values(view.boards).map((b) => b.next),
+  ].find((g) => g.kind === "tell" && (g.check ?? g.want) === node.id);
+  if (!gap) return null;
+  const option = gap.option ? nodes[gap.option]?.title : undefined;
+  const want = gap.want ? nodes[gap.want]?.title : undefined;
+  const cell =
+    gap.option && gap.want
+      ? view.boards[gap.q]?.cells[cellKey(gap.option, gap.want)]
+      : undefined;
+  return (
+    <div className={box}>
+      <div className={label}>Claude needs you here</div>
+      <div className="text-ink">
+        {gap.check
+          ? `${gap.label}: say what you found in the thread below.`
+          : `Claude can't tell “${option ?? "an option"}” on “${want ?? "this must"}” without you.`}
+      </div>
+      {cell?.note && <div className="text-body">Claude: “{cell.note}”</div>}
+      {!gap.check && (
+        <div className="mt-0.5 text-muted">
+          Tell the thread below what you know (your setup, your numbers), or
+          rate that cell yourself on the board.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PanelExtra({ here, node }: { here: Here; node: MapNode }) {
+  return (
+    <>
+      <TellHint here={here} node={node} />
+      <PanelLines here={here} node={node} />
+    </>
+  );
+}
+
+function PanelLines({ here, node }: { here: Here; node: MapNode }) {
   const { view } = here;
   const nodes = here.ws.map.nodes;
   if (node.kind === "option") {

@@ -132,11 +132,13 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
             return;
           }
           // a must only you can settle: Next opens its want, whose thread
-          // writes the whole row once you say what you know
-          if (gap?.kind === "tell" && gap.want) {
+          // writes the whole row once you say what you know; when the cells
+          // wait on a check still to run, the check it names, where you
+          // answer it
+          if (gap?.kind === "tell" && (gap.check || gap.want)) {
             if (view?.boards[gap.q]?.shape === "choose" && gap.q !== board)
               place.openBoard(gap.q);
-            ws.setSelection([gap.want]);
+            ws.setSelection([gap.check ?? gap.want!]);
             return;
           }
           // a choice with its own board: Next opens it, as its chip does,

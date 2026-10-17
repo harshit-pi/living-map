@@ -227,8 +227,15 @@ export function createEngine({
     const scope = thread?.nodeId ?? null;
     // ops core does not know go to the map's plugin
     const plugin = pluginFor(m.purpose);
+    // a side thread may change only what its node allows: an op the plugin
+    // refused there is said under the reply, which may still name it as made
+    let refused = 0;
     const opExtra = plugin?.applyOp
-      ? (op: Raw) => plugin.applyOp!(m, op, { scope })
+      ? (op: Raw) => {
+          const n = plugin.applyOp!(m, op, { scope });
+          if (n === 0 && scope) refused++;
+          return n;
+        }
       : undefined;
     state.busy = true;
     stopped = false;
@@ -366,6 +373,15 @@ export function createEngine({
         ...(opts.blankId ? { blankId: opts.blankId } : {}),
         ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
       });
+      if (refused)
+        messages.push({
+          role: "system",
+          text:
+            refused === 1
+              ? "1 of Claude's changes was not made: it reaches past what this side thread may change."
+              : `${refused} of Claude's changes were not made: they reach past what this side thread may change.`,
+          ts: Date.now(),
+        });
       void reply.usage.then((u) =>
         recordUsage(m, u, reply.firstMs, reply.endMs),
       );

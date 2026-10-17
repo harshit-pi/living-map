@@ -23,7 +23,7 @@ export function NameLeft({ text }: { text: string }) {
       className={`text-[11px] tabular-nums ${left < 0 ? "font-medium text-danger-strong" : "text-muted"}`}
     >
       {left < 0
-        ? `${-left} too long: keep the name short, the rest goes in its thread`
+        ? `${-left} ${left === -1 ? "character" : "characters"} too long: keep the name short, and add the detail in its thread once it is added`
         : `${left} left`}
     </span>
   );

@@ -1027,3 +1027,36 @@ test("an empty message is refused before it costs a move", async () => {
   assert.equal(calls.length, 0);
   assert.deepEqual(engine.state.map?.chat, []);
 });
+
+test("a side thread's reply says which of its changes the thread could not make", async () => {
+  const { engine, calls } = setup();
+  const started = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(
+    'Laid out.\n```map\n{"ops":[\n{"op":"add","id":"q","parent":null,"kind":"question","title":"Which DB?"},\n{"op":"add","id":"pg","parent":"q","kind":"option","title":"Postgres"},\n{"op":"add","id":"keep","parent":"q","kind":"option","title":"Keep the current DB"},\n{"op":"frame","q":"q","shape":"choose","keepAsIs":"keep"}\n]}\n```',
+  );
+  await started;
+  const m = engine.state.map!;
+  const asked = act(engine, {
+    type: "thread",
+    nodeId: "pg",
+    text: "We already run Postgres",
+  });
+  await settled(calls, 2);
+  // keep-as-is's case against is not this thread's to write; the stand is
+  calls[1].release(
+    'Noted; I changed keep as is too.\n```map\n{"ops":[{"op":"against","option":"keep","text":"Old"},{"op":"stand","q":"q","lead":null,"line":"Open"}]}\n```',
+  );
+  await asked;
+  const thread = Object.values(m.threads).find((t) => t.nodeId === "pg")!;
+  assert.equal(thread.messages.at(-2)?.role, "claude");
+  assert.deepEqual(thread.messages.at(-1), {
+    role: "system",
+    text: "1 of Claude's changes was not made: it reaches past what this side thread may change.",
+    ts: thread.messages.at(-1)!.ts,
+  });
+});

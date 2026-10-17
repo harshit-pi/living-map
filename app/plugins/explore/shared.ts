@@ -68,7 +68,16 @@ export type Side = {
 // yours wins on the board; Claude's shows beside it
 export type Cell = { you?: Side; claude?: Side };
 // id = the want's fact node
-export type Row = { id: string; weight: Weight; suggested: boolean; by: Who };
+export type Row = {
+  id: string;
+  weight: Weight;
+  suggested: boolean;
+  by: Who;
+  // when Claude last judged this row in its own thread, on what you told it
+  // there: a "can't tell" after that is one you have already answered, so
+  // Next no longer sends you to say what you know
+  told?: number;
+};
 export type Against = {
   text: string;
   survives: Survives;
@@ -165,8 +174,14 @@ export const cellKey = (option: string, row: string) => `${option}|${row}`;
 // shows as one on the Tree, and is no loose fact on the board.
 const CHECK =
   /^\s*(to check:|(check|compare|split|break\b.*\bdown|match|measure|look (at|for|up|into)|pull|test|find out|segment|verify|confirm)\b)/i;
+// A check once run says what it found ("Found: …", as the prompt and
+// answerChecks write it): it is a fact now, even when its title is still
+// the instruction ("Split time by stage"), which kept it a check to run.
+const FOUND = /^\s*found:/i;
 export const isCheck = (n: { kind: string; title: string; summary: string }) =>
-  n.kind === "fact" && (CHECK.test(n.summary) || CHECK.test(n.title));
+  n.kind === "fact" &&
+  !FOUND.test(n.summary) &&
+  (CHECK.test(n.summary) || CHECK.test(n.title));
 
 // ---- what the browser sees (view): computed on the server, read as is
 
@@ -351,6 +366,9 @@ export type Gap = {
   option?: string;
   // the want ("ask", and for "tell" the one Next opens)
   want?: string;
+  // for "tell", the check still to run the cells wait on: Next opens it,
+  // where you answer it, rather than the want
+  check?: string;
   label: string;
   reason: string;
 };

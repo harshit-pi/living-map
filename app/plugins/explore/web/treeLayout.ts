@@ -208,15 +208,45 @@ export function treeLayout(
       }
       stack.h = y - GAP_Y;
     }
-    // the first row keeps room for the notes, so they never wrap below
+    // the first row keeps room for the notes, so they never wrap below; a
+    // question below laid narrower than a column and its notes (to keep the
+    // causes beside it on the first row) stacks them under its options,
+    // their line down the trunk on the left, as a wrapped row's is
+    const beside =
+      !!stack && (centred || !inRow.length || budget >= slot + GAP_X + stack.w);
     type Item = { head: MapNode; block: Block };
     const rows: Item[][] = [];
     let row: Item[] = [];
     let rowW = 0;
-    for (const head of inRow) {
-      const room = budget - (rows.length === 0 && stack ? stack.w + GAP_X : 0);
+    // A question laid wide in one column (a sub-choice under the likely
+    // cause) pushed the columns after it onto a row below the frame: while
+    // the first row runs past its room, the widest such column is laid
+    // narrower, as one that comes last already was.
+    const firstRoom = budget - (stack && beside ? stack.w + GAP_X : 0);
+    const laid = inRow.map((head) => blockOf(head, 0, NESTED_W, slot));
+    const across = () => laid.reduce((a, b, i) => a + b.w + (i ? GAP_X : 0), 0);
+    const tried = new Set<number>();
+    for (
+      let over = across() - firstRoom;
+      over > 0;
+      over = across() - firstRoom
+    ) {
+      let i = -1;
+      laid.forEach((b, k) => {
+        if (b.w > slot && !tried.has(k) && (i < 0 || b.w > laid[i].w)) i = k;
+      });
+      if (i < 0) break;
+      tried.add(i);
+      const narrow = blockOf(inRow[i], 0, Math.max(laid[i].w - over, 0), slot);
+      // laying it again set its cards anew: the wider one is laid back
+      laid[i] =
+        narrow.w < laid[i].w ? narrow : blockOf(inRow[i], 0, NESTED_W, slot);
+    }
+    for (const [k, head] of inRow.entries()) {
+      const room =
+        budget - (rows.length === 0 && stack && beside ? stack.w + GAP_X : 0);
       const free = room - rowW - (row.length ? GAP_X : 0);
-      let block = blockOf(head, 0, NESTED_W, slot);
+      let block = laid[k];
       // too wide for what is left of the row only for a question laid in
       // it: laid narrower, it may still fit (laying it again sets its
       // cards anew)
@@ -234,7 +264,7 @@ export function treeLayout(
       rowW += (row.length ? GAP_X : 0) + c.block.w;
       row.push(c);
     }
-    if (row.length || stack) rows.push(row);
+    if (row.length || beside) rows.push(row);
     const bus = th + RANK / 2;
     let y = th + RANK;
     let width = CARD_W;
@@ -256,7 +286,7 @@ export function treeLayout(
         x += c.block.w + GAP_X;
         tallest = Math.max(tallest, c.block.h);
       }
-      if (k === 0 && stack) {
+      if (k === 0 && stack && beside) {
         for (const id of stack.heads)
           b.edges.push({
             id: `${q.id}-${id}`,
@@ -273,8 +303,22 @@ export function treeLayout(
       width = Math.max(width, x - GAP_X);
       y += tallest + ROW_GAP;
     });
+    if (stack && !beside) {
+      for (const id of stack.heads)
+        b.edges.push({
+          id: `${q.id}-${id}`,
+          source: q.id,
+          target: id,
+          kind: "stack",
+          bus,
+          spine: -GAP_X / 2,
+        });
+      put(b, stack, 0, y);
+      width = Math.max(width, stack.w);
+      y += stack.h + ROW_GAP;
+    }
     b.w = width;
-    b.h = rows.length ? y - ROW_GAP : th;
+    b.h = y > th + RANK ? y - ROW_GAP : th;
     if (centred) boxes[q.id].x = (width - CARD_W) / 2;
     return b;
   };

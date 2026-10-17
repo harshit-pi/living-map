@@ -406,7 +406,10 @@ const openChecks = (nodes: Nodes, side: Side | undefined) =>
 // so news from Claude (an option it added, a fact behind that option's
 // cell) settles nothing, and Next spent a move that ended "can't tell"
 // again. What it lacks then is yours, the same on every option: Next asks
-// you for it.
+// you for it. Once you have told the want's thread what you know and Claude
+// judged the row on it there (`told`), a "can't tell" left is one that
+// nothing you know settles (how a build not yet made will be done): Next
+// sent you back to the same thread after every reply.
 export function waitsOnYou(
   nodes: Nodes,
   b: Board,
@@ -419,7 +422,7 @@ export function waitsOnYou(
     yours.some((f) => f.updatedAt > side.at && !side.facts.includes(f.id));
   const out: { want: string; option: string; note: string; check?: string }[] =
     [];
-  for (const r of keptRows(b).filter((x) => x.weight === weight)) {
+  for (const r of keptRows(b).filter((x) => x.weight === weight && !x.told)) {
     const cants = cols
       .map((o) => ({ o, side: own(b.cells, cellKey(o.id, r.id)) }))
       .filter(({ side }) => !side?.you && side?.claude?.mark === "unknown")
@@ -770,15 +773,21 @@ export function openItems(
     guess.map((h) => qOf.get(h)!),
     (n) => `${plural(n, "guess", "guesses")} ${onMusts(guess)}`,
   );
-  // a choice made with musts still empty or a guess on the option chosen:
-  // choosing settles the board, not what is unknown about the choice
-  const unsure = Object.values(s.boards).flatMap((b) =>
-    b.commit && b.shape === "choose"
-      ? holes(s, nodes, b, "must")
-          .filter((h) => h.option === b.commit?.option)
-          .map(() => b.question)
-      : [],
-  );
+  // a choice made with musts still empty, a guess, or "can't tell" on the
+  // option chosen: choosing settles the board, not what is unknown about
+  // the choice (a check that turned a guess into "can't tell" made it less
+  // certain, and the line said nothing was open)
+  const unsure = Object.values(s.boards).flatMap((b) => {
+    const chosen = b.commit?.option;
+    if (!chosen || b.shape !== "choose") return [];
+    return keptRows(b)
+      .filter((r) => {
+        if (r.weight !== "must") return false;
+        const sc = shown(own(b.cells, cellKey(chosen, r.id)));
+        return !sc || sc.guess || sc.mark === "unknown";
+      })
+      .map(() => b.question);
+  });
   add("chosen-unsure", unsure, (n) =>
     n === 1
       ? "1 must unsure on your choice"
@@ -977,6 +986,7 @@ function tellGap(
     q: b.question,
     option: tell.option,
     want: tell.want,
+    ...(tell.check ? { check: tell.check } : {}),
     label: tell.check
       ? `Answer ${named(nodes, tell.check)} to settle ${plural(cells, "cell")}`
       : `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
@@ -1218,12 +1228,16 @@ function boardOfRow(s: ExploreState, want: string, kept = true) {
 
 // What a side thread may write: one pinned to an option writes that option's
 // column (and another column's cell that cites a fact filed under it), its
-// case against and takeaway, and its board's stand; one pinned to
-// a want writes that row and its board's stand; any other writes takeaways
-// and moves within its node, and the stand of the question it sits under (a
-// check's result told in its thread moves where the causes stand; refused,
-// it left the stand stale for a paid "Weigh what came in"). Framing and
-// wants are never a thread's.
+// case against and takeaway, and its board's stand; one pinned to a want
+// writes that row (and another row's cell that cites a fact filed under it:
+// what you tell it about your setup bears on more than one want) and its
+// board's stand; any other writes takeaways and moves within its node, and
+// the stand of the question it sits under (a check's result told in its
+// thread moves where the causes stand; refused, it left the stand stale for
+// a paid "Weigh what came in"). Any thread may pick the check to run next
+// under that question (a takeaway on it): refused, the pick Claude named in
+// the reply never reached the map, and Next asked for one, paid. Framing
+// and wants are never a thread's.
 function threadAllows(
   s: ExploreState,
   nodes: Nodes,
@@ -1235,9 +1249,20 @@ function threadAllows(
   const inside = subtree(nodes, scope);
   const isWant = !!boardOfRow(s, scope, false);
   const isOption = node.kind === "option";
+  const above = pathTo(nodes, scope)
+    .reverse()
+    .find((n) => n.kind === "question");
   switch (op.op) {
     case "cell": {
-      if (isWant) return op.want === scope;
+      if (isWant) {
+        if (op.want === scope) return true;
+        const b = boardOfRow(s, scope, false);
+        return (
+          !!b &&
+          b.rows.some((r) => r.id === op.want) &&
+          factsOf(nodes, op.facts).some((f) => f !== scope && inside.has(f))
+        );
+      }
       if (!isOption) return false;
       if (op.option === scope) return true;
       // what you tell an option's thread about yourself (budget, how long you
@@ -1252,16 +1277,18 @@ function threadAllows(
     }
     case "against":
       return isOption && op.option === scope;
-    case "stand": {
+    case "stand":
       // a question's own thread writes its stand; any other node's, the
       // stand of the nearest question above it
-      const q = pathTo(nodes, scope)
-        .reverse()
-        .find((n) => n.kind === "question");
-      return !!q && op.q === q.id;
+      return !!above && op.q === above.id;
+    case "takeaway": {
+      const id = String(op.node ?? "");
+      if (inside.has(id)) return true;
+      const n = own(nodes, id);
+      return (
+        !!above && !!n && isCheck(n) && checksOn(nodes, above.id).includes(n)
+      );
     }
-    case "takeaway":
-      return inside.has(String(op.node ?? ""));
     case "move":
       return (
         !isOption &&
@@ -1379,6 +1406,12 @@ export function applyExploreOp(
       const key = cellKey(option, want);
       const before = own(b.cells, key)?.claude;
       b.cells[key] = { ...own(b.cells, key), claude: side };
+      // only you write in a want's thread: a cell judged there is judged on
+      // what you told it
+      if (scope === want) {
+        const row = b.rows.find((r) => r.id === want);
+        if (row) row.told = now;
+      }
       answerChecks(s, nodes, before, side, now);
       return 1;
     }
@@ -1424,11 +1457,27 @@ export function applyExploreOp(
       };
       if (op.sure !== undefined && op.sure !== null && Number.isFinite(sure))
         st.sure = Math.min(100, Math.max(0, Math.round(sure)));
+      // A lead rests on Claude's own marks: on a choice, an option it has
+      // not judged itself on every must you kept is no lead yet. With 2 of
+      // 24 cells filled, one of them yours, it led the option you had rated,
+      // with a line that described a tie.
+      const b = own(s.boards, q);
+      const led = st.lead;
+      if (
+        led &&
+        b?.shape === "choose" &&
+        keptRows(b).some(
+          (r) =>
+            r.weight === "must" && !own(b.cells, cellKey(led, r.id))?.claude,
+        )
+      ) {
+        st.lead = null;
+        delete st.sure;
+      }
       // Your choice is no evidence: with nothing new on the board since you
       // chose, Claude's lead and how sure it is stay what they were, so
       // "Claude agrees" means it does (the lead may be an option your choice
       // set aside)
-      const b = own(s.boards, q);
       const was = own(s.stand, q);
       if (b?.commit && was && !changedSince(b, b.commit.at)) {
         st.lead = was.lead;
