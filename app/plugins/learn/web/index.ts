@@ -11,7 +11,7 @@ export const learnWeb: WebPlugin = {
   switchesWith: ["explore"],
   heading: "What do you want to understand?",
   blurb:
-    "Any subject. Claude draws it in the shape that fits and leaves the key parts blank for you to fill.",
+    "Any subject, step by step. You see one worked case, build it back from memory, and it comes back days later with less help.",
   placeholder:
     "e.g. a protocol, a theory, a period of history, a coding problem",
   examples: [

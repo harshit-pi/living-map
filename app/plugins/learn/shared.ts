@@ -244,7 +244,9 @@ export type StepView = {
   trayCount: number;
   // the worked case: only while you see it, or after Show the model
   worked: {
-    parts: PartView[];
+    // a part's slot in the frame is shown with the worked case (not the
+    // hidden part's: that would point at the predict answer)
+    parts: (PartView & { slot?: string })[];
     links: LinkView[];
     hidden: string | null;
   } | null;
@@ -326,6 +328,10 @@ export type ReviewView = {
 
 export type LearnView = {
   mode: "build";
+  // the server's time when this view was made: the review clock may run
+  // ahead of the browser's (LIVING_MAP_CLOCK_SKEW_DAYS), so "next in 4 days"
+  // is counted from here
+  now: number;
   level: Level | null;
   steps: StepView[];
   due: { now: number; next: number | null };

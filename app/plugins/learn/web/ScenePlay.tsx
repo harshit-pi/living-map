@@ -245,7 +245,8 @@ export function ScenePlay({
   onKey: (key: string) => Promise<{ ok?: boolean }>;
   onShow: () => void;
   onReplay: () => void;
-  onHint: () => void;
+  // a build map has no hint ladder on a scene: its hints are on the build
+  onHint?: () => void;
   onNext: () => void;
 }) {
   const [flash, setFlash] = useState<Flash>(null);
@@ -413,12 +414,14 @@ export function ScenePlay({
             </>
           ) : (
             <>
-              <button
-                onClick={onHint}
-                className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-body hover:bg-panel"
-              >
-                {busy ? "Hint (after Claude)" : "Hint"}
-              </button>
+              {onHint && (
+                <button
+                  onClick={onHint}
+                  className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-body hover:bg-panel"
+                >
+                  {busy ? "Hint (after Claude)" : "Hint"}
+                </button>
+              )}
               <button
                 onClick={onShow}
                 title="Counts as shown, not worked out"

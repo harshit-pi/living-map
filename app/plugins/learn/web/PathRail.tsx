@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -49,6 +50,16 @@ function stateOf(map: MapDoc, n: MapNode) {
   };
 }
 
+// What a mode says about a step in the rail, in place of the classic state:
+// its mark and word, and a meter of small dots under the title (Build It
+// Back: Built, Why, What if, New case, Kept).
+export type RailMark = {
+  mark: string;
+  cls: string;
+  word: string;
+  meter?: { sym: string; cls: string; title: string }[];
+};
+
 // The path to understanding: the steps in order, each with where you are on it.
 export function PathRail({
   map,
@@ -57,6 +68,9 @@ export function PathRail({
   busy,
   workingId,
   onNext,
+  marks,
+  progress,
+  footer,
 }: {
   map: MapDoc;
   selected: string | null;
@@ -64,7 +78,14 @@ export function PathRail({
   busy: boolean;
   workingId: string | null;
   onNext: () => void;
+  // a build map's own marks per step, and its count of steps done
+  marks?: Record<string, RailMark>;
+  progress?: { got: number; word: string };
+  // under the steps, over Next step (what is due; Practise this as builds)
+  footer?: ReactNode;
 }) {
+  const markOf = (n: MapNode) =>
+    (!n.dropped && marks?.[n.id]) || stateOf(map, n);
   const root = Object.values(map.nodes).find((n) => !n.parent);
   const kids = root
     ? Object.values(map.nodes)
@@ -80,9 +101,9 @@ export function PathRail({
   const start = map.chat.find(
     (c) => c.role === "claude" && !c.blankId && !c.nodeId,
   )?.text;
-  const got = steps.filter(
-    (s) => s.status === "answered" && !s.revealed,
-  ).length;
+  const got =
+    progress?.got ??
+    steps.filter((s) => s.status === "answered" && !s.revealed).length;
   return (
     <nav className="flex h-full w-[220px] shrink-0 xl:w-[270px] flex-col border-r border-line bg-canvas">
       <div className="px-4 pb-2 pt-4">
@@ -106,7 +127,7 @@ export function PathRail({
           />
         </div>
         <div className="mt-1 text-xs text-muted">
-          {got} of {steps.length} worked out by you
+          {got} of {steps.length} {progress?.word ?? "worked out by you"}
         </div>
         {/* Claude's opening instruction stays here to re-read after its
             caption above the message box has gone */}
@@ -123,7 +144,8 @@ export function PathRail({
       </div>
       <ol className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
         {steps.map((s, i) => {
-          const st = stateOf(map, s);
+          const st = markOf(s);
+          const meter = !s.dropped ? marks?.[s.id]?.meter : undefined;
           const on = selected === s.id;
           return (
             <li key={s.id}>
@@ -150,11 +172,20 @@ export function PathRail({
                   <span className="block text-[11px] text-muted">
                     {st.word}
                   </span>
+                  {meter && (
+                    <span className="mt-0.5 flex gap-0.5 text-[10px] leading-none">
+                      {meter.map((d, k) => (
+                        <span key={k} className={d.cls} title={d.title}>
+                          {d.sym}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </span>
               </button>
               {/* smaller steps ("Smaller steps" on a step) sit under it */}
               {subSteps(s.id).map((c) => {
-                const cs = stateOf(map, c);
+                const cs = markOf(c);
                 return (
                   <button
                     key={c.id}
@@ -194,6 +225,7 @@ export function PathRail({
           </li>
         ))}
       </ol>
+      {footer && <div className="border-t border-line px-3 py-2">{footer}</div>}
       <div className="border-t border-line p-3">
         <button
           onClick={onNext}

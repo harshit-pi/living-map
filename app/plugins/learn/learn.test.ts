@@ -1076,7 +1076,11 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
   vi.setSystemTime(noon(1));
   assert.equal(learn.due!(m, Date.now()).now, 4);
   assert.match(learn.summary!(m), /1 of 3 built · 4 due/);
+  // a step part way through a new case still comes back on its own model
+  s.steps.s1.onCase = true;
+  s.steps.s1.stage = "build";
   assert.deepEqual(await act(engine, learnAct("review")), { ok: true });
+  assert.equal(s.steps.s1.onCase, false);
   assert.equal(s.steps.s1.stage, "build");
   assert.equal(s.steps.s1.help, 1);
   for (const [from, to, rel] of ALL_RIGHT)
@@ -1089,6 +1093,7 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
   assert.ok(items.every((i) => i.box === 2));
   assert.deepEqual(await act(engine, learnAct("done")), { ok: true });
   assert.deepEqual(s.visits.at(-1), { at: noon(1), unaided: 3, of: 3 });
+  assert.match(learn.summary!(m), /last review 3 of 3 unaided/);
   assert.equal(
     calls.length,
     3,

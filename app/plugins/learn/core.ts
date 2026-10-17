@@ -937,14 +937,25 @@ export function startBuild(m: RefModel, help: Help): Build {
           ),
         );
     const rows = new Map<number, number>();
+    for (const p of m.parts) rows.set(depth.get(p.id)!, 0);
+    const tall = Math.max(
+      ...m.parts.map(
+        (p) =>
+          m.parts.filter((q) => depth.get(q.id) === depth.get(p.id)).length,
+      ),
+    );
     for (const p of m.parts) {
       const d = depth.get(p.id)!;
-      const r = rows.get(d) ?? 0;
+      const r = rows.get(d)!;
       rows.set(d, r + 1);
+      // past four columns the layers fold into rows that run back the
+      // other way, as the screen draws the worked case
+      const fold = Math.floor(d / 4);
+      const col = fold % 2 ? 3 - (d % 4) : d % 4;
       b.placed.push({
         part: p.id,
-        x: d * COL,
-        y: r * ROW,
+        x: col * COL,
+        y: r * ROW + fold * (tall * ROW + 40),
         ...(p.slot ? { slot: p.slot[0] } : {}),
       });
     }
@@ -1496,7 +1507,9 @@ function stepView(
       : null;
     base.worked = {
       parts: m.parts.map((x) =>
-        x.id === hidden ? { id: x.id, label: "?", role: "" } : partView(x),
+        x.id === hidden
+          ? { id: x.id, label: "?", role: "" }
+          : { ...partView(x), ...(x.slot ? { slot: x.slot[0] } : {}) },
       ),
       links: m.links
         .filter((l) => !l.argued && l.id !== hideLink)
@@ -1657,6 +1670,7 @@ export function viewOf(
   const live = new Set(path.map((p) => p.id));
   return {
     mode: "build",
+    now,
     level: s.level,
     steps: path.map((p) => stepView(s, nodes, p, now)),
     due: dueOf(s, live, now),

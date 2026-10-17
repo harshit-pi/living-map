@@ -1,9 +1,11 @@
 import { useState } from "react";
 
+import { BuildScreen } from "./BuildScreen.tsx";
 import { DiagramView } from "./DiagramView.tsx";
 import { PathRail } from "./PathRail.tsx";
 import { ScenePlay } from "./ScenePlay.tsx";
 import { nextOpenStep, nextStep } from "./steps.ts";
+import { learnView } from "./view.ts";
 import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
 import { act } from "../../../web/lib/api.ts";
@@ -11,9 +13,21 @@ import type { Workspace } from "../../../web/lib/workspace.ts";
 
 const BUILDING = "Building a playable scene";
 
-// Learn: the path on the left; in the middle the topic diagram, or the
-// selected step played by hand; the step's panel on the right.
+// Learn: a build map (every new one) gets the build screen; a map from
+// before build mode keeps the classic one, exactly as it was, with one way
+// out: Practise this as builds.
 export function LearnScreen({ ws }: { ws: Workspace }) {
+  const view = learnView(ws.map);
+  return view ? (
+    <BuildScreen key={ws.map.id} ws={ws} view={view} />
+  ) : (
+    <ClassicScreen ws={ws} />
+  );
+}
+
+// Classic Learn: the path on the left; in the middle the topic diagram, or
+// the selected step played by hand; the step's panel on the right.
+function ClassicScreen({ ws }: { ws: Workspace }) {
   const { map, live, selection, setSelection, roomy } = ws;
   const [centre, setCentre] = useState<"play" | "topic">("play");
   // in a narrow window the board needs the room: the panel tucks away while you play
@@ -72,6 +86,21 @@ export function LearnScreen({ ws }: { ws: Workspace }) {
           const n = nextOpenStep(map, one?.id);
           if (n) setSelection([n]);
         }}
+        footer={
+          <button
+            onClick={() => {
+              void ws.run({
+                type: "plugin",
+                plugin: "learn",
+                name: "practise",
+              });
+            }}
+            title="Each step becomes a small model you see once and build back from memory; the topic diagram stays"
+            className="w-full rounded-lg border border-line-strong py-1.5 text-[12.5px] text-body hover:border-primary hover:text-primary-strong"
+          >
+            Practise this as builds
+          </button>
+        }
       />
       <div className="relative min-w-0 flex-1">
         <div

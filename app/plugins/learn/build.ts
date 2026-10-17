@@ -942,9 +942,12 @@ const review: Act = (ctx) => {
   const path = pathSteps(ctx.map.nodes).map((p) => p.id);
   const due = path.filter((step) => {
     const m = modelOf(s, step);
+    const st = s.steps[step];
+    // a step part way through a new case is built too: the review takes it
+    // back to its own model
     return (
       m &&
-      s.steps[step]?.stage === "built" &&
+      (st?.stage === "built" || !!st?.onCase) &&
       itemsOf(s, m.id).some((i) => !i.retired && i.due <= t)
     );
   });

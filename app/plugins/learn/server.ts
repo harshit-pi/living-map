@@ -343,7 +343,9 @@ export const learn: ServerPlugin = {
     if (isBuildMap(map)) {
       const built = steps.filter((n) => n.status === "answered").length;
       const due = learn.due!(map, clock()).now;
-      return `${built} of ${steps.length} built${due ? ` · ${due} due` : ""}`;
+      // the headline of the last review: today, unaided
+      const last = peek(map.data)?.visits.at(-1);
+      return `${built} of ${steps.length} built${due ? ` · ${due} due` : ""}${last ? ` · last review ${last.unaided} of ${last.of} unaided` : ""}`;
     }
     const done = steps.filter(
       (n) => n.status === "answered" && !n.revealed,
