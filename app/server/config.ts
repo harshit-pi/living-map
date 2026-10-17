@@ -6,7 +6,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PORT = Number(process.env.PORT ?? 4317);
-export const HOME = path.join(os.homedir(), ".living-map");
+// where maps and the model's workspace live; LIVING_MAP_HOME moves it (e.g. a
+// separate copy for testing that must not touch your own maps)
+export const HOME = process.env.LIVING_MAP_HOME
+  ? path.resolve(process.env.LIVING_MAP_HOME)
+  : path.join(os.homedir(), ".living-map");
 export const MAPS_DIR = path.join(HOME, "maps");
 export const CURRENT_FILE = path.join(HOME, "current.txt");
 // the folder the model works in (it may read files there when you ask it to)
