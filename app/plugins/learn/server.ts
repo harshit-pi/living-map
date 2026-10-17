@@ -1,14 +1,30 @@
-// Learn on the server: any subject as a path of steps, a topic diagram with
-// blanks you fill, and steps you play by hand. Its map is core's node map,
-// shared with Explore, which is why the two switch into each other. Its state
-// is the map's top-level fields (diagram, fills, answers, scenes, play), not
-// map.data: saved maps hold it there, core applies the diagram and scene ops
-// on every map, and an Explore map switched to Learn and back keeps it.
-// Blanks and scene moves are checked here against the answers the model
-// wrote, with no model call; the answers never reach the browser.
+// Learn on the server: any subject as a path of steps. Its map is core's
+// node map, shared with Explore, which is why the two switch into each other.
+// A map is in one of two modes (map.data.learn.mode):
+// - build (every new map): each step is a small model you see once and build
+//   back from memory, checked here with no model call (build.ts, core.ts).
+// - classic (a map from before, with no data.learn): a topic diagram with
+//   blanks you fill, and steps you play by hand, exactly as before. Its
+//   state is the map's top-level fields (diagram, fills, answers, scenes,
+//   play): saved maps hold it there, and core applies the diagram and scene
+//   ops on every map.
+// Blanks, scene moves and builds are checked against the answers the model
+// wrote; the answers never reach the browser.
 
+import {
+  applyBuildOp,
+  BUILD_ACTIONS,
+  BUILD_PROMPT,
+  BUILD_SECTIONS,
+  enterBuild,
+  isBuildMap,
+  startBuildMap,
+} from "./build.ts";
+import { dueOf, outlineOf, pathSteps, peek, viewOf } from "./core.ts";
 import * as canvas from "../../server/actions/canvas.ts";
 import type { Ctx } from "../../server/actions/context.ts";
+import { hint as coreHint } from "../../server/actions/steps.ts";
+import { now as clock } from "../../server/clock.ts";
 import {
   accepts,
   diagramOutline,
@@ -16,7 +32,13 @@ import {
   revealBlank,
 } from "../../server/core/diagram.ts";
 import { newPlay, playMove, showMove } from "../../server/core/scene.ts";
-import { own, safeId, type Play, type Raw } from "../../server/core/types.ts";
+import {
+  own,
+  safeId,
+  type Play,
+  type Raw,
+  type StoredMap,
+} from "../../server/core/types.ts";
 import type { ServerPlugin } from "../../server/plugin.ts";
 import type { ActionResult, MapNode } from "../../shared/model.ts";
 
@@ -183,44 +205,58 @@ function replay(ctx: Ctx, nodeId: string): ActionResult {
   return {};
 }
 
+// a build map has no topic diagram section: a core move that names it (a
+// message, Next) sends it only to classic maps
+const CLASSIC: Record<string, string> = { diagram: DIAGRAM, scene: SCENE };
+const BUILD: Record<string, string> = { ...BUILD_SECTIONS, scene: SCENE };
+
+const classicOutline = (map: StoredMap) =>
+  `TOPIC DIAGRAM:\n${diagramOutline(map.diagram, map.fills, map.answers)}`;
+
+// the root's steps, as the path counts them
+const stepsOf = (map: StoredMap) => {
+  const nodes = Object.values(map.nodes);
+  const root = nodes.find((n) => !n.parent);
+  return nodes.filter(
+    (n) => n.kind === "question" && n.parent && n.parent === root?.id,
+  );
+};
+
+// a core action the classic screen sends, which a build map answers its own way
+const either =
+  (classic: (ctx: Ctx, a: Raw) => Promise<ActionResult> | ActionResult) =>
+  (build: (ctx: Ctx, a: Raw) => Promise<ActionResult> | ActionResult) =>
+  (ctx: Ctx, a: Raw) => (isBuildMap(ctx.map) ? build(ctx, a) : classic(ctx, a));
+
 export const learn: ServerPlugin = {
   id: "learn",
   label: "Learn",
   canvasName: "learning path",
   switchesWith: ["explore"],
+  // a classic map's prompt, word for word as before (pinned by a fixture)
   prompt: PROMPT,
   sections: { diagram: DIAGRAM, scene: SCENE },
-  outline: (map) =>
-    `TOPIC DIAGRAM:\n${diagramOutline(map.diagram, map.fills, map.answers)}`,
+  promptFor: (map) =>
+    isBuildMap(map)
+      ? { prompt: BUILD_PROMPT, sections: BUILD }
+      : { prompt: PROMPT, sections: CLASSIC },
+  outline: (map) => {
+    const s = peek(map.data);
+    if (s?.mode !== "build") return classicOutline(map);
+    // a map practised as builds after the topic diagram keeps it in view
+    return map.diagram
+      ? `${outlineOf(s, map.nodes)}\n\n${classicOutline(map)}`
+      : outlineOf(s, map.nodes);
+  },
+  applyOp: (map, op, { scope }) => applyBuildOp(map, op, scope),
 
-  async start(ctx) {
-    const m = ctx.map;
-    const r = await ctx.engine.turn(startAction(m.title), ctx.settings, {
-      label: "Drawing the topic and your path",
-      sections: ["diagram"],
-    });
-    if (!r.error && !r.stopped && !Object.keys(m.nodes).length && !m.diagram)
-      return {
-        error:
-          "Claude did not lay anything out. Try again, or rephrase the question.",
-      };
-    return r;
+  start(ctx) {
+    return startBuildMap(ctx);
   },
 
-  // a map switched to Learn with no topic diagram gets its path and diagram
-  enter(ctx) {
-    if (ctx.map.diagram || ctx.engine.state.busy) return {};
-    return ctx.engine.turn(
-      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order, and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first. Remove nothing: every node already on the map stays where it is (the learner explored it, and it is listed under what they looked into); a useful existing question can be one of the steps, but keep its title and summary as they are (Explore reads them when the learner switches back): say what a step is in the caption, never by rewriting an existing node.",
-      ctx.settings,
-      // what you explored stays, with its threads, for when you switch back
-      {
-        label: "Turning this into a learning path",
-        sections: ["diagram"],
-        keep: true,
-      },
-    );
-  },
+  // a map switched to Learn that was never in it gets its path and step 1's
+  // model; one that was keeps what it has, with no call
+  enter: (ctx) => enterBuild(ctx),
 
   // every core action: the path, the diagram and the step panel use them all
   core: [
@@ -245,8 +281,10 @@ export const learn: ServerPlugin = {
   ],
 
   // blanks and scenes are Learn's own; thread, deeper and next are core's,
-  // worded for a learner working through steps
+  // worded for a learner working through steps; the build actions are
+  // build.ts's (hint and deeper answer both screens)
   actions: {
+    ...BUILD_ACTIONS,
     fill: (ctx, a: Raw) => fill(ctx, id(a.blankId), a.text),
     scene: (ctx, a: Raw) => buildScene(ctx, id(a.nodeId)),
     play: (ctx, a: Raw) => play(ctx, id(a.nodeId), a.key),
@@ -259,26 +297,54 @@ export const learn: ServerPlugin = {
         id(a.threadId) || undefined,
         a.text,
         ({ node, named }) =>
-          node.kind === "question"
-            ? `the learner wrote in the thread on step ${named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`
-            : null,
+          node.kind !== "question"
+            ? null
+            : isBuildMap(ctx.map)
+              ? `the learner wrote in the thread on step ${named}. Answer their question about this step without naming the links of its model: they build it back from memory, and the server checks it.`
+              : `the learner wrote in the thread on step ${named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`,
       ),
-    deeper: (ctx, a: Raw) =>
+    hint: either((ctx, a) => coreHint(ctx, id(a.nodeId)))(BUILD_ACTIONS.hint),
+    // a build map goes deeper on a part of a step's model; without a part
+    // (or on a classic map) it breaks the step down as before
+    deeper: either((ctx, a) =>
       canvas.deeper(ctx, id(a.nodeId), "Breaking it into smaller steps"),
+    )((ctx, a) =>
+      a?.part
+        ? BUILD_ACTIONS.deeper(ctx, a)
+        : canvas.deeper(ctx, id(a.nodeId ?? a.step), "Going deeper"),
+    ),
     next: (ctx) =>
       canvas.next(
         ctx,
-        "next: point the learner at the next open step and make its first move clear, without solving it.",
+        isBuildMap(ctx.map)
+          ? "next: point the learner at the next step to build, without giving away its model."
+          : "next: point the learner at the next open step and make its first move clear, without solving it.",
       ),
   },
 
-  // the path's steps, counted as the path counts them: worked out by you, not shown
+  // what the browser sees of a build map; a classic map has no view, so it
+  // goes out exactly as it did before build mode
+  view: (map) => {
+    const s = peek(map.data);
+    return s?.mode === "build"
+      ? viewOf(s, map.nodes, clock(), !!map.diagram)
+      : undefined;
+  },
+
+  due: (map, now) => {
+    const s = peek(map.data);
+    if (s?.mode !== "build") return { now: 0, next: null };
+    return dueOf(s, new Set(pathSteps(map.nodes).map((p) => p.id)), now);
+  },
+
+  // the path's steps: worked out by you (classic), or built (build), and due
   summary(map) {
-    const nodes = Object.values(map.nodes);
-    const root = nodes.find((n) => !n.parent);
-    const steps = nodes.filter(
-      (n) => n.kind === "question" && n.parent && n.parent === root?.id,
-    );
+    const steps = stepsOf(map);
+    if (isBuildMap(map)) {
+      const built = steps.filter((n) => n.status === "answered").length;
+      const due = learn.due!(map, clock()).now;
+      return `${built} of ${steps.length} built${due ? ` · ${due} due` : ""}`;
+    }
     const done = steps.filter(
       (n) => n.status === "answered" && !n.revealed,
     ).length;

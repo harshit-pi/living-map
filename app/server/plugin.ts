@@ -21,6 +21,12 @@ export type ServerPlugin = {
   prompt: string;
   // extra instructions by name, sent only on moves that list them in `sections`
   sections?: Record<string, string>;
+  // the job and sections for one map, when they depend on it (Learn's older
+  // maps keep their topic-diagram prompt; its build maps get another)
+  promptFor?: (map: StoredMap) => {
+    prompt: string;
+    sections?: Record<string, string>;
+  };
   // what the model is told about the plugin's state on every move
   outline?: (map: StoredMap) => string;
   // an op from the model's reply that core does not know; return how many
@@ -51,6 +57,9 @@ export type ServerPlugin = {
   view?: (map: StoredMap) => unknown;
   // one line for the maps list, e.g. "7 parts · 6 wires"
   summary?: (map: StoredMap) => string;
+  // how much of the map waits for review now, and when the next falls due
+  // (Learn's spaced rebuilds), for the start screen and the maps list
+  due?: (map: StoredMap, now: number) => { now: number; next: number | null };
 };
 
 // a plugin's state on a map, created on first use

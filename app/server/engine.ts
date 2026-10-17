@@ -105,10 +105,15 @@ export function createEngine({
           sceneView(sc, m.play[id]),
         ]),
       ),
-      ...(pluginFor(m.purpose)?.view
-        ? { data: { [m.purpose]: pluginFor(m.purpose)!.view!(m) } }
-        : {}),
+      ...dataOf(m),
     };
+
+  // a plugin's view, when it has one for this map (a Learn map from before
+  // build mode has none, and goes out exactly as it did)
+  const dataOf = (m: StoredMap) => {
+    const v = pluginFor(m.purpose)?.view?.(m);
+    return v === undefined ? {} : { data: { [m.purpose]: v } };
+  };
 
   const snapshot = (): ServerEvent => ({
     type: "map",
@@ -275,7 +280,11 @@ export function createEngine({
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          system: systemPrompt(m.purpose, opts.sections ?? [], plugin),
+          system: systemPrompt(
+            m.purpose,
+            opts.sections ?? [],
+            plugin.promptFor?.(m) ?? plugin,
+          ),
           message: text,
           ...settings,
         },
