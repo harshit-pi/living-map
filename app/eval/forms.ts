@@ -67,7 +67,7 @@ async function run(question: string, effort: string): Promise<Result> {
   const message = [
     `CANVAS (learning path):\n${outline({})}`,
     `TOPIC DIAGRAM:\n${diagramOutline(null, {})}`,
-    `ACTION: ${startAction("learn", question)}`,
+    `ACTION: ${startAction(question)}`,
     viewLine("visual"),
   ].join("\n\n");
   const reply = await provider.run(

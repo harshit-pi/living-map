@@ -7,12 +7,10 @@ import { Segmented } from "./components/Segmented.tsx";
 import { UpdateButton } from "./components/UpdateButton.tsx";
 import { WorkingBar, WorkingPill } from "./components/WorkingBar.tsx";
 import { act } from "./lib/api.ts";
-import { setAside } from "./lib/layout.ts";
 import { useLiveMap } from "./lib/live.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
-import { pluginFor } from "./plugins.ts";
-import { ExploreScreen } from "./screens/ExploreScreen.tsx";
+import { PLUGINS, pluginFor } from "./plugins.ts";
 import { LearnScreen } from "./screens/LearnScreen.tsx";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
 import { StartScreen } from "./screens/StartScreen.tsx";
@@ -34,7 +32,6 @@ export default function App() {
   const { map } = live;
   const roomy = useRoomy();
   const [selection, setSelection] = useState<string[]>([]);
-  const [showDropped, setShowDropped] = useState(true);
   const [starting, setStarting] = useState(false);
   // a new map on its way: the map it replaces, so the loading screen shows until the new one lands
   const [launch, setLaunch] = useState<{ from: string | null } | null>(null);
@@ -80,12 +77,6 @@ export default function App() {
   // a node that disappears (removed by Claude) closes its panel
   if (map && selection.some((id) => !map.nodes[id]))
     setSelection((s) => s.filter((id) => map.nodes[id]));
-  // so does one hidden with the set-aside nodes: what you write is then about
-  // the whole map, not a node you cannot see
-  const hidden = (id: string) =>
-    !!map && map.purpose === "explore" && setAside(map.nodes, id);
-  if (!showDropped && selection.some(hidden))
-    setSelection((s) => s.filter((id) => !hidden(id)));
 
   const openMap = async (mapId: string) => {
     setSelection([]);
@@ -135,9 +126,28 @@ export default function App() {
     setSelection,
     roomy,
   };
-  const learn = map.purpose === "learn";
-  // a plugin's map has its own screen and a fixed mode
+  // Learn is built in; any other mode is a plugin with its own screen
   const plugin = pluginFor(map.purpose);
+  // the modes this map can switch between (Explore and Learn share their map)
+  const switches = PLUGINS.filter(
+    (p) =>
+      p.id === map.purpose ||
+      p.switchesWith?.includes(map.purpose) ||
+      plugin?.switchesWith?.includes(p.id),
+  );
+  const modes: [string, string][] = [
+    ...switches.map((p): [string, string, number] => [
+      p.id,
+      p.label,
+      p.order ?? 50,
+    ]),
+    ...(map.purpose === "learn" ||
+    switches.some((p) => p.switchesWith?.includes("learn"))
+      ? [["learn", "Learn", 20] as [string, string, number]]
+      : []),
+  ]
+    .sort((a, b) => a[2] - b[2])
+    .map(([id, label]) => [id, label]);
 
   return (
     <div className="flex h-full flex-col bg-canvas">
@@ -156,42 +166,20 @@ export default function App() {
           />
         </div>
         <div className="flex items-center justify-end gap-2">
-          {plugin ? (
-            <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
-              {plugin.label}
-            </span>
-          ) : (
+          {modes.length > 1 ? (
             <Segmented
               value={map.purpose}
-              options={[
-                ["explore", "Explore"],
-                ["learn", "Learn"],
-              ]}
+              options={modes}
               onChange={(purpose) => {
                 void run({ type: "purpose", purpose });
               }}
             />
+          ) : (
+            <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
+              {plugin?.label ?? "Learn"}
+            </span>
           )}
-          {!learn && !plugin && (
-            <label className="flex items-center gap-1 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={showDropped}
-                onChange={(e) => setShowDropped(e.target.checked)}
-              />{" "}
-              Set aside
-            </label>
-          )}
-          {!learn && !plugin && (
-            <button
-              onClick={() => {
-                void run({ type: "next" });
-              }}
-              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
-            >
-              Next ▸
-            </button>
-          )}
+          {plugin?.Header && <plugin.Header ws={ws} />}
           <UpdateButton steps={live.updateSteps} />
           <MapsMenu
             onOpen={(id) => {
@@ -233,13 +221,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {plugin ? (
-          <plugin.Screen ws={ws} />
-        ) : learn ? (
-          <LearnScreen ws={ws} />
-        ) : (
-          <ExploreScreen ws={ws} showDropped={showDropped} />
-        )}
+        {plugin ? <plugin.Screen ws={ws} /> : <LearnScreen ws={ws} />}
       </main>
     </div>
   );

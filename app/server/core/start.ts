@@ -1,7 +1,5 @@
 // The opening move: what you typed or pasted, and what the model is asked to draw.
 
-import type { Purpose } from "../../shared/model.ts";
-
 // Lines a problem page adds around the problem itself (LeetCode and similar).
 const CHROME =
   /^(solved|attempted|easy|medium|hard|topics|companies|premium lock icon|hint|hints?|accepted|submissions?|acceptance rate.*|seen this question in a real interview before\?.*|\d+(\.\d+)?[km]?)$/i;
@@ -26,8 +24,7 @@ export function splitStart(text: unknown): { title: string; source: string } {
   };
 }
 
-export function startAction(purpose: Purpose, title: string): string {
-  return purpose === "learn"
-    ? `start. The learner wants to understand: "${title}". Create the root question (the topic, parent null) and 3-5 steps under it in learning order. Then build the TOPIC DIAGRAM in the form that fits this topic best: the skeleton of the subject, with the 2-3 parts the learner should discover first as blanks. No solution. In the map block write the diagram op FIRST, then the root and the steps, so the picture appears before the path.`
-    : `start. The user wants to explore: "${title}". Create the root question (parent null), 3-4 options under it, and up to 2 facts that frame how to judge them.`;
+// Learn's first move; a plugin's mode writes its own (ServerPlugin.start)
+export function startAction(title: string): string {
+  return `start. The learner wants to understand: "${title}". Create the root question (the topic, parent null) and 3-5 steps under it in learning order. Then build the TOPIC DIAGRAM in the form that fits this topic best: the skeleton of the subject, with the 2-3 parts the learner should discover first as blanks. No solution. In the map block write the diagram op FIRST, then the root and the steps, so the picture appears before the path.`;
 }

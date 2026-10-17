@@ -40,9 +40,9 @@ For a UI change, also run `npm start` and try it in the browser: Explore and Lea
 - `app/server/providers/`: the model. `types.ts` is the only seam; `claude-code.ts` implements it with `claude -p`. To add a model, implement `ModelProvider` and register it in `index.ts`; pick it with `LIVING_MAP_PROVIDER`.
 - `app/server/engine.ts`: one move at a time (queue, Stop), what the model is sent, streaming ops onto the canvas. `app/server/actions/`: one function per action. `app/server/store.ts`: maps on disk (`~/.living-map/maps/`). `app/server/http.ts`: routes.
 - `app/server/update.ts` and `app/server/launcher.ts`: the one-click update (compare with the latest GitHub release, pull, `npm ci`, build, restart).
-- `app/web/`: `App.tsx` is the shell; `screens/` (Start, Loading, Explore, Learn), `components/`, `hooks/`, `lib/` (live connection, API client, storage, step navigation).
+- `app/web/`: `App.tsx` is the shell; `screens/` (Start, Loading, Learn), `components/`, `hooks/`, `lib/` (live connection, API client, storage, step navigation).
 - `app/eval/forms.ts`: the diagram-fit eval, through the same provider.
-- Plugins add a mode of their own (Design is the first). The contract is `app/server/plugin.ts` and `app/web/plugin.ts`; the registries are `app/server/plugins.ts` and `app/web/plugins.ts`. A plugin lives in `app/plugins/<id>/`: `shared.ts` (types both sides use), `core.ts` (pure logic, tested), `server.ts` (prompt, ops, actions, browser view), `web/` (its screen). Its state is `map.data[<id>]`.
+- Plugins add a mode of their own (Design is the first). The contract is `app/server/plugin.ts` and `app/web/plugin.ts`; the registries are `app/server/plugins.ts` and `app/web/plugins.ts`. Explore and Design are plugins; Learn is still built in. A plugin can name modes it switches with (`switchesWith`: Explore and Learn share one map) and add header controls (`Header`). A plugin lives in `app/plugins/<id>/`: `shared.ts` (types both sides use), `core.ts` (pure logic, tested), `server.ts` (prompt, ops, actions, browser view), `web/` (its screen). Its state is `map.data[<id>]`.
 
 ## Releases
 

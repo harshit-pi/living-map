@@ -15,12 +15,12 @@ export async function start(
   purpose: Purpose,
 ): Promise<ActionResult> {
   await engine.stop();
-  const plugin = pluginFor(purpose);
-  const p: Purpose = plugin
-    ? plugin.id
-    : purpose === "learn"
-      ? "learn"
-      : "explore";
+  // Learn is built in; any other mode is a plugin, and an unknown one starts as Explore
+  const plugin =
+    purpose === "learn"
+      ? undefined
+      : (pluginFor(purpose) ?? pluginFor("explore"));
+  const p: Purpose = plugin ? plugin.id : "learn";
   const { title, source } = splitStart(text);
   const m = newMap(title, p);
   if (source) m.source = source;
@@ -28,11 +28,8 @@ export async function start(
   engine.state.map = m;
   engine.push();
   if (plugin) return plugin.start(makeCtx(engine, settings, m));
-  const r = await engine.turn(startAction(p, m.title), settings, {
-    label:
-      p === "learn"
-        ? "Drawing the topic and your path"
-        : "Laying out the options",
+  const r = await engine.turn(startAction(m.title), settings, {
+    label: "Drawing the topic and your path",
     sections: ["diagram"],
   });
   if (!r.error && !r.stopped && !Object.keys(m.nodes).length && !m.diagram)
@@ -63,14 +60,18 @@ export function switchPurpose(
   purpose: Purpose,
 ): Promise<ActionResult> | ActionResult {
   const { map, engine } = ctx;
-  if (pluginFor(map.purpose))
-    return {
-      error: "This map's mode is fixed; start a new map for another mode.",
-    };
-  // a plugin's mode is set only when its map is started
-  if (purpose !== "learn" && purpose !== "explore")
-    return { error: "A map switches only between Explore and Learn." };
   if (map.purpose === purpose) return {};
+  // two modes switch when one of them names the other (Explore names Learn);
+  // any other plugin's mode is set only when its map is started
+  const pairs = (a: string, b: string) =>
+    !!pluginFor(a)?.switchesWith?.includes(b);
+  if (!pairs(map.purpose, purpose) && !pairs(purpose, map.purpose))
+    return {
+      error:
+        pluginFor(map.purpose) && !pluginFor(map.purpose)?.switchesWith?.length
+          ? "This map's mode is fixed; start a new map for another mode."
+          : "A map switches only between Explore and Learn.",
+    };
   map.purpose = purpose;
   ctx.note(`Switched the canvas to ${map.purpose} mode.`);
   engine.push();
