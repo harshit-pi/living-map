@@ -53,6 +53,10 @@ export type Side = {
   facts: string[];
   sure: Sure;
   at: number;
+  // Claude judged this cell on its own, in a thread (an Ask or a reply): a
+  // guess it left is one it could not settle, so Next does not ask again
+  // until a newer fact is on the board
+  checked?: boolean;
 };
 // yours wins on the board; Claude's shows beside it
 export type Cell = { you?: Side; claude?: Side };
@@ -78,6 +82,9 @@ export type Step = {
   do: string;
   by: Who;
   done?: boolean;
+  // when Claude wrote it (older maps have none): one older than the choice
+  // was about an earlier one
+  at?: number;
 };
 export type Outcome = "expected" | "worse" | "too-soon";
 export type Commit = {
@@ -126,6 +133,14 @@ export type ExploreState = {
 };
 
 export const cellKey = (option: string, row: string) => `${option}|${row}`;
+
+// A check still to run is not a fact: Claude starts its summary "To check:",
+// and older maps phrase it as an instruction ("Split churn by cohort"). It
+// shows as one on the Tree, and is no loose fact on the board.
+const CHECK =
+  /^\s*(to check:|(check|compare|split|break\b.*\bdown|match|measure|look (at|for|up|into)|pull|test|find out|segment|verify|confirm)\b)/i;
+export const isCheck = (n: { kind: string; title: string; summary: string }) =>
+  n.kind === "fact" && (CHECK.test(n.summary) || CHECK.test(n.title));
 
 // ---- what the browser sees (view): computed on the server, read as is
 
@@ -214,6 +229,9 @@ export type BoardView = {
   settled: boolean;
   // what Next does when this is the board you are on
   next: Gap;
+  // the facts on this choice (none under a question below it) that back no
+  // cell yet
+  looseFacts: { id: string; title: string }[];
 };
 
 export type StandView = Stand & { stale: boolean };
@@ -290,7 +308,8 @@ export type ExploreView = {
   open: OpenItem[];
   questions: QuestionView[];
   next: Gap;
-  looseFacts: { id: string; title: string }[];
+  // the want nodes: the board's rail shows them, so the Tree leaves them out
+  wants: string[];
   outcomeDue: {
     q: string;
     option: string;

@@ -80,9 +80,10 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
           <div
             // another board, or another map, opens at its top
             key={`${map.id}|${shown.question}`}
-            className="absolute inset-0 overflow-y-auto px-4 pb-56 pt-3"
-            // with the panel beside it, the board scrolls in the room left
-            style={one && roomy ? { paddingRight: 452 } : undefined}
+            // with the panel beside it, the board scrolls in the room left,
+            // on any window wide enough to leave some (the panel floats over
+            // the work only on a narrow one)
+            className={`absolute inset-0 overflow-y-auto px-4 pb-56 pt-3 ${one ? "md:pr-[452px]" : ""}`}
           >
             {shown.path.length > 1 && (
               <nav className="mb-2 flex flex-wrap items-center gap-1 text-[13px] text-muted">

@@ -177,6 +177,13 @@ function WantActions({
   const q = board.question;
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(node.title);
+  // its marks go with it, and only another Claude move brings them back:
+  // with marks on it, Remove asks first
+  const [removing, setRemoving] = useState(false);
+  const marks = board.columns.filter(
+    (c) => board.cells[cellKey(c.id, row.id)],
+  ).length;
+  const remove = () => void act("want", { q, id: row.id, remove: true });
   return (
     <>
       {row.suggested && (
@@ -203,11 +210,18 @@ function WantActions({
         </button>
       ))}
       <Btn onClick={() => setRenaming(!renaming)}>Rename</Btn>
-      {!row.suggested && (
-        <Btn onClick={() => void act("want", { q, id: row.id, remove: true })}>
-          Remove
-        </Btn>
-      )}
+      {!row.suggested &&
+        (removing ? (
+          <span className="flex basis-full flex-wrap items-center gap-1.5 text-xs text-body">
+            Remove it and its {marks === 1 ? "mark" : `${marks} marks`}?
+            <Btn onClick={remove}>Remove</Btn>
+            <Btn onClick={() => setRemoving(false)}>Keep it</Btn>
+          </span>
+        ) : (
+          <Btn onClick={() => (marks ? setRemoving(true) : remove())}>
+            Remove
+          </Btn>
+        ))}
       {explain}
       {renaming && (
         <form

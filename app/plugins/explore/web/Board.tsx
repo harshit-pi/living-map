@@ -78,15 +78,23 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   // within its own span, which stops short of the columns after the options
   // (the drawer, "Something else?"): it is kept narrower than the box you
   // see by their width, so it can follow you to the far right. The box's
-  // width is kept on it as --board-w
+  // width is kept on it as --board-w.
+  // The option names stay pinned on top as the rail is on the left, so a
+  // tall board scrolls inside its box, no taller than the room it is in;
+  // past its end, the scroll carries on to what is under it
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = box.current;
-    if (!el) return;
-    const fit = () => el.style.setProperty("--board-w", `${el.clientWidth}px`);
+    const room = el?.parentElement;
+    if (!el || !room) return;
+    const fit = () => {
+      el.style.setProperty("--board-w", `${el.clientWidth}px`);
+      el.style.maxHeight = `${Math.max(room.clientHeight - 24, 320)}px`;
+    };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
+    ro.observe(room);
     return () => ro.disconnect();
   }, []);
   const cols = board.columns;
@@ -238,7 +246,20 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
         </div>
       ),
     });
-  lines.push({ key: "add", span: <AddWant here={here} q={q} /> });
+  lines.push({
+    key: "add",
+    span: (
+      <AddWant
+        here={here}
+        q={q}
+        // the group you add to stays open, so the want you typed stays on
+        // screen when the board grows past the fold
+        onAdded={(w) => {
+          if (w !== "must" && !opened.has(w)) setOpened(w, true);
+        }}
+      />
+    ),
+  });
   lines.push({
     key: "against",
     tone: "foot",
@@ -282,7 +303,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
   return (
     <div
       ref={box}
-      className="w-fit max-w-full overflow-x-auto rounded-xl border border-line bg-surface"
+      className="w-fit max-w-full overflow-auto rounded-xl border border-line bg-surface"
     >
       <div className="grid w-max" style={{ gridTemplateColumns: template }}>
         {lines.map((l, i) =>
@@ -306,7 +327,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
               <div
                 key={`${l.key}-rail`}
                 style={at(i + 1, 1)}
-                className={`sticky left-0 z-10 border-r border-line ${lineCls(l)} ${l.tone ? "" : "bg-surface"}`}
+                className={`sticky left-0 border-r border-line ${l.tone === "head" ? "top-0 z-30" : "z-10"} ${lineCls(l)} ${l.tone ? "" : "bg-surface"}`}
               >
                 {l.rail}
               </div>,
@@ -314,7 +335,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
                 <div
                   key={`${l.key}-${c.id}`}
                   style={at(i + 1, first + j)}
-                  className={`min-w-0 border-r border-line ${lineCls(l)} ${!l.tone && c.lead && !c.faded ? "bg-primary-soft/30" : ""}`}
+                  className={`min-w-0 border-r border-line ${l.tone === "head" ? "sticky top-0 z-20" : ""} ${lineCls(l)} ${!l.tone && c.lead && !c.faded ? "bg-primary-soft/30" : ""}`}
                 >
                   {isStrip(c)
                     ? l.tone === "head" && (
@@ -330,7 +351,7 @@ export function Board({ here, board }: { here: Here; board: BoardView }) {
           <div
             // the header line only: the lines that span the board run under it
             style={{ gridRow: 1, gridColumn: 2 }}
-            className="border-r border-dashed border-line-strong bg-canvas p-3"
+            className="sticky top-0 z-20 border-r border-dashed border-line-strong bg-canvas p-3"
           >
             <div className="text-[13px] text-muted">
               Keep things as they are
@@ -690,7 +711,15 @@ function TallyCell({
 }
 
 // "+ what else do you want?", with the categories you have probably missed
-function AddWant({ here, q }: { here: Here; q: string }) {
+function AddWant({
+  here,
+  q,
+  onAdded,
+}: {
+  here: Here;
+  q: string;
+  onAdded: (w: Weight) => void;
+}) {
   const [title, setTitle] = useState("");
   const [weight, setWeight] = useState<Weight>("matters");
   const input = useRef<HTMLInputElement>(null);
@@ -701,7 +730,11 @@ function AddWant({ here, q }: { here: Here; q: string }) {
           e.preventDefault();
           if (!title.trim()) return;
           void here.act("want", { q, title, weight });
+          onAdded(weight);
           setTitle("");
+          // back to the usual weight: a must you meant once would otherwise
+          // make the next want a must too
+          setWeight("matters");
         }}
         className="flex flex-wrap items-center gap-1.5"
       >

@@ -8,6 +8,7 @@
 
 import {
   cellKey,
+  isCheck,
   MARKS,
   PLUGIN_ID,
   SHAPES,
@@ -198,6 +199,13 @@ export function reconcile(state: unknown, nodes: Nodes): ExploreState {
         nodes[b.commit.option].status !== "chosen")
     )
       dropCommit(b);
+    // older maps kept Claude's after for an earlier choice when the choice
+    // changed: what it wrote before this choice was made is about another
+    if (b.commit) {
+      const at = b.commit.at;
+      b.assumptions = b.assumptions.filter((a) => a.by === "you" || a.at >= at);
+      b.steps = b.steps.filter((x) => x.by === "you" || (x.at ?? at) >= at);
+    }
     // an option chosen before boards existed is a choice made, with no why
     const chosen = opts.find((o) => o.status === "chosen");
     if (b.shape === "choose" && !b.commit && chosen)
@@ -334,25 +342,42 @@ type Hole = { option: string; want: string; guess: boolean };
 // Empty or guess cells on the given rows, over the options still in play,
 // most worth filling first: the lead's column, then empty cells before
 // guesses. A column that already fails a must is out, so its other cells
-// are no gap: filling them cannot change the choice.
+// are no gap: filling them cannot change the choice. With `rechecks` off
+// (Next), a guess Claude already checked on its own is left out until a
+// fact newer than its mark is on the board: asking again would only get the
+// same answer, for another paid move.
 function holes(
   s: ExploreState,
   nodes: Nodes,
   b: Board,
   weight: Weight,
-  { guesses = true } = {},
+  { guesses = true, rechecks = true } = {},
 ): Hole[] {
   const lead = liveLead(s, nodes, b.question)?.id;
   const t = tally(b, nodes);
   const cols = columnsOf(nodes, b).filter(
     (o) => inPlay(o) && !t[o.id]?.failsMust,
   );
+  const rowIds = new Set(b.rows.map((r) => r.id));
+  const facts = rechecks
+    ? []
+    : [...subtree(nodes, b.question)]
+        .map((id) => nodes[id])
+        .filter((n) => n?.kind === "fact" && !rowIds.has(n.id));
+  const settledGuess = (side: Side) =>
+    !!side.checked &&
+    !facts.some((f) => f.updatedAt > side.at && !side.facts.includes(f.id));
   const out: Hole[] = [];
   for (const o of cols)
     for (const r of keptRows(b).filter((x) => x.weight === weight)) {
-      const sc = shown(own(b.cells, cellKey(o.id, r.id)));
+      const cell = own(b.cells, cellKey(o.id, r.id));
+      const sc = shown(cell);
       if (!sc) out.push({ option: o.id, want: r.id, guess: false });
-      else if (guesses && sc.guess)
+      else if (
+        guesses &&
+        sc.guess &&
+        (rechecks || !cell?.claude || !settledGuess(cell.claude))
+      )
         out.push({ option: o.id, want: r.id, guess: true });
     }
   // a stable sort: column order holds within each rank
@@ -363,7 +388,9 @@ function holes(
 // ---------------------------------------------------------------- fold, tally
 
 // Rows grouped by weight. Musts never fold; past `max` rows NICE folds to a
-// count, then MATTERS, unless you opened that group.
+// count, then MATTERS, unless you opened that group. A group of one row is
+// never folded: its count line takes the same room, so it would hide the
+// want and save nothing.
 export function fold(
   rows: RowView[],
   cells: Record<string, Cell>,
@@ -387,7 +414,8 @@ export function fold(
   if (rows.length > max)
     for (const w of ["nice", "matters"] as const) {
       const g = groups.find((x) => x.weight === w);
-      if (g && !opened.has(w) && shownRows() > max) g.folded = true;
+      if (g && g.rows.length > 1 && !opened.has(w) && shownRows() > max)
+        g.folded = true;
     }
   return groups;
 }
@@ -546,14 +574,29 @@ export function openItems(
   const undecided = Object.values(s.boards).filter(
     (b) => b.shape === "choose" && !chosenHere(nodes, b.question),
   );
-  const empty: string[] = [];
-  const guess: string[] = [];
+  // counted in cells, and said so: "4 empty musts" read as 4 missing wants
+  // when it was 1 must across 4 options
+  const empty: Hole[] = [];
+  const guess: Hole[] = [];
+  const qOf = new Map<Hole, string>();
   for (const b of undecided)
-    for (const h of holes(s, nodes, b, "must"))
-      (h.guess ? guess : empty).push(b.question);
-  add("empty-must", empty, (n) => plural(n, "empty must"));
-  add("guess-must", guess, (n) =>
-    n === 1 ? "1 guess on a must" : `${n} guesses on musts`,
+    for (const h of holes(s, nodes, b, "must")) {
+      qOf.set(h, b.question);
+      (h.guess ? guess : empty).push(h);
+    }
+  const onMusts = (hs: Hole[]) => {
+    const musts = new Set(hs.map((h) => h.want)).size;
+    return musts === 1 ? "on 1 must" : `on ${musts} musts`;
+  };
+  add(
+    "empty-must",
+    empty.map((h) => qOf.get(h)!),
+    (n) => `${plural(n, "empty cell")} ${onMusts(empty)}`,
+  );
+  add(
+    "guess-must",
+    guess.map((h) => qOf.get(h)!),
+    (n) => `${plural(n, "guess", "guesses")} ${onMusts(guess)}`,
   );
   const choices = roll.points.filter(
     (p) => p.shape === "choose" && p.open && p.id !== root,
@@ -621,6 +664,13 @@ export function newestChange(s: ExploreState, nodes: Nodes, q: string): number {
   return Math.max(t, b.commit?.at ?? 0);
 }
 
+// A cell or a case against written on the board after `t`: new evidence.
+export function changedSince(b: Board, t: number): boolean {
+  for (const c of Object.values(b.cells))
+    if ((c.you?.at ?? 0) > t || (c.claude?.at ?? 0) > t) return true;
+  return Object.values(b.against).some((l) => l.some((a) => a.at > t));
+}
+
 export const isStale = (s: ExploreState, nodes: Nodes, q: string): boolean => {
   const st = own(s.stand, q);
   return !!st && st.at < newestChange(s, nodes, q);
@@ -660,7 +710,7 @@ export function nextGap(
             ? "a choice with one option fails far more often"
             : "there is no keep-things-as-they-are option to weigh against",
       };
-    const must = holes(s, nodes, b, "must")[0];
+    const must = holes(s, nodes, b, "must", { rechecks: false })[0];
     if (must)
       return {
         kind: "ask",
@@ -906,6 +956,7 @@ export function applyExploreOp(
         facts,
         sure: facts.length ? given : "low",
         at: now,
+        ...(scope ? { checked: true } : {}),
       };
       const key = cellKey(option, want);
       b.cells[key] = { ...own(b.cells, key), claude: side };
@@ -953,6 +1004,17 @@ export function applyExploreOp(
       };
       if (op.sure !== undefined && op.sure !== null && Number.isFinite(sure))
         st.sure = Math.min(100, Math.max(0, Math.round(sure)));
+      // Your choice is no evidence: with nothing new on the board since you
+      // chose, Claude's lead and how sure it is stay what they were, so
+      // "Claude agrees" means it does (the lead may be an option your choice
+      // set aside)
+      const b = own(s.boards, q);
+      const was = own(s.stand, q);
+      if (b?.commit && was && !changedSince(b, b.commit.at)) {
+        st.lead = was.lead;
+        if (was.sure !== undefined) st.sure = was.sure;
+        else delete st.sure;
+      }
       s.stand[q] = st;
       return 1;
     }
@@ -1032,7 +1094,7 @@ export function applyExploreOp(
       }
       if (!what || b.steps.filter((x) => x.by === "claude").length >= WRAP_MAX)
         return 0;
-      b.steps.push({ id, when, do: what, by: "claude" });
+      b.steps.push({ id, when, do: what, by: "claude", at: now });
       return 1;
     }
   }
@@ -1246,19 +1308,50 @@ export function outlineOf(s: ExploreState, nodes: Nodes): string {
   return text ? `DECISION BOARDS:\n${text}` : "";
 }
 
-// Facts on the map that back no cell and are no board's want.
-export function looseFacts(s: ExploreState, nodes: Nodes) {
-  const used = new Set<string>();
-  for (const b of Object.values(s.boards)) {
-    for (const r of b.rows) used.add(r.id);
+// Facts that back no cell, are no want and no check still to run: on the
+// whole map, or on one choice (under its question, but not under a question
+// below it, whose facts are about that one).
+export function looseFacts(s: ExploreState, nodes: Nodes, q?: string) {
+  const used = new Set(wantIds(s, nodes));
+  for (const b of Object.values(s.boards))
     for (const c of Object.values(b.cells))
       for (const f of [...(c.you?.facts ?? []), ...(c.claude?.facts ?? [])])
         used.add(f);
+  let within: Set<string> | null = null;
+  if (q) {
+    within = subtree(nodes, q);
+    for (const id of [...within])
+      if (id !== q && isQuestion(nodes, id))
+        for (const x of subtree(nodes, id)) within.delete(x);
   }
   return Object.values(nodes)
-    .filter((n) => n.kind === "fact" && !n.dropped && !used.has(n.id))
+    .filter(
+      (n) =>
+        n.kind === "fact" &&
+        !n.dropped &&
+        !used.has(n.id) &&
+        !isCheck(n) &&
+        (!within || within.has(n.id)),
+    )
     .sort(byOrder)
     .map((n) => ({ id: n.id, title: n.title }));
+}
+
+// The want nodes: every board's rows, and a want an older map left behind
+// when you removed it (its summary still says it is a want), unless
+// something hangs under it.
+export function wantIds(s: ExploreState, nodes: Nodes): string[] {
+  const ids = new Set(
+    Object.values(s.boards).flatMap((b) => b.rows.map((r) => r.id)),
+  );
+  for (const n of Object.values(nodes))
+    if (
+      n.kind === "fact" &&
+      WANT_SUMMARY.test(n.summary) &&
+      !Object.values(nodes).some((x) => x.parent === n.id)
+    )
+      ids.add(n.id);
+  return [...ids];
 }
 
 // ---------------------------------------------------------------- view
@@ -1288,7 +1381,11 @@ export function viewOf(
     const q = b.question;
     const cols = columnsOf(nodes, b);
     const t = tally(b, nodes);
-    const lead = liveLead(s, nodes, q)?.id;
+    // after a Choose, Claude's lead may be an option the choice set aside:
+    // it is still Claude's, so its column says so
+    const lead =
+      liveLead(s, nodes, q)?.id ??
+      (b.commit ? (own(s.stand, q)?.lead ?? undefined) : undefined);
     const column = (o: MapNode): ColumnView => {
       const list = own(b.against, o.id) ?? [];
       return {
@@ -1343,6 +1440,7 @@ export function viewOf(
       needsWants: b.shape === "choose" && !b.rows.length,
       settled: point(q)?.settled ?? false,
       next: nextGap(s, nodes, q),
+      looseFacts: looseFacts(s, nodes, q),
     };
   }
   const stand: ExploreView["stand"] = {};
@@ -1402,7 +1500,7 @@ export function viewOf(
     open: openItems(s, nodes, roll),
     questions,
     next: nextGap(s, nodes),
-    looseFacts: looseFacts(s, nodes),
+    wants: wantIds(s, nodes),
     outcomeDue,
   };
 }

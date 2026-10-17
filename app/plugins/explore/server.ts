@@ -54,7 +54,9 @@ const PROMPT = `You are the engine behind a DECISION BOARD. The user works throu
 - A cell is your judgment of one option on one want, against the other options. Cite the facts behind it by id. With no fact on the map behind it, set sure "low": it shows as a guess. Leave a cell out rather than invent a reason, and say what you did not check.
 - "Against" is the strongest single reason an option is the wrong choice, not a balanced review.
 - Keep scoring light: marks only, never weights, scores or totals.
-- For causes: never set a cause dropped. If a fact rules it out, start its summary "Ruled out:" and name the fact; the user sets it aside.
+- For causes: never set a cause dropped. If a fact rules it out, start its summary "Ruled out:" and name the fact; the user sets it aside. The stand's lead is the cause you think likeliest so far, with how sure you are; its line is about the whole question, never only the cause you last worked on. With no likeliest cause yet, lead null and no sure.
+- A fact node states something known, with its source. A check not yet run is not a fact: start its summary "To check:" and say what it would show; once it is run, rewrite the summary with what it found.
+- When the user tells you about their own situation (budget, tools, team, deadlines), it bears on every option: add it as a fact (in a thread, under the thread's node) and cite it, so the other options' cells are judged on it too; in a thread, say the rest of the board picks it up on the next move.
 - Only the user chooses, sets aside or settles. Never set a question answered while options under it are still proposed: give your lead in a stand op. Never write "Recommended:".
 - End every move that changes a board with a stand op for that board, and write a fresh one for any board whose last stand is marked "written before the last change". Never add fact nodes that sum up where things stand: that is what the stand op is for.
 - Cells land only on wants the user kept: your new wants are suggestions, and a cell on one is dropped. On a board with no kept wants, write no cells, and never describe marks in the caption that the board does not show.
@@ -73,19 +75,21 @@ BOARD OPS (in the same map block as node ops):
 The user's ratings, wants and answers are theirs: give your view beside them, never as theirs.`;
 
 // Each op names nodes by id, so it goes after the nodes it names.
-const START = `START: classify the question with a frame op on the root. choose: the root, 3-4 options (one of them "Keep things as they are" or "Wait"), and 4-6 want ops spread over the categories, at most 2 of them must; no cells. causes: the root, 3-5 possible causes as options, and up to 2 facts on how to tell them apart. open: the root and 3-4 sub-questions; a sub-question that is a choice gets its own frame. Then a stand op for the root, lead null, with a line saying what would decide it. Write each board op after the nodes it names. The caption is one sentence: keep or skip the suggested wants, add your own, then press Fill.`;
+const START = `START: classify the question with a frame op on the root. choose: the root, 3-4 options (one of them "Keep things as they are" or "Wait"), and 4-6 want ops spread over the categories, at most 2 of them must; no cells. causes: the root, 3-5 possible causes as options, and up to 2 checks that would tell them apart (fact nodes whose summary starts "To check:"). open: the root and 3-4 sub-questions; a sub-question that is a choice gets its own frame. Then a stand op for the root, lead null, with a line saying what would decide it. Write each board op after the nodes it names. The caption is one sentence: keep or skip the suggested wants, add your own, then press Fill.`;
 
-const FILL = `FILL the board named in the ACTION: cell ops for every live option, must wants first, then matters, then nice; at most 24 cells. Skip suggestions the user has not kept. Leave out a cell you cannot judge, or write unknown with what would tell. Add at most 3 facts when one decides a cell, and cite it. You may add one option if the wants point at one the board lacks (no cells for it yet). End with a stand op.`;
+const FILL = `FILL the board named in the ACTION: cell ops for every live option on every want the ACTION lists, must wants first, then matters, then nice; at most 24 cells. Pressing Fill kept every suggestion the user did not skip, so all of them are the user's wants now. Leave out a cell you cannot judge, or write unknown with what would tell. Add at most 3 facts when one decides a cell, and cite it. You may add one option if the wants point at one the board lacks (no cells for it yet). End with a stand op.`;
 
 const WRAP = `{"op":"premortem","option":"option id","reasons":["at most 12 words"]}          // at most 3, likeliest first
 {"op":"assume","q":"question id","id":"a-short-id","text":"at most 14 words","breaksIf":"at most 14 words"}
 {"op":"step","q":"question id","id":"s-short-id","when":"if/when …, at most 10 words","do":"at most 12 words"}
-WRAP: the ACTION names the option chosen and its question. It is a year from now and the choice failed. Write a premortem op with the 3 likeliest reasons. Turn the top 2 into assume ops: what must stay true, and breaksIf, the first sign you would see that it broke. Write 1-3 step ops, each "if/when X, do Y"; make the first doable this week. End with a stand op for the question. No other ops.`;
+WRAP: the ACTION names the option chosen and its question. It is a year from now and the choice failed. Write a premortem op with the 3 likeliest reasons. Turn the top 2 into assume ops: what must stay true, and breaksIf, the first sign you would see that it broke. Write 1-3 step ops, each "if/when X, do Y"; make the first doable this week. End with a stand op for the question: the user's choice is no evidence, so keep your own lead and how sure you are from YOUR LAST STAND (it may be another option), and say in the line whether you agree. No other ops.`;
 
 const SUGGEST = `SUGGEST WANTS for the question named in the ACTION: from what is on the map, write 4-6 want ops for what the user seems to want. Where an existing fact states a want, reuse its id so it becomes the row. No cells.`;
 
 const LAYING_OUT = "Laying out the board";
 const FILLING = "Filling the board";
+// Next's label for a fill (core.ts nextGap)
+const FILL_LABEL = "Fill the board";
 const SUGGESTING = "Suggesting what to weigh";
 const ANOTHER = "Looking for another option";
 
@@ -169,15 +173,39 @@ const lead = (how: TurnHow, text: string) =>
 
 function fillTurn(ctx: Ctx, q: MapNode, how: TurnHow = {}) {
   const s = state(ctx);
-  const b = ensureBoard(s, ctx.map.nodes, q.id);
+  const nodes = ctx.map.nodes;
+  const b = ensureBoard(s, nodes, q.id);
   if (!b.rows.length)
     return fail("Add what you want first, or ask Claude to suggest some.");
-  // pressing Fill keeps the suggestions you did not skip
-  for (const r of b.rows) r.suggested = false;
+  // a second press while one runs would pay for the same fill again
+  if (
+    ctx.engine.isQueuedOrRunning(q.id, FILLING) ||
+    ctx.engine.isQueuedOrRunning(q.id, `Next: ${FILL_LABEL}`)
+  )
+    return {};
+  // pressing Fill keeps the suggestions you did not skip; said in a note, or
+  // Claude reads only the ones you kept by hand as kept, and fills those
+  const kept = b.rows.filter((r) => r.suggested);
+  for (const r of kept) {
+    r.suggested = false;
+    const n = own(nodes, r.id);
+    if (n && WANT_SUMMARY.test(n.summary))
+      n.summary = wantSummary(r.weight, false);
+  }
+  if (kept.length)
+    ctx.note(
+      `Pressing Fill kept Claude's suggestions ${kept.map((r) => t(nodes[r.id])).join(", ")} as what you want.`,
+    );
   b.filledAt = Date.now();
   ctx.say("Fill the board");
+  const order = WEIGHTS.flatMap((w) =>
+    b.rows.filter((r) => r.weight === w).map((r) => `[${r.id}] ${r.weight}`),
+  );
   return ctx.engine.turn(
-    lead(how, `FILL the board for [${q.id}] ${t(q)}.`),
+    lead(
+      how,
+      `FILL the board for [${q.id}] ${t(q)}. Fill every one of these wants: ${order.join(", ")}.`,
+    ),
     ctx.settings,
     { label: how.label ?? FILLING, sections: ["fill"], nodeId: q.id },
   );

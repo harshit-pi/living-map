@@ -78,12 +78,21 @@ export function Tree({
   useEffect(() => {
     framing.current = frame;
   }, [frame]);
+  const view = exploreView(map);
+  // what you want is the board's rail, never a card on the tree: there it
+  // read as a fact, and a sub-choice's wants crowded its options
+  const wants = useMemo(() => new Set(view?.wants ?? []), [view]);
   const visible = useMemo(
     () =>
       Object.values(map.nodes).filter(
-        (n) => showDropped || !setAside(map.nodes, n.id),
+        (n) =>
+          (showDropped || !setAside(map.nodes, n.id)) &&
+          !(
+            wants.has(n.id) &&
+            !Object.values(map.nodes).some((x) => x.parent === n.id)
+          ),
       ),
-    [map, showDropped],
+    [map, showDropped, wants],
   );
   const laid = useMemo(() => layout(visible), [visible]);
   const threads = useMemo(() => {
@@ -99,7 +108,6 @@ export function Tree({
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
   >({});
-  const view = exploreView(map);
   const nodes = useMemo(
     () =>
       laid.nodes.map((n) => ({
@@ -118,23 +126,52 @@ export function Tree({
   );
   const { fitView, getViewport, setViewport } = useReactFlow();
 
-  // The whole tree, or, when it cannot be read whole, its root and what is
-  // next to it: a fit at the smallest readable zoom would frame the middle
-  // of the bounds, which on a lopsided tree is no card in particular.
+  // The box around some laid-out cards, in tree units.
+  const boundsOf = (ids: Set<string>) => {
+    const ns = laid.nodes.filter((n) => ids.has(n.id));
+    const x = Math.min(...ns.map((n) => n.position.x));
+    const y = Math.min(...ns.map((n) => n.position.y));
+    const right = Math.max(
+      ...ns.map((n) => n.position.x + (sizes[n.id]?.width ?? 260)),
+    );
+    const bottom = Math.max(
+      ...ns.map((n) => n.position.y + (sizes[n.id]?.height ?? 120)),
+    );
+    return { x, y, w: right - x, h: bottom - y };
+  };
+  // The whole tree, or, when it cannot be read whole, the root and the
+  // cards right under it (for a why-question, every cause): those are where
+  // it stands. A fit at the smallest readable zoom would frame the middle of
+  // the bounds, which on a lopsided tree is no card in particular, and
+  // centring on the root cut its first children off at the top.
   const frameWhole = async () => {
     await fitView({ ...WHOLE, duration: 300 });
     const root = laid.nodes.find((n) => !map.nodes[n.id]?.parent);
     if (!root || getViewport().zoom > READABLE + 0.001) return;
-    const h = sizes[root.id]?.height ?? 120;
-    const room = Math.max(height - BELOW, 200);
-    await setViewport(
-      {
-        x: PAD - root.position.x * READABLE,
-        y: PAD + (room - PAD) / 2 - (root.position.y + h / 2) * READABLE,
-        zoom: READABLE,
-      },
-      { duration: 200 },
+    const z = READABLE;
+    const room = Math.max(height - BELOW, 200) - PAD;
+    const all = boundsOf(new Set(laid.nodes.map((n) => n.id)));
+    const near = boundsOf(
+      new Set([
+        root.id,
+        ...laid.nodes
+          .filter((n) => map.nodes[n.id]?.parent === root.id)
+          .map((n) => n.id),
+      ]),
     );
+    // across: the whole width centred when it fits, else from the root
+    const x =
+      all.w * z <= width - 2 * PAD
+        ? (width - all.w * z) / 2 - all.x * z
+        : PAD - all.x * z;
+    // down: the whole tree, else the root and its children, centred in the
+    // room above the message box; else those from the top
+    const box = all.h * z <= room ? all : near;
+    const y =
+      box.h * z <= room
+        ? PAD + (room - box.h * z) / 2 - box.y * z
+        : PAD - box.y * z;
+    await setViewport({ x, y, zoom: z }, { duration: 200 });
   };
 
   // The camera holds still: it frames the whole tree when the tree first
@@ -259,19 +296,20 @@ export function Tree({
         <Controls
           showInteractive={false}
           position="top-left"
-          onFitView={() => void frameWhole()}
+          onFitView={() => {
+            void frameWhole();
+            // you have looked at the whole tree: nothing on it is new now
+            setSeen(new Set(Object.keys(map.nodes)));
+          }}
         />
       </ReactFlow>
       {fresh.length > 0 && (
+        // beside the zoom buttons: on a left-to-right tree the corner above
+        // the root is the one a card is least often in
         <button
           onClick={showNew}
           title="Frame the nodes Claude added since you last looked"
-          className="absolute right-4 top-3 z-10 rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary shadow-md hover:bg-primary-strong"
-          style={
-            panelOpen && width > PANEL_W * 2
-              ? { right: PANEL_W + 16 }
-              : undefined
-          }
+          className="absolute left-14 top-3 z-10 rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary shadow-md hover:bg-primary-strong"
         >
           {fresh.length} new ▸
         </button>

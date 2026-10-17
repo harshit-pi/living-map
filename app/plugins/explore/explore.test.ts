@@ -8,6 +8,7 @@ import { test } from "vitest";
 import {
   applyExploreOp,
   clip,
+  newState,
   fold,
   live,
   nextGap,
@@ -22,7 +23,12 @@ import {
 } from "./core.ts";
 import { parseDump, RUN1, RUN2 } from "./fixtures.ts";
 import { explore } from "./server.ts";
-import type { ExploreState, ExploreView, RowView } from "./shared.ts";
+import {
+  isCheck,
+  type ExploreState,
+  type ExploreView,
+  type RowView,
+} from "./shared.ts";
 import { makeCtx } from "../../server/actions/context.ts";
 import type { Raw, StoredMap } from "../../server/core/types.ts";
 import type { Engine, TurnOptions } from "../../server/engine.ts";
@@ -83,8 +89,9 @@ function withWants(nodes: Nodes) {
   return { map, s };
 }
 
-// An engine that records the turns it is asked for and runs none of them.
-function stub(map: StoredMap) {
+// An engine that records the turns it is asked for and runs none of them;
+// `busy` says every turn asked about is already queued or running.
+function stub(map: StoredMap, { busy = false } = {}) {
   const turns: { action: string; opts: TurnOptions }[] = [];
   let pushes = 0;
   const engine = {
@@ -107,7 +114,7 @@ function stub(map: StoredMap) {
       };
       return id;
     },
-    isQueuedOrRunning: () => false,
+    isQueuedOrRunning: () => busy,
   } as unknown as Engine;
   const ctx = makeCtx(engine, { model: "", effort: "" }, map);
   const run = (name: string, args: Raw = {}) =>
@@ -1385,4 +1392,198 @@ test("an empty message runs no turn", async () => {
     assert.match((await run("message", { text })).error ?? "", /Say something/);
   assert.equal(turns.length, 0);
   assert.deepEqual(m.chat, []);
+});
+
+test("Fill says it kept the open suggestions, names every want, and runs once", async () => {
+  const m = storedMap(boardNodes());
+  m.data = { explore: withWants(m.nodes).s };
+  const { run, turns } = stub(m);
+  await run("fill", { q: "q" });
+  assert.match(
+    m.notes.join("\n"),
+    /Pressing Fill kept Claude's suggestions "w-sugg" as what you want/,
+  );
+  assert.equal(m.nodes["w-sugg"].summary, "What you want · nice");
+  assert.match(
+    turns[0].action,
+    /Fill every one of these wants: \[w-cost\] must, \[w-speed\] matters, \[w-sugg\] nice\./,
+  );
+  // a second press while a fill is queued or running pays for nothing
+  const m2 = storedMap(boardNodes());
+  m2.data = { explore: withWants(m2.nodes).s };
+  const two = stub(m2, { busy: true });
+  await two.run("fill", { q: "q" });
+  assert.equal(two.turns.length, 0);
+  assert.ok(!ex(m2).boards.q.filledAt);
+});
+
+test("Next asks once on a guess Claude checked in a thread, and again only after a newer fact", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  for (const o of ["keep", "pg", "dyn"])
+    for (const w of ["w-cost", "w-speed"])
+      applyExploreOp(s, nodes, {
+        op: "cell",
+        option: o,
+        want: w,
+        mark: "same",
+        facts: ["f-pg"],
+      });
+  const guess = { op: "cell", option: "pg", want: "w-cost" };
+  applyExploreOp(s, nodes, { ...guess, mark: "better" }, { now: 100 });
+  let g = nextGap(s, nodes, "q");
+  assert.deepEqual([g.kind, g.option, g.want], ["ask", "pg", "w-cost"]);
+  // Claude checks it in pg's thread and still cannot tell
+  applyExploreOp(
+    s,
+    nodes,
+    { ...guess, mark: "unknown", note: "a trial would tell" },
+    { scope: "pg", now: 200 },
+  );
+  assert.equal(s.boards.q.cells["pg|w-cost"].claude?.checked, true);
+  g = nextGap(s, nodes, "q");
+  assert.ok(
+    !(g.kind === "ask" && g.option === "pg" && g.want === "w-cost"),
+    "Next moves on",
+  );
+  // still open, for you to rate
+  assert.ok(openItems(s, nodes).some((o) => o.kind === "guess-must"));
+  // a fact newer than the mark is something to check it against
+  nodes["f-budget"] = node("f-budget", "dyn", "fact", "Budget $1,500/mo", {
+    updatedAt: 300,
+    order: 60,
+  });
+  g = nextGap(s, nodes, "q");
+  assert.deepEqual([g.kind, g.option, g.want], ["ask", "pg", "w-cost"]);
+});
+
+test("the open list counts empty cells, and on how many musts", () => {
+  const { map, s } = withWants(boardNodes());
+  const open = openItems(s, map.nodes);
+  assert.equal(
+    open.find((o) => o.kind === "empty-must")?.label,
+    "3 empty cells on 1 must",
+  );
+});
+
+test("a group of one row never folds: it would only hide the want", () => {
+  const rows: RowView[] = [
+    ...["m1", "m2"].map((id) => ({ id, weight: "must" as const })),
+    ...["a", "b", "c", "d", "e", "f"].map((id) => ({
+      id,
+      weight: "matters" as const,
+    })),
+    { id: "n1", weight: "nice" as const },
+  ].map((r) => ({ ...r, title: r.id, by: "you" as const, suggested: false }));
+  const g = fold(rows, {}, []);
+  assert.equal(g.find((x) => x.weight === "nice")?.folded, false);
+  assert.equal(g.find((x) => x.weight === "matters")?.folded, true);
+});
+
+test("after you choose, Claude's lead stays its own until the board changes", async () => {
+  const m = storedMap(boardNodes());
+  m.data = { explore: withWants(m.nodes).s };
+  applyExploreOp(live(m), m.nodes, {
+    op: "stand",
+    q: "q",
+    lead: "dyn",
+    line: "DynamoDB scales",
+    sure: 40,
+  });
+  const { run } = stub(m);
+  await run("commit", { option: "pg", why: "joins" });
+  applyExploreOp(live(m), m.nodes, {
+    op: "stand",
+    q: "q",
+    lead: "pg",
+    line: "Chosen",
+    sure: 65,
+  });
+  assert.deepEqual([ex(m).stand.q.lead, ex(m).stand.q.sure], ["dyn", 40]);
+  const v = viewOf(peek(m), m.nodes, m.threads);
+  assert.ok(v.boards.q.columns.find((c) => c.id === "dyn")?.lead);
+  // new evidence: now Claude may change its mind
+  const later = Date.now() + 1000;
+  const s = live(m);
+  applyExploreOp(
+    s,
+    m.nodes,
+    {
+      op: "cell",
+      option: "pg",
+      want: "w-cost",
+      mark: "better",
+      facts: ["f-pg"],
+    },
+    { now: later },
+  );
+  applyExploreOp(
+    s,
+    m.nodes,
+    { op: "stand", q: "q", lead: "pg", line: "It fits", sure: 70 },
+    { now: later },
+  );
+  assert.deepEqual([ex(m).stand.q.lead, ex(m).stand.q.sure], ["pg", 70]);
+});
+
+test("an older map's after for an earlier choice goes when it is opened", () => {
+  const nodes = boardNodes();
+  nodes.pg.status = "chosen";
+  for (const id of ["keep", "dyn"]) nodes[id].status = "dropped";
+  const s = newState();
+  const b = reconcile(s, nodes).boards.q;
+  b.commit = { option: "pg", why: "", at: 500, premortem: { claude: [] } };
+  const a = (id: string, by: "you" | "claude", at: number) => ({
+    id,
+    text: id,
+    breaksIf: "",
+    status: "untested" as const,
+    by,
+    at,
+  });
+  b.assumptions = [a("a-old", "claude", 100), a("a-new", "claude", 600)];
+  b.assumptions.push(a("a-yours", "you", 50));
+  b.steps = [
+    { id: "s-old", when: "", do: "x", by: "claude", at: 100 },
+    { id: "s-undated", when: "", do: "x", by: "claude" },
+    { id: "s-new", when: "", do: "x", by: "claude", at: 700 },
+  ];
+  const r = reconcile({ ...s, boards: { q: b } }, nodes).boards.q;
+  assert.deepEqual(
+    r.assumptions.map((x) => x.id),
+    ["a-new", "a-yours"],
+  );
+  assert.deepEqual(
+    r.steps.map((x) => x.id),
+    ["s-undated", "s-new"],
+  );
+});
+
+test("a board's loose facts are its own: no checks, no wants, none from a question below", () => {
+  const { map, s } = withWants(boardNodes());
+  const nodes = map.nodes;
+  nodes["f-host"] = node("f-host", "q2", "fact", "Managed costs more", {
+    order: 70,
+  });
+  nodes["f-check"] = node("f-check", "pg", "fact", "Query plans", {
+    summary: "To check: run EXPLAIN on the top queries",
+    order: 71,
+  });
+  nodes["w-old"] = node("w-old", "q", "fact", "Old want", {
+    summary: "What you want · must",
+    order: 72,
+  });
+  const v = viewOf(s, nodes, {});
+  assert.deepEqual(
+    v.boards.q.looseFacts.map((f) => f.id),
+    ["f-pg"],
+  );
+  assert.deepEqual(
+    v.boards.q2.looseFacts.map((f) => f.id),
+    ["f-host"],
+  );
+  assert.ok(v.wants.includes("w-old") && v.wants.includes("w-cost"));
+  assert.ok(isCheck(nodes["f-check"]));
+  assert.ok(isCheck(node("x", null, "fact", "Split churn by cohort")));
+  assert.ok(!isCheck(node("y", null, "fact", "TikTok ads started August")));
 });

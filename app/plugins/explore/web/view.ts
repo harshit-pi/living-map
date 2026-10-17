@@ -9,7 +9,12 @@ import { useSyncExternalStore } from "react";
 import type { Action, ActionResult, MapDoc } from "../../../shared/model.ts";
 import { store, stored } from "../../../web/lib/storage.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
-import { PLUGIN_ID, type ExploreView, type Weight } from "../shared.ts";
+import {
+  isCheck,
+  PLUGIN_ID,
+  type ExploreView,
+  type Weight,
+} from "../shared.ts";
 
 export type Tab = "board" | "tree";
 
@@ -126,20 +131,33 @@ export function anchorOf(el: Element): Anchor {
 
 // A cause is not an option you pick: several can be true, and marking one
 // likely is not a choice. Its card and panel say so (set aside keeps the
-// usual word).
+// usual word), and where it stands: Claude's best guess, and how it came out
+// of its case against. A check still to run says so too, so it never reads
+// as something known.
 export function tagOf(
   view: ExploreView | null,
   nodes: MapDoc["nodes"],
   n: MapDoc["nodes"][string],
 ): string | undefined {
-  if (!view || n.kind !== "option" || !n.parent) return undefined;
+  if (!view || !n.parent) return undefined;
   if (n.dropped || n.status === "dropped") return undefined;
+  if (isCheck(n)) return "to check";
+  if (n.kind !== "option") return undefined;
   const shape =
     view.boards[n.parent]?.shape ??
     view.questions.find((p) => p.id === n.parent)?.shape;
   if (shape !== "causes" || nodes[n.parent]?.kind !== "question")
     return undefined;
-  return n.status === "chosen" ? "✓ marked likely" : "possible cause";
+  const against = view.boards[n.parent]?.columns.find(
+    (c) => c.id === n.id,
+  )?.against;
+  return [
+    n.status === "chosen" ? "✓ marked likely" : "possible cause",
+    view.stand[n.parent]?.lead === n.id && "★ Claude's guess",
+    against && `against: survives ${against.survives}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 // What the board's parts work with.

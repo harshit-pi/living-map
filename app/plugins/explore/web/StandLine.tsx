@@ -64,6 +64,8 @@ export function StandLine({
     (p) => p.board && p.shape === "choose" && p.id !== q,
   );
   const due = view.outcomeDue.filter((d) => d.q === q);
+  // this choice's own: the facts of a diagnosis above it back no cell here
+  const looseFacts = board?.looseFacts ?? [];
   // an open item opens its board, or, for a question that is not a choice,
   // its node on the tree
   const goTo = (id: string) => {
@@ -98,6 +100,7 @@ export function StandLine({
                   <span className="text-primary-strong">
                     ★ {title(stand.lead)}
                   </span>
+                  {stand.sure !== undefined && ` ~${stand.sure}%`}
                 </span>
               )
             )}
@@ -119,7 +122,8 @@ export function StandLine({
               "Claude: "
             )}
             “{stand.line}”
-            {stand.sure !== undefined && (
+            {/* how sure is about a lead: with none, a figure says nothing */}
+            {stand.lead && stand.sure !== undefined && (
               <span className="text-muted"> · ~{stand.sure}% sure</span>
             )}
           </span>
@@ -208,13 +212,13 @@ export function StandLine({
             )}
           </button>
         ))}
-        {onBoard && view.looseFacts.length > 0 && (
+        {onBoard && looseFacts.length > 0 && (
           <button
             onClick={(e) => setLoose(anchorOf(e.currentTarget))}
-            title="Facts on the map that back no cell"
+            title="Facts on this choice that back no cell"
             className="rounded-full border border-line px-2 py-0.5 hover:border-primary hover:text-ink"
           >
-            Loose facts {view.looseFacts.length}
+            Loose facts {looseFacts.length}
           </button>
         )}
       </div>
@@ -252,7 +256,7 @@ export function StandLine({
           onClose={() => setLoose(null)}
         >
           <ul className="max-h-64 space-y-1 overflow-y-auto">
-            {view.looseFacts.map((f) => (
+            {looseFacts.map((f) => (
               <li key={f.id}>
                 <button
                   onClick={() => {
