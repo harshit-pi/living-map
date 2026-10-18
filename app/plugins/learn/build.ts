@@ -297,10 +297,10 @@ const JUDGING = "Reading your why";
 const NEW_CASE = "Writing a new case";
 const ARGUING = "Weighing your link";
 
-const id = (v: unknown): string =>
+export const id = (v: unknown): string =>
   typeof v === "string" && safeId(v) ? v : "";
 
-const state = (map: StoredMap): LearnState | null => {
+export const state = (map: StoredMap): LearnState | null => {
   const s = peek(map.data);
   return s?.mode === "build" ? s : null;
 };
@@ -319,7 +319,7 @@ const today = (ctx: Ctx): LearnState | null => {
   return s;
 };
 
-const ok = (ctx: Ctx, result = true): ActionResult => {
+export const ok = (ctx: Ctx, result = true): ActionResult => {
   ctx.engine.push();
   return { ok: result };
 };
@@ -329,7 +329,7 @@ const topPath = (map: StoredMap) =>
     .filter((p) => p.depth === 0)
     .map((p) => p.id);
 
-type At = {
+export type At = {
   s: LearnState;
   step: string;
   st: StepState;
@@ -339,7 +339,7 @@ type At = {
 };
 
 // The step an action is about, its state and its model, or why not.
-function at(ctx: Ctx, a: Raw, stages?: Stage[]): At | string {
+export function at(ctx: Ctx, a: Raw, stages?: Stage[]): At | string {
   const s = today(ctx);
   if (!s) return "This map is not practised as builds.";
   const step = id(a?.step ?? a?.nodeId);
@@ -592,9 +592,9 @@ function passed(x: At, b: Build) {
 
 // ---------------------------------------------------------------- actions
 
-type Act = (ctx: Ctx, a: Raw) => Promise<ActionResult> | ActionResult;
-const fail = (x: At | string): x is string => typeof x === "string";
-const err = (error: string): ActionResult => ({ error });
+export type Act = (ctx: Ctx, a: Raw) => Promise<ActionResult> | ActionResult;
+export const fail = (x: At | string): x is string => typeof x === "string";
+export const err = (error: string): ActionResult => ({ error });
 
 // What the first move says, written here rather than by Claude: that move
 // writes step 1's model, and its streamed caption said the case outright

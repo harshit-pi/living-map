@@ -16,6 +16,7 @@ export function FloatingComposer({
   sticky = false,
   scope,
   collapsed = false,
+  pill = "💬 Ask Claude",
   docked = false,
 }: {
   ws: Workspace;
@@ -33,6 +34,9 @@ export function FloatingComposer({
   // a "💬 Ask Claude" pill until you want it: a wide empty box with two
   // pickers sat over every canvas, read as one more thing to do
   collapsed?: boolean;
+  // the pill's words: what the box is about (Learn: the whole topic, as
+  // each step has its own thread)
+  pill?: string;
   // a bar at the bottom of the screen's own layout, not over the canvas: an
   // overlay covered the board's last rows and their buttons. Claude's reply
   // shows inside it, at most three lines (it scrolls)
@@ -134,7 +138,7 @@ export function FloatingComposer({
           onClick={() => setAsking(true)}
           className="pointer-events-auto self-end rounded-full bg-surface px-3.5 py-1.5 text-[13px] text-body shadow-md ring-1 ring-line-strong hover:ring-primary"
         >
-          💬 Ask Claude
+          {pill}
         </button>
       ) : (
         <div ref={box} className="pointer-events-auto w-full max-w-2xl">

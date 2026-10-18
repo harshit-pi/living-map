@@ -13,6 +13,7 @@ import {
 } from "./ReviewPanel.tsx";
 import { ScenePlay } from "./ScenePlay.tsx";
 import { LevelCard, PredictCard } from "./StepTop.tsx";
+import { EndCard, StuckLinks } from "./StuckLinks.tsx";
 import { Tray } from "./Tray.tsx";
 import {
   canvasMode,
@@ -169,6 +170,11 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   const [wiShown, setWiShown] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [wiSure, setWiSure] = useState<Sure | null>(null);
+  // steps you went past without building (Skip for now), and the end card
+  // once every step has been seen: going past the last one never wrapped
+  // silently back to step 1 again
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [end, setEnd] = useState(false);
 
   const find = (id: string | null | undefined) =>
     id ? view.steps.find((s) => s.step === id) : undefined;
@@ -282,6 +288,7 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
     setSelection([id]);
     setOnPath(true);
     setClosed(null);
+    setEnd(false);
     const st = find(id);
     if (st && st.model === "none" && !isWriting(st))
       void here.act("open", { step: id });
@@ -295,9 +302,44 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
     const n = nextAfter(current?.step);
     if (n) openStep(n.step);
   };
+  // Skip for now: the next step not built and not yet gone past; with none
+  // left, the end card says so
+  const skip = () => {
+    if (!current) return;
+    const past = skipped.includes(current.step)
+      ? skipped
+      : [...skipped, current.step];
+    setSkipped(past);
+    const i = tops.findIndex((s) => s.step === current.step);
+    const n = [...tops.slice(i + 1), ...tops.slice(0, Math.max(0, i))].find(
+      (s) => s.stage !== "built" && !past.includes(s.step),
+    );
+    if (n) openStep(n.step);
+    else setEnd(true);
+  };
+  // the answer is written in a thread, which opens where you asked
+  const answer = (step: string) =>
+    void act("answerStep", { step }).then((r) => {
+      if (!r.threadId) return;
+      setSelection([step]);
+      setThread(true);
+    });
+  const root = Object.values(map.nodes).find((n) => !n.parent);
+  const full = () =>
+    void act("fullAnswer").then((r) => {
+      if (r.threadId && root) setSelection([root.id]);
+    });
 
   const marks: Record<string, RailMark> = {};
   for (const st of view.steps) marks[st.step] = railMark(st);
+  // not built: an answer you were shown says so first, then a skip
+  for (const st of view.steps)
+    if (st.stage !== "built" && marks[st.step]) {
+      if (map.nodes[st.step]?.revealed)
+        marks[st.step] = { ...marks[st.step], word: "answer shown" };
+      else if (skipped.includes(st.step))
+        marks[st.step] = { ...marks[st.step], word: "skipped" };
+    }
   // built as the server counts it (countsBuilt)
   const built = tops.filter((s) =>
     countsBuilt(map.nodes[s.step]?.status, s.rungs),
@@ -397,6 +439,21 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
             }}
             onPick={openStep}
             onNext={nextAfter(current.step) ? goNext : null}
+            onSkip={skip}
+            onAnswer={answer}
+            onFull={full}
+            end={
+              end
+                ? {
+                    seen: tops.length,
+                    built,
+                    first: (() => {
+                      const i = tops.findIndex((s) => s.stage !== "built");
+                      return i < 0 ? null : { step: tops[i].step, at: i + 1 };
+                    })(),
+                  }
+                : null
+            }
             closed={closed}
             onEndReview={endReview}
           />
@@ -446,6 +503,10 @@ function StepArea({
   onThread,
   onPick,
   onNext,
+  onSkip,
+  onAnswer,
+  onFull,
+  end,
   closed,
   onEndReview,
 }: {
@@ -468,6 +529,14 @@ function StepArea({
   onThread: () => void;
   onPick: (id: string) => void;
   onNext: (() => void) | null;
+  onSkip: () => void;
+  onAnswer: (step: string) => void;
+  onFull: () => void;
+  end: {
+    seen: number;
+    built: number;
+    first: { step: string; at: number } | null;
+  } | null;
   closed: Closed | null;
   onEndReview: () => void;
 }) {
@@ -544,7 +613,7 @@ function StepArea({
     st.stage === "see" &&
     !st.worked &&
     (view.level === null || (first && !ready));
-  const own = !reviewOnly && !closing && ready;
+  const own = !reviewOnly && !closing && ready && !end;
 
   // Everything that is not the one next thing, behind the card's ⋯.
   const firstTry =
@@ -615,7 +684,13 @@ function StepArea({
               },
             ]
           : []),
-        { label: "Talk about this step", onClick: onThread },
+        { label: "Ask about this step", onClick: onThread },
+        {
+          label: "Show me the full answer",
+          title:
+            "Claude writes the whole answer in the question's thread. No step counts as built.",
+          onClick: onFull,
+        },
         ...(node?.parent && node.status !== "answered" && !node.dropped
           ? [
               {
@@ -643,14 +718,24 @@ function StepArea({
   const reviewAt = review ? review.order.indexOf(st.step) + 1 : 0;
   const passed = st.check?.pass ? st.check : null;
 
-  const side = (ready || review || levelCard || closing) && (
+  const side = (ready || review || levelCard || closing || end) && (
     <aside className="relative flex max-h-[45%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 lg:max-h-none lg:w-[260px] lg:border-t-0 lg:border-l xl:w-[280px] 2xl:w-[300px]">
       {/* ⋯ sits at the top right of the card, beside the one next thing */}
       <div className="absolute top-2.5 right-2.5 z-10">
         <More sections={sections} intro={intro} />
       </div>
       <div className="space-y-4 [&>*:first-child]:pr-8">
-        {closing && closed && (
+        {end && (
+          <EndCard
+            here={here}
+            seen={end.seen}
+            built={end.built}
+            first={end.first}
+            onBuild={onPick}
+            onFull={onFull}
+          />
+        )}
+        {!end && closing && closed && (
           <ClosingCard
             view={view}
             closed={closed}
@@ -660,8 +745,8 @@ function StepArea({
             })()}
           />
         )}
-        {levelCard && <LevelCard here={here} level={view.level} />}
-        {reviewOnly && review && (
+        {!end && levelCard && <LevelCard here={here} level={view.level} />}
+        {!end && reviewOnly && review && (
           <ReviewPanel
             here={here}
             review={review}
@@ -681,7 +766,15 @@ function StepArea({
           <PredictCard key={st.step} here={here} st={st} />
         )}
         {own && st.stage === "build" && <CheckCard here={here} st={st} />}
-        {inReview && review && (
+        {own && st.stage === "build" && !st.reviewing && !st.recall && (
+          <StuckLinks
+            here={here}
+            st={st}
+            onAnswer={() => onAnswer(st.step)}
+            onSkip={onSkip}
+          />
+        )}
+        {!end && inReview && review && (
           <div className="border-t border-line pt-3">
             <ReviewPanel here={here} review={review} onDone={onEndReview} />
           </div>
@@ -819,6 +912,13 @@ function StepArea({
             <div className="mt-5 text-sm text-muted">
               <Drawing since={live.working?.since} />
             </div>
+            {/* going on never waits for a drawing */}
+            <button
+              onClick={onSkip}
+              className="mt-3 text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline"
+            >
+              Skip for now →
+            </button>
           </div>
         ) : (
           <SmallBtn
@@ -909,6 +1009,15 @@ function StepArea({
                   <span data-content>{st.title}</span>
                 </div>
               </div>
+              {ready && (
+                <button
+                  onClick={onThread}
+                  title="A thread on this step: ask Claude anything about it"
+                  className="shrink-0 text-[12px] text-muted hover:text-ink"
+                >
+                  💬 Ask about this step
+                </button>
+              )}
               {st.mode === "play" && !fromMemory(st) && (
                 <Toggle
                   value={centre === "play" ? "play" : "step"}
@@ -959,7 +1068,8 @@ function StepArea({
             sticky
             collapsed
             scope={st.step}
-            placeholder="Ask anything about the topic, or tell Claude where you are stuck…"
+            pill="💬 Ask about the whole topic"
+            placeholder="Ask Claude about the whole topic…"
           />
         </div>
       </div>
