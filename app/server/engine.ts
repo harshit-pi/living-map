@@ -20,7 +20,12 @@ import type {
   Working,
 } from "../shared/model.ts";
 import { applyOps, outline, pathTo } from "./core/canvas.ts";
-import { systemPrompt, viewLine, type Section } from "./core/prompts.ts";
+import {
+  promptParts,
+  QUIET_VIEW,
+  viewLine,
+  type Section,
+} from "./core/prompts.ts";
 import {
   completeOps,
   hasMapBlock,
@@ -89,6 +94,22 @@ export function createEngine({
   let stopped = false;
   let queue: Promise<unknown> = Promise.resolve();
   let generation = 0; // bumped by Stop, New and Open: whatever is waiting is cancelled
+  let lastSettings: Settings = { model: "", effort: "" };
+
+  // The next move most likely runs on the same mode with the same settings,
+  // and a mode's system prompt is the same on every move (promptParts): the
+  // provider may start its call ahead (Claude Code starts its process).
+  function warm(settings: Settings = lastSettings) {
+    const m = state.map;
+    if (!m || !provider.warm) return;
+    const plugin = modeOf(m.purpose);
+    const { system } = promptParts(
+      m.purpose,
+      [],
+      plugin.promptFor?.(m) ?? plugin,
+    );
+    provider.warm({ system, ...settings });
+  }
 
   // What the browser sees: everything but notes, and scenes without their answers.
   const publicMap = (m: StoredMap | null): MapDoc | null =>
@@ -164,6 +185,7 @@ export function createEngine({
     scope: string | null,
     history: ChatLine[],
     notes: string[],
+    instructions: string,
   ) {
     const sceneId = scope ?? opts.nodeId;
     const plugin = modeOf(m.purpose);
@@ -193,12 +215,13 @@ export function createEngine({
       m.source
         ? `THE MATERIAL THE USER PASTED AT THE START (the full problem or text):\n${m.source}`
         : "",
+      instructions ? `INSTRUCTIONS FOR THIS MOVE:\n${instructions}` : "",
       `ACTION: ${action}`,
       opts.selection?.length
         ? `SELECTED NODES: ${opts.selection.map((id) => `[${id}] ${m.nodes[id]?.title ?? id}`).join("; ")}`
         : "",
       opts.text ? `USER SAYS: ${opts.text}` : "",
-      viewLine(opts.view ?? "visual"),
+      opts.quiet ? QUIET_VIEW : viewLine(opts.view ?? "visual"),
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -255,6 +278,7 @@ export function createEngine({
       : undefined;
     state.busy = true;
     stopped = false;
+    lastSettings = settings;
     state.working = {
       label: opts.label ?? "Thinking",
       nodeId: opts.nodeId ?? scope,
@@ -287,6 +311,11 @@ export function createEngine({
             .lastIndexOf(true)
         : -1;
       if (own >= 0) earlier.splice(own, 1);
+      const prompt = promptParts(
+        m.purpose,
+        opts.sections ?? [],
+        plugin.promptFor?.(m) ?? plugin,
+      );
       const text = message(
         m,
         action,
@@ -294,15 +323,12 @@ export function createEngine({
         scope,
         earlier.slice(-HISTORY),
         notes,
+        prompt.move,
       );
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          system: systemPrompt(
-            m.purpose,
-            opts.sections ?? [],
-            plugin.promptFor?.(m) ?? plugin,
-          ),
+          system: prompt.system,
           message: text,
           ...settings,
         },
@@ -426,6 +452,9 @@ export function createEngine({
       if (opts.blankId && m.fills[opts.blankId]?.state === "pending")
         delete m.fills[opts.blankId];
       push();
+      // a move already waiting starts at once: a process started now would
+      // be no further on than its own
+      if (!stopped && !state.waiting.length) warm(settings);
     }
   }
 
@@ -467,15 +496,19 @@ export function createEngine({
     return next;
   }
 
-  // End the running move (what streamed so far stays on the canvas) and cancel what waits.
-  async function stop() {
+  // End the running move (what streamed so far stays on the canvas) and
+  // cancel what waits. Your own Stop also lets go of the call the provider
+  // started ahead (`release`); New and Open keep it for the next move.
+  async function stop({ release = false } = {}) {
     generation++;
     state.waiting = [];
-    if (!state.busy) return;
-    stopped = true;
-    call?.cancel();
-    for (let i = 0; i < 50 && state.busy; i++)
-      await new Promise((r) => setTimeout(r, 100));
+    if (state.busy) {
+      stopped = true;
+      call?.cancel();
+      for (let i = 0; i < 50 && state.busy; i++)
+        await new Promise((r) => setTimeout(r, 100));
+    }
+    if (release) provider.release?.();
   }
 
   const isQueuedOrRunning = (nodeId: string | null, label: string) =>
@@ -489,6 +522,7 @@ export function createEngine({
     snapshot,
     turn,
     stop,
+    warm,
     threadOf,
     openThread,
     isQueuedOrRunning,

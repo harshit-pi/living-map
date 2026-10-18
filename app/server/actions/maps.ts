@@ -30,12 +30,15 @@ export async function start(
 export async function open(
   engine: Engine,
   mapId: string,
+  settings?: Settings,
 ): Promise<ActionResult> {
   const m = readMap(String(mapId ?? ""));
   if (!m) return { error: "That map is gone." };
   await engine.stop();
   engine.state.map = m;
   engine.push();
+  // its first move is on this map's mode: have it ready
+  engine.warm(settings);
   return {};
 }
 

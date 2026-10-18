@@ -14,6 +14,7 @@ import type {
   ModelProvider,
   ModelReply,
   ModelRequest,
+  WarmRequest,
 } from "./providers/types.ts";
 import { newMap, normalise } from "./store.ts";
 
@@ -115,6 +116,39 @@ test("a move streams the model reply onto the canvas, through the provider only"
   assert.equal(m.chat.at(-1)?.text, "Laid out.");
   await tick();
   assert.equal(m.usage.turns, 1, "usage recorded when the provider reports it");
+});
+
+test("after a move the provider is warmed for the next one on the same mode and settings; Stop lets go of it", async () => {
+  const { engine, calls } = setup();
+  const warmed: WarmRequest[] = [];
+  let released = 0;
+  engine.provider.warm = (r) => void warmed.push(r);
+  engine.provider.release = () => void released++;
+  const started = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  assert.equal(warmed.length, 0, "not while the move runs");
+  calls[0].release(ROOT);
+  await started;
+  assert.deepEqual(warmed, [
+    { system: calls[0].req.system, model: "", effort: "" },
+  ]);
+  // the next move, whatever its instructions, has the same key
+  const asked = act(engine, {
+    type: "message",
+    text: "And cost?",
+    selection: [],
+  });
+  await settled(calls, 2);
+  assert.equal(calls[1].req.system, warmed[0].system);
+  // a move you stop is not warmed for, and Stop ends the spare
+  await act(engine, { type: "stop" });
+  await asked;
+  assert.equal(warmed.length, 1);
+  assert.equal(released, 1);
 });
 
 test("the first move's label follows the shape Claude frames, not the question's first word", async () => {
@@ -542,7 +576,10 @@ test("each move sends only the instructions it needs", async () => {
   };
   withBlank(m, "b1");
   const { engine, calls } = setup(m);
+  // a move's own instructions go with its message; the system prompt is the
+  // mode's job alone, the same on every move (so a process can start ahead)
   const sent: Record<string, string> = {};
+  const systems = new Set<string>();
   const run = async (
     name: string,
     action: Parameters<typeof act>[1],
@@ -551,7 +588,8 @@ test("each move sends only the instructions it needs", async () => {
     const n = calls.length;
     const done = act(engine, action);
     await settled(calls, n + 1);
-    sent[name] = calls[n].req.system;
+    sent[name] = calls[n].req.message;
+    systems.add(calls[n].req.system);
     calls[n].release(
       `Ok.\n\`\`\`map\n{"ops":[{"op":"update","id":"${target}","detail":"d"}]}\n\`\`\``,
     );
@@ -576,6 +614,11 @@ test("each move sends only the instructions it needs", async () => {
   assert.ok(
     has("explain", /EXPLAIN on a node/) &&
       !has("explain", /TOPIC DIAGRAM \(learning|PLAYABLE SCENE/),
+  );
+  assert.equal(systems.size, 1);
+  assert.doesNotMatch(
+    [...systems][0],
+    /TOPIC DIAGRAM \(learning|PLAYABLE SCENE|THREADS:|EXPLAIN on a node/,
   );
 });
 
@@ -996,7 +1039,7 @@ test("a plugin answers the core actions it names its own way; others go to core"
   const chose = act(engine, { type: "choose", nodeId: "pg" });
   await settled(calls, 2);
   assert.match(calls[1].req.message, /ACTION: WRAP: \[pg\]/);
-  assert.match(calls[1].req.system, /premortem/);
+  assert.match(calls[1].req.message, /premortem/);
   // the model may not rewrite what you chose
   calls[1].release(
     'Done.\n```map\n{"ops":[{"op":"update","id":"pg","title":"Mongo","status":"dropped"},{"op":"premortem","option":"pg","reasons":["Joins get slow"]}]}\n```',

@@ -1122,10 +1122,12 @@ export function grade(
     if (rev) {
       reversed++;
       touched.add(rev.id);
+      // Claude writes no line per link for when it is drawn backwards: the
+      // way the link runs says it (a model that has its own line keeps it)
       marks.push({
         link: l.id,
         mark: "reversed",
-        ...(rev.reversed ? { note: rev.reversed } : {}),
+        note: rev.reversed ?? `It runs the other way: ${linkWords(m, rev)}.`,
       });
       continue;
     }
