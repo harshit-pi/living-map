@@ -1,164 +1,125 @@
 import { useState } from "react";
 
-import { SmallBtn } from "./BuildCanvas.tsx";
 import { HowSure } from "./CheckCard.tsx";
-import { CREDIT, helpLine, type Here } from "./view.ts";
-import {
-  showsCase,
-  type Credit,
-  type Level,
-  type StepView,
-  type Sure,
-} from "../shared.ts";
+import { LEVELS, type Here } from "./view.ts";
+import type { Action } from "../../../shared/model.ts";
+import { PLUGIN_ID, type Level, type StepView, type Sure } from "../shared.ts";
 
-const LEVELS: [Level, string, string][] = [
-  ["new", "I'm new", "see a worked case first"],
-  ["some", "I know some", "start building, parts placed"],
-  ["cold", "Test me cold", "the frame and the parts, no links"],
-];
+const QUESTION = "How much do you know?";
 
-// Once per map, above step 1: how much help the first builds start with.
-// It can be changed later; steps you have started keep what you did.
-export function LevelChooser({
+// The three levels as one column of buttons. Nothing picked, "I'm new" is
+// the filled one (the safe start); once one is picked it is marked, and
+// nothing is filled: there is nothing left to do here.
+function LevelButtons({
+  level,
+  onPick,
+}: {
+  level: Level | null;
+  onPick: (lv: Level) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {LEVELS.map(([lv, label, says]) => {
+        const primary = !level && lv === "new";
+        const mine = level === lv;
+        return (
+          <button
+            key={lv}
+            title={says}
+            data-primary={primary || undefined}
+            onClick={() => onPick(lv)}
+            className={`rounded-lg px-3 py-1.5 text-left text-[13px] font-medium ${primary ? "bg-primary text-on-primary hover:bg-primary-strong" : mine ? "bg-primary-soft text-primary-strong ring-1 ring-primary" : "border border-line-strong bg-surface text-body hover:border-primary"}`}
+          >
+            {mine ? `✓ ${label}` : label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Top of the right card on a map with no level yet, while step 1 is drawn
+// and after: the first thing to do on the map, and it calls no model.
+export function LevelCard({
   here,
   level,
 }: {
   here: Here;
   level: Level | null;
 }) {
-  const [open, setOpen] = useState(false);
-  if (level && !open)
-    return (
-      <div className="flex items-center justify-end gap-2 text-[11.5px] text-muted">
-        Starting help: {LEVELS.find((l) => l[0] === level)?.[1]}
-        <button
-          onClick={() => setOpen(true)}
-          className="text-primary-strong hover:underline"
-        >
-          change
-        </button>
-      </div>
-    );
   return (
-    <div className="rounded-xl bg-surface px-4 py-3 ring-1 ring-line">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-[14px] font-medium text-ink">
-          How much do you know already?
-        </span>
-        {LEVELS.map(([lv, label, says]) => (
-          <button
-            key={lv}
-            title={says}
-            onClick={() => {
-              setOpen(false);
-              void here.act("level", { level: lv });
-            }}
-            className={`rounded-full border px-3 py-1 text-[13px] ${level === lv ? "border-primary bg-primary-soft text-primary-strong" : "border-line-strong bg-surface text-body hover:border-primary"}`}
-          >
-            {label}
-          </button>
-        ))}
-        <span className="ml-auto text-[11.5px] text-faint">
-          you can change it later
-        </span>
-      </div>
+    <div className="space-y-2">
+      <div className="text-[14px] font-medium text-ink">{QUESTION}</div>
+      <LevelButtons
+        level={level}
+        onPick={(lv) => void here.act("level", { level: lv })}
+      />
     </div>
   );
 }
 
-type Dot = "done" | "now" | "todo" | "skip";
-const DOT: Record<Dot, string> = {
-  done: "✓",
-  now: "●",
-  todo: "○",
-  skip: "–",
-};
-
-const creditDot = (c: Credit | null, now: boolean): [Dot, string] =>
-  now ? ["now", ""] : c ? ["done", CREDIT[c].word] : ["todo", ""];
-
-// See ─ Build ─ Why ┊ What if ┊ New case: where you are on the step, and
-// what each finished rung earned (by you, with hints, shown).
-export function StageStrip({
-  st,
-  skippedSee,
+// The same question on the loading screen, the moment you press Start: the
+// answer is held and sent as the free level move once the map exists, so
+// the first thing you do never waits on Claude drawing step 1.
+export function LevelWaiting({
+  held,
+  hold,
 }: {
-  st: StepView;
-  // the level chooser started this step past See (I know some, Test me cold)
-  skippedSee: boolean;
+  held: Action | null;
+  hold: (a: Action) => void;
 }) {
-  const seen: Dot =
-    st.stage === "see"
-      ? "now"
-      : skippedSee && !st.rungs.built
-        ? "skip"
-        : "done";
-  const all: [string, Dot, string][] = [
-    ["See it", st.onCase || st.recall || st.reviewing ? "skip" : seen, ""],
-    ["Build", ...creditDot(st.rungs.built, st.stage === "build" && !st.onCase)],
-    ["Why", ...creditDot(st.rungs.why, st.stage === "why")],
-    ["What if", ...creditDot(st.rungs.whatif, false)],
-    ["New case", ...creditDot(st.rungs.case, st.onCase)],
-  ];
-  // a step that offers no new case has no rung for one (showsCase)
-  const items = all.filter(([label]) => label !== "New case" || showsCase(st));
+  const level =
+    held?.type === "plugin" ? ((held.args?.level as Level) ?? null) : null;
   return (
-    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px]">
-      {items.map(([label, dot, word], i) => (
-        <span key={label} className="flex items-center gap-1.5">
-          {i > 0 && <span className="text-faint">{i >= 3 ? "┊" : "─"}</span>}
-          <span
-            title={word || undefined}
-            className={
-              dot === "now"
-                ? "font-semibold text-primary-strong"
-                : dot === "done"
-                  ? "text-success-strong"
-                  : "text-muted"
-            }
-          >
-            {label} {DOT[dot]}
-          </span>
-        </span>
-      ))}
-      {st.stage === "build" && (
-        <span className="ml-2 text-[12px] text-muted">· {helpLine(st)}</span>
-      )}
-      {st.stage === "build" && st.lowered && (
-        <span className="text-[12px] text-warning-strong">
-          · more help this time: your quick rebuild needed a second check
-        </span>
-      )}
+    <div className="mx-auto w-64 space-y-2 text-left">
+      <div className="text-center text-[15px] font-medium text-ink">
+        {QUESTION}
+      </div>
+      <LevelButtons
+        level={level}
+        onPick={(lv) =>
+          hold({
+            type: "plugin",
+            plugin: PLUGIN_ID,
+            name: "level",
+            args: { level: lv },
+          })
+        }
+      />
     </div>
   );
 }
 
-// Before you look away: one question with a pick and how sure you are. A
-// wrong pick shows its misconception at once; nothing here calls Claude.
+// Before you look away: one question, then how sure you are. A wrong pick
+// shows its misconception at once; nothing here calls Claude. The sure row
+// comes after the pick, and the pick is graded once both are in: shown
+// together, the row went the moment a choice was clicked.
 export function PredictCard({ here, st }: { here: Here; st: StepView }) {
   const [pick, setPick] = useState<string | null>(null);
   const [sure, setSure] = useState<Sure | null>(null);
   const p = st.predict;
   const hide = (
     <div className="flex justify-end">
-      <SmallBtn
-        primary
+      <button
+        data-primary
         onClick={() => void here.act("hide", { step: st.step })}
+        className="rounded-lg bg-primary px-3 py-1.5 text-[13px] font-medium text-on-primary hover:bg-primary-strong"
       >
-        {st.predict ? "Hide it, I'll build it →" : "Hide it and build it →"}
-      </SmallBtn>
+        {p ? "Hide it, I'll build it →" : "Hide it and build it →"}
+      </button>
     </div>
   );
-  if (!p) return hide;
+  // with no question, the example is the whole card: look, then hide it
+  if (!p) return st.worked ? hide : null;
   const done = p.picked !== null;
-  const send = (choice: string | null, s: Sure | null) => {
-    if (choice && s)
-      void here.act("predict", { step: st.step, pick: choice, sure: s });
+  const send = (s: Sure) => {
+    setSure(s);
+    if (pick) void here.act("predict", { step: st.step, pick, sure: s });
   };
   return (
     <div className="space-y-2">
       <div className="text-[14px] font-medium text-ink">
-        Before you look: {p.ask}
+        Before you look: <span data-content>{p.ask}</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {p.choices.map((c) => {
@@ -176,54 +137,38 @@ export function PredictCard({ here, st }: { here: Here; st: StepView }) {
             <button
               key={c}
               disabled={done}
-              onClick={() => {
-                setPick(c);
-                send(c, sure);
-              }}
+              onClick={() => setPick(c)}
               className={`rounded-lg border px-3 py-1 text-[13px] ${cls}`}
             >
-              {c}
+              <span data-content>{c}</span>
               {done && mine && (p.right ? " ✓" : " ✗")}
             </button>
           );
         })}
       </div>
-      {!done && (
-        <HowSure
-          value={sure}
-          onPick={(s) => {
-            setSure(s);
-            send(pick, s);
-          }}
-        />
-      )}
+      {!done && pick && <HowSure value={sure} onPick={send} />}
       {done && (
         <div className="text-[12.5px] leading-snug text-body">
           {p.right ? (
             <span className="text-success-strong">
-              Right. Look at where it sits in the case before you hide it.
+              ✓ Right. See where it sits, then hide it.
             </span>
           ) : (
             <>
-              <span className="font-medium text-danger-strong">Not that.</span>{" "}
+              <span className="font-medium text-danger-strong">
+                ✗ Not that.
+              </span>{" "}
               {p.correct && (
                 <>
                   It is “<span className="font-medium">{p.correct}</span>”.{" "}
                 </>
               )}
-              {p.refute ??
-                "Look at where it sits in the case before you hide it."}
+              {p.refute ?? "See where it sits, then hide it."}
             </>
           )}
         </div>
       )}
-      {done ? (
-        hide
-      ) : (
-        <div className="text-[11.5px] text-faint">
-          Pick one and say how sure you are; then the case shows in full.
-        </div>
-      )}
+      {done && hide}
     </div>
   );
 }

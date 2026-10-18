@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { ArgueBox, SmallBtn } from "./BuildCanvas.tsx";
-import { MARK, slotWord, WAIT_TITLE, type Here } from "./view.ts";
+import { ArgueBox } from "./BuildCanvas.tsx";
+import { MARK, notYet, passRule, type Here } from "./view.ts";
 import {
-  orderStops,
   SURES,
   type LinkView,
   type Mark,
@@ -40,224 +39,118 @@ export function HowSure({
   );
 }
 
-const plural = (n: number, one: string, many = `${one}s`) =>
-  `${n} ${n === 1 ? one : many}`;
+// true once `ms` have gone by since `key` was last new (a step, a try)
+function useLater(ms: number, key: string): boolean {
+  const [at, setAt] = useState({ key, done: false });
+  if (at.key !== key) setAt({ key, done: false });
+  useEffect(() => {
+    const t = setTimeout(() => setAt({ key, done: true }), ms);
+    return () => clearTimeout(t);
+  }, [key, ms]);
+  return at.key === key && at.done;
+}
 
-// The check card beside a build: counts and places from the server's check,
-// never the fix; the hint ladder after a first try; Show one link; how sure
-// you are; and Argue for a link Claude's model does not have.
+const STUCK_MS = 20_000;
+
+// The check card beside a build. Its one filled button is at the top: Check
+// before the first check; after a check that did not pass, Hint while the
+// build is as it was checked, then Check again once you change it. Under it,
+// how sure you are (once you have drawn a link), the one line the check
+// says, the hints you took, and what it found. Show one link and Show the
+// model are in the card's More.
 export function CheckCard({ here, st }: { here: Here; st: StepView }) {
-  const { act, busy } = here;
+  const { act } = here;
   const step = st.step;
   const c = st.check;
-  const [asking, setAsking] = useState(false);
-  const shownKeys = st.links.filter((l) => l.given).length;
+  const own = st.links.filter((l) => !l.given).length;
+  // a first try with nothing drawn for a while: a way out before the first
+  // check, which is when hints open (not in a review or a rebuild, which
+  // are from memory)
+  const fresh = !c && own === 0 && !st.reviewing && !st.recall && !st.onCase;
+  const idle = useLater(STUCK_MS, `${step}:${st.checks}`);
+  const hintFirst = !!c && !c.pass && !st.changed && st.canHint;
+  const checkBtn = (primary: boolean) => (
+    <button
+      key="check"
+      data-primary={primary || undefined}
+      onClick={() => void act("check", { step })}
+      disabled={!st.placed.length}
+      className={`flex-1 rounded-lg py-1.5 text-sm font-medium disabled:opacity-40 ${primary ? "bg-primary text-on-primary hover:bg-primary-strong" : "border border-line-strong bg-surface text-body hover:border-primary"}`}
+    >
+      {c ? "Check again" : "Check"}
+    </button>
+  );
+  const hintBtn = (primary: boolean) => (
+    <button
+      key="hint"
+      data-primary={primary || undefined}
+      disabled={!st.canHint}
+      title="Where to look, then a question, then the link drawn dotted"
+      onClick={() => void act("hint", { step })}
+      className={`flex-1 rounded-lg py-1.5 text-sm font-medium disabled:opacity-40 ${primary ? "bg-primary text-on-primary hover:bg-primary-strong" : "border border-line-strong bg-surface text-body hover:border-primary"}`}
+    >
+      Hint
+    </button>
+  );
 
   return (
     <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-          {/* the try the card shows: the first check is try 1 */}
-          Check{st.checks ? ` · try ${st.checks}` : ""}
-        </div>
-        {c?.keyOnly && (
-          <span className="text-[11px] text-muted">key links only</span>
-        )}
+      {/* the buttons come first and stay put: under the findings, an
+          argued link's verdict moved them, and a click meant for Hint
+          landed on Check again */}
+      <div className="flex gap-1.5">
+        {hintFirst
+          ? [hintBtn(true), checkBtn(false)]
+          : c && st.canHint
+            ? [checkBtn(true), hintBtn(false)]
+            : [checkBtn(true)]}
       </div>
-
-      {/* the buttons come first and stay put: under the counts, an
-          argued link's verdict or a deleted link's row moved them, and a
-          click meant for Hint landed on Check again */}
-      <div className="space-y-2">
+      {fresh && idle && (
+        <button
+          onClick={() => void act("showModel", { step })}
+          title="Try one link first: a wrong try teaches more than a hint. Peeking counts as shown."
+          className="w-full text-[11.5px] text-muted hover:text-ink"
+        >
+          Stuck? Peek at the example
+        </button>
+      )}
+      {/* optional, and never waited for: asked once there is a link to be
+          sure of, and before the first check (after it, you are fixing
+          what the check found; what you said is kept) */}
+      {own > 0 && !c && (
         <HowSure
           value={st.sure}
           onPick={(sure) => void act("sure", { step, sure })}
         />
-        <button
-          onClick={() => {
-            setAsking(false);
-            void act("check", { step });
-          }}
-          disabled={!st.placed.length}
-          className="w-full rounded-lg bg-primary py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
-        >
-          {c ? "Check again" : "Check"}
-        </button>
-        {c && (
-          <div className="flex flex-wrap gap-1.5">
-            <SmallBtn
-              disabled={!st.canHint}
-              title="Where, then a question, then the link drawn dashed. Instant."
-              onClick={() => void act("hint", { step })}
-            >
-              Hint
-            </SmallBtn>
-            <SmallBtn
-              disabled={!st.canHint}
-              title={
-                st.hintOn === "place"
-                  ? "Puts one part where it goes; it counts as shown"
-                  : "Draws one link for you; it counts as shown"
-              }
-              onClick={() => void act("showLink", { step })}
-            >
-              {st.hintOn === "place" ? "Show one place" : "Show one link"}
-            </SmallBtn>
-            {!st.reviewing && !st.recall && (
-              <SmallBtn
-                title="Shows the whole model as long as you want, then you rebuild it at L1. It counts as shown."
-                onClick={() => void act("showModel", { step })}
+      )}
+
+      {c && (
+        <div className="space-y-2">
+          {st.changed ? (
+            <div className="text-[12px] text-muted">Changed: check again.</div>
+          ) : (
+            !c.pass && (
+              <div
+                title={passRule(st)}
+                className="text-[13px] font-medium text-ink"
               >
-                Show the model
-              </SmallBtn>
-            )}
-          </div>
-        )}
-        {!c && !st.reviewing && !st.recall && (
-          <button
-            onClick={() => setAsking((v) => !v)}
-            className="w-full text-[11.5px] text-muted hover:text-ink"
-          >
-            Stuck before you start?
-          </button>
-        )}
-        {asking && (
-          <div className="rounded-lg bg-panel px-2.5 py-1.5 text-[12px] leading-snug text-muted">
-            Try one link first: a wrong try teaches more than a hint before it.
-            If it is all gone,{" "}
-            <button
-              onClick={() => void act("showModel", { step })}
-              className="text-primary-strong hover:underline"
-            >
-              peek at the worked case
-            </button>{" "}
-            (it counts as shown).
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-3 border-t border-line pt-2">
-        {!c ? (
-          <p className="text-[12.5px] leading-snug text-muted">
-            Build it from memory, then check. The check marks each link at once;
-            hints open after your first check.
-          </p>
-        ) : (
-          <>
-            {/* the counts and marks are of the build as it was checked */}
-            {st.changed && (
-              <div className="text-[11.5px] text-muted">
-                Your build changed since this check: check again to mark it.
+                {notYet(st)}
               </div>
-            )}
-            <Counts st={st} />
-          </>
-        )}
-
-        {st.hints.length > 0 && (
-          <div className="space-y-1">
-            {st.hints.map((h, i) => (
-              <div key={i} className="text-[12px] leading-snug text-body">
-                <span className="font-medium text-hint-strong">
-                  Hint ·{" "}
-                  {h.rung === 1 ? "where" : h.rung === 2 ? "ask" : "ghost"}:
-                </span>{" "}
-                {h.text}
-              </div>
-            ))}
-          </div>
-        )}
-        {shownKeys > 0 && st.help > 0 && (
-          <div className="text-[11px] text-muted">
-            Dashed links were drawn for you.
-          </div>
-        )}
-
-        <CheckFindings here={here} st={st} />
-      </div>
-      {busy && (
-        <div className="text-[11px] text-faint" title={WAIT_TITLE}>
-          Checking and hints never wait on Claude.
+            )
+          )}
+          {st.hints.length > 0 && (
+            <div className="space-y-1">
+              {st.hints.map((h, i) => (
+                <div key={i} className="text-[12px] leading-snug text-body">
+                  <span className="font-medium text-hint-strong">Hint:</span>{" "}
+                  {h.text}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
-    </div>
-  );
-}
-
-// What the last check counted: links right, key links, what is missing or
-// the wrong way, where the parts sit, and what a pass still needs.
-function Counts({ st }: { st: StepView }) {
-  const c = st.check!;
-  const argued = c.argued ?? 0;
-  const word = slotWord(st.frame);
-  const wrongSlots = c.slots.filter((s) => !s.ok).length;
-  const loose = c.loose ?? 0;
-  const order = orderStops(st.frame);
-  return (
-    <div className="space-y-1 text-[12.5px] leading-snug text-body">
-      <div className="text-[14px] font-semibold text-ink">
-        {c.right + c.given + argued} of {c.total + argued} links ✓
-        {c.given > 0 && (
-          <span className="ml-1 text-[11.5px] font-normal text-muted">
-            ({c.given} given)
-          </span>
-        )}
-      </div>
-      <div>
-        {c.keyRight} of {c.keys} key links
-        {c.keyMissing > 0 &&
-          ` · ${plural(c.keyMissing, "key link")} still missing`}
-      </div>
-      {c.missing > c.keyMissing && (
-        <div>
-          {plural(c.missing - c.keyMissing, "other link")} not drawn yet
-        </div>
-      )}
-      {c.reversed > 0 && (
-        <div>
-          {plural(c.reversed, "link points", "links point")} the wrong way ↔
-        </div>
-      )}
-      {c.family > 0 && (
-        <div>
-          {plural(c.family, "link has", "links have")} the right pair with
-          another verb ~
-        </div>
-      )}
-      {wrongSlots > 0 && (
-        <div>
-          {st.frame.kind === "sort"
-            ? `${plural(wrongSlots, "part is", "parts are")} not in the column Claude's model puts ${wrongSlots === 1 ? "it" : "them"} in ⚠`
-            : `${plural(wrongSlots, "part is", "parts are")} not in the ${word} ${wrongSlots === 1 ? "it belongs" : "they belong"} in ⚠`}
-        </div>
-      )}
-      {loose > 0 && (
-        <div>
-          {plural(loose, "part is", "parts are")} not in a {word} yet
-        </div>
-      )}
-      {c.outOfOrder > 0 && (
-        <div>{plural(c.outOfOrder, "pair")} out of order along the axis</div>
-      )}
-      {/* what a pass needs, so a card full of ✓ that has not passed
-          says why (with 3 other links, 70% is all 3) */}
-      {!c.pass && (
-        <div className="mt-1 rounded-lg bg-panel px-2 py-1 text-[12px] text-muted">
-          Not passed yet. A pass needs every key link
-          {c.restNeed > 0
-            ? `, and ${c.restNeed} of the ${c.rest} other links (you have ${c.restGot})`
-            : ""}
-          {order
-            ? ", with every part on a tick, in order"
-            : st.frame.kind !== "free"
-              ? `, with every part in a ${word}`
-              : ""}
-          .
-          {!order &&
-            wrongSlots > 0 &&
-            ` Which ${word} a part sits in is marked, but does not stop a pass.`}
-        </div>
-      )}
+      <CheckFindings here={here} st={st} />
     </div>
   );
 }
@@ -332,15 +225,6 @@ export function CheckFindings({
 
   return (
     <div className="space-y-3">
-      {passed && (
-        <>
-          <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-            Check · try {st.checks} · passed
-          </div>
-          <Counts st={st} />
-        </>
-      )}
-
       {/* what the server found, with the reason only once you drew it */}
       {(of("miscon").length > 0 || of("reversed").some((m) => m.note)) && (
         <div className="space-y-1.5 border-t border-line pt-2">

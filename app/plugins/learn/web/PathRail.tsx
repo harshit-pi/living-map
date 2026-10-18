@@ -71,18 +71,24 @@ export function PathRail({
   marks,
   progress,
   footer,
+  simple = false,
 }: {
   map: MapDoc;
   selected: string | null;
   onSelect: (id: string) => void;
   busy: boolean;
   workingId: string | null;
-  onNext: () => void;
+  // Next step at the foot of the rail; a build map has none: the step's own
+  // card says what is next, and two "next" buttons competed
+  onNext?: () => void;
   // a build map's own marks per step, and its count of steps done
   marks?: Record<string, RailMark>;
   progress?: { got: number; word: string };
   // under the steps, over Next step (what is due; Practise this as builds)
   footer?: ReactNode;
+  // the build map's rail: the steps, the bar and "1 of 4 done", no more
+  // ("Your path", the intro, the meter moved or went)
+  simple?: boolean;
 }) {
   const markOf = (n: MapNode) =>
     (!n.dropped && marks?.[n.id]) || stateOf(map, n);
@@ -107,17 +113,27 @@ export function PathRail({
   return (
     <nav className="flex h-full w-[220px] shrink-0 xl:w-[270px] flex-col border-r border-line bg-canvas">
       <div className="px-4 pb-2 pt-4">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
-          Your path
-        </div>
-        {root && (
-          <button
-            onClick={() => onSelect(root.id)}
-            className="mt-0.5 text-left text-[15px] font-semibold leading-snug text-ink hover:text-primary-strong"
-          >
-            {root.title}
-          </button>
+        {!simple && (
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+            Your path
+          </div>
         )}
+        {root &&
+          (simple ? (
+            <div
+              className="text-[15px] font-semibold leading-snug text-ink"
+              data-content
+            >
+              {root.title}
+            </div>
+          ) : (
+            <button
+              onClick={() => onSelect(root.id)}
+              className="mt-0.5 text-left text-[15px] font-semibold leading-snug text-ink hover:text-primary-strong"
+            >
+              {root.title}
+            </button>
+          ))}
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line">
           <div
             className="h-full rounded-full bg-success transition-all"
@@ -131,7 +147,7 @@ export function PathRail({
         </div>
         {/* Claude's opening instruction stays here to re-read after its
             caption above the message box has gone */}
-        {start && (
+        {start && !simple && (
           <details className="mt-2 rounded-lg bg-panel px-2.5 py-1.5 text-[12px]">
             <summary className="cursor-pointer text-[11px] font-semibold text-muted">
               How to start
@@ -165,13 +181,16 @@ export function PathRail({
                 </span>
                 <span className="min-w-0 pb-1">
                   <span
+                    data-content
                     className={`block text-[13.5px] font-medium leading-snug ${s.dropped ? "text-faint line-through" : "text-ink"}`}
                   >
                     {s.title}
                   </span>
-                  <span className="block text-[11px] text-muted">
-                    {st.word}
-                  </span>
+                  {st.word && (
+                    <span className="block text-[11px] text-muted">
+                      {st.word}
+                    </span>
+                  )}
                   {meter && (
                     <span className="mt-0.5 flex gap-0.5 text-[10px] leading-none">
                       {meter.map((d, k) => (
@@ -198,6 +217,7 @@ export function PathRail({
                       {cs.mark}
                     </span>
                     <span
+                      data-content
                       className={`text-[12.5px] leading-snug ${c.dropped ? "text-faint line-through" : "text-body"}`}
                     >
                       {c.title}
@@ -226,15 +246,17 @@ export function PathRail({
         ))}
       </ol>
       {footer && <div className="border-t border-line px-3 py-2">{footer}</div>}
-      <div className="border-t border-line p-3">
-        <button
-          onClick={onNext}
-          disabled={busy}
-          className="w-full rounded-lg bg-primary py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
-        >
-          Next step ▸
-        </button>
-      </div>
+      {onNext && (
+        <div className="border-t border-line p-3">
+          <button
+            onClick={onNext}
+            disabled={busy}
+            className="w-full rounded-lg bg-primary py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
+          >
+            Next step ▸
+          </button>
+        </div>
+      )}
     </nav>
   );
 }

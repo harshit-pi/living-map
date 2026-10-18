@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { PART_DRAG } from "./BuildCanvas.tsx";
 import { nextSpot } from "./frame.ts";
 import { slotWord, type Here } from "./view.ts";
-import { FAMILIES, familyOf, type Family, type StepView } from "../shared.ts";
+import type { StepView } from "../shared.ts";
 
 // The parts not yet placed and the verbs this frame takes. Click a part to
 // place it, or drag it where it goes. At L3 there are no names to pick from:
@@ -123,7 +123,7 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
                         title="Counts as hinted for this part"
                         className="rounded-md border border-line-strong bg-surface px-2 py-0.5 text-left text-body hover:border-primary"
                       >
-                        {label}?
+                        <span data-content>{label}</span>?
                       </button>
                     ))}
                   </div>
@@ -155,11 +155,17 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
                 title={p.role}
                 className="w-full cursor-grab rounded-lg border border-line-strong bg-surface px-2 py-1 text-left hover:border-primary active:cursor-grabbing"
               >
-                <span className="block text-[12.5px] font-medium text-ink">
+                <span
+                  className="block text-[12.5px] font-medium text-ink"
+                  data-content
+                >
                   {p.label}
                 </span>
                 {p.role && (
-                  <span className="block text-[10.5px] leading-snug text-muted">
+                  <span
+                    className="block text-[10.5px] leading-snug text-muted"
+                    data-content
+                  >
                     {p.role}
                   </span>
                 )}
@@ -169,23 +175,8 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
         </ul>
       )}
 
-      {/* a narrow window keeps the room for the parts: the verbs are in the
-          picker too */}
-      <div className="mt-4 hidden text-[10px] font-semibold tracking-wide text-faint uppercase xl:block">
-        Link verbs
-      </div>
-      <div className="mt-1 hidden space-y-1.5 xl:block">
-        {(Object.keys(FAMILIES) as Family[])
-          .filter((f) => st.verbs.some((v) => familyOf(v) === f))
-          .map((f) => (
-            <div key={f}>
-              <div className="text-[10px] text-faint">{f}</div>
-              <div className="text-[12px] leading-snug text-body">
-                {st.verbs.filter((v) => familyOf(v) === f).join(" · ")}
-              </div>
-            </div>
-          ))}
-      </div>
+      {/* no legend of the verbs: they are in the picker that opens when
+          you link two parts, the one place they are used */}
     </aside>
   );
 }

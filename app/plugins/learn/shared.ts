@@ -331,6 +331,8 @@ export type StepView = {
   links: LinkView[];
   check: CheckResult | null;
   checks: number;
+  // the model's key links, counted, while there is a build
+  keys?: number;
   sure: Sure | null;
   hints: HintView[];
   canHint: boolean;

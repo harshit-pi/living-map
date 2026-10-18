@@ -53,6 +53,7 @@ export function StartScreen({
         <div className="mb-4 flex justify-center">
           <Segmented
             value={purpose}
+            filled={!!mode.simple}
             options={MODES.map((m) => [m.id, m.label])}
             onChange={(p) => {
               setPurpose(p);
@@ -80,13 +81,25 @@ export function StartScreen({
             className="block w-full resize-none border-0 bg-transparent px-4 pt-3 text-base outline-hidden focus:ring-0"
           />
           <div className="flex justify-end px-2 pb-2">
-            <button
-              onClick={() => go(q)}
-              disabled={!q.trim()}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary disabled:opacity-40"
-            >
-              ↑
-            </button>
+            {mode.simple ? (
+              // a word, not an arrow: the one thing this screen asks of you
+              <button
+                data-primary
+                onClick={() => go(q)}
+                disabled={!q.trim()}
+                className="h-8 rounded-lg bg-primary px-4 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
+              >
+                Start
+              </button>
+            ) : (
+              <button
+                onClick={() => go(q)}
+                disabled={!q.trim()}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary disabled:opacity-40"
+              >
+                ↑
+              </button>
+            )}
           </div>
         </div>
         {working !== null && (

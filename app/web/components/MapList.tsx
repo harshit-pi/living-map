@@ -61,7 +61,14 @@ export function MapRows({
   );
 }
 
-export function MapsMenu({ onOpen }: { onOpen: (id: string) => void }) {
+export function MapsMenu({
+  onOpen,
+  onNew,
+}: {
+  onOpen: (id: string) => void;
+  // New inside the menu, first (the simpler header has no New button)
+  onNew?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const maps = useMaps(open);
   const box = useRef<HTMLDivElement>(null);
@@ -94,6 +101,17 @@ export function MapsMenu({ onOpen }: { onOpen: (id: string) => void }) {
       </button>
       {open && (
         <div className="absolute right-0 top-10 z-40 max-h-[70vh] w-[420px] overflow-y-auto rounded-xl bg-surface shadow-xl ring-1 ring-line">
+          {onNew && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                onNew();
+              }}
+              className="block w-full border-b border-line px-3 py-2 text-left text-sm font-medium text-primary-strong hover:bg-panel"
+            >
+              + New map
+            </button>
+          )}
           <div className="border-b border-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
             Your maps
           </div>

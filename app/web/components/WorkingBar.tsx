@@ -6,11 +6,14 @@ type Props = {
   working: Working | null;
   queued: number;
   onStop: () => void;
+  // the seconds only, the task said on hover: the screen under it already
+  // says what is being drawn, and the label was six more words in the header
+  compact?: boolean;
 };
 
 // What the model is doing right now: the task, the seconds so far, what waits
 // behind it, and Stop. It sits in the header, so it never covers the work.
-export function WorkingPill({ working, queued, onStop }: Props) {
+export function WorkingPill({ working, queued, onStop, compact }: Props) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!working) return;
@@ -20,11 +23,14 @@ export function WorkingPill({ working, queued, onStop }: Props) {
   if (!working) return null;
   const secs = Math.max(0, Math.round((now - working.since) / 1000));
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-full bg-surface py-1 pr-1 pl-3 text-xs text-body shadow-xs ring-1 ring-line">
+    <div
+      title={compact ? `${working.label}…` : undefined}
+      className="flex min-w-0 items-center gap-2 rounded-full bg-surface py-1 pr-1 pl-3 text-xs text-body shadow-xs ring-1 ring-line"
+    >
       <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary" />
       <span className="truncate">
-        Claude · {working.label}…{" "}
-        <span className="text-faint tabular-nums">{secs}s</span>
+        {compact ? "Claude ·" : `Claude · ${working.label}…`}{" "}
+        <span className="text-faint tabular-nums">{`${secs}s`}</span>
         {queued > 0 && (
           <span className="text-primary-strong"> · {queued} waiting</span>
         )}

@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { WorkingBar } from "../components/WorkingBar.tsx";
 import type { Live } from "../lib/live.ts";
 
@@ -5,9 +7,12 @@ import type { Live } from "../lib/live.ts";
 export function LoadingScreen({
   live,
   onStop,
+  children,
 }: {
   live: Live;
   onStop: () => void;
+  // what the new map's mode asks while you wait (its Waiting)
+  children?: ReactNode;
 }) {
   return (
     <div className="flex h-full flex-col bg-canvas">
@@ -17,7 +22,13 @@ export function LoadingScreen({
           <div className="animate-pulse">
             {live.working?.label ?? "Starting"}…
           </div>
-          <div className="mt-3 text-sm text-faint">{live.stream.text}</div>
+          {children ? (
+            <div className="mt-6">{children}</div>
+          ) : (
+            <div className="mt-3 text-sm text-faint" data-content>
+              {live.stream.text}
+            </div>
+          )}
         </div>
       </div>
     </div>

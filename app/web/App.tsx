@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import type { Action, Purpose, Settings } from "../shared/model.ts";
 import { Mark } from "./components/Logo.tsx";
@@ -32,8 +38,19 @@ export default function App() {
   const roomy = useRoomy();
   const [selection, setSelection] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
-  // a new map on its way: the map it replaces, so the loading screen shows until the new one lands
-  const [launch, setLaunch] = useState<{ from: string | null } | null>(null);
+  // a new map on its way: the map it replaces, so the loading screen shows
+  // until the new one lands, and its mode (the question it asks meanwhile)
+  const [launch, setLaunch] = useState<{
+    from: string | null;
+    purpose: Purpose;
+  } | null>(null);
+  // what you answered on the loading screen, sent once the new map exists
+  // (`from`: the map it replaced): asked at once, it never waits for Claude
+  const [held, setHeld] = useState<{
+    action: Action;
+    from: string | null;
+  } | null>(null);
+  const sentHeld = useRef<typeof held>(null);
   const [startError, setStartError] = useState("");
   const [error, setError] = useState("");
   const [settings, setSettings] = useState<Settings>(() => {
@@ -80,6 +97,15 @@ export default function App() {
   const hasContent =
     !!map && (Object.keys(map.nodes).length > 0 || !!map.diagram);
   if (launch && map && map.id !== launch.from && hasContent) setLaunch(null);
+  // once, after the new map's first view: refused (the map not ready for
+  // it), the map asks again as it would have
+  const heldFor =
+    held && !launch && map && map.id !== held.from && hasContent ? held : null;
+  useEffect(() => {
+    if (!heldFor || sentHeld.current === heldFor) return;
+    sentHeld.current = heldFor;
+    void run(heldFor.action);
+  }, [heldFor, run]);
   // a node that disappears (removed by Claude) closes its panel
   if (map && selection.some((id) => !map.nodes[id]))
     setSelection((s) => s.filter((id) => map.nodes[id]));
@@ -91,8 +117,19 @@ export default function App() {
     else setStarting(false);
   };
 
-  if (launch || (!starting && !hasContent && live.busy))
-    return <LoadingScreen live={live} onStop={stop} />;
+  if (launch || (!starting && !hasContent && live.busy)) {
+    const Waiting = launch ? pluginFor(launch.purpose)?.Waiting : undefined;
+    return (
+      <LoadingScreen live={live} onStop={stop}>
+        {Waiting && launch && (
+          <Waiting
+            held={held?.from === launch.from ? held.action : null}
+            hold={(action) => setHeld({ action, from: launch.from })}
+          />
+        )}
+      </LoadingScreen>
+    );
+  }
 
   if (starting || !hasContent || !map)
     return (
@@ -107,7 +144,8 @@ export default function App() {
         onStart={async (text: string, purpose: Purpose) => {
           setStartError("");
           setSelection([]);
-          setLaunch({ from: map?.id ?? null });
+          setLaunch({ from: map?.id ?? null, purpose });
+          setHeld(null);
           setStarting(false);
           const r = await act({ type: "new", text, purpose }, settings);
           // stopped or nothing drawn: back to the start screen, never a spinner forever
@@ -142,6 +180,11 @@ export default function App() {
       p.switchesWith?.includes(map.purpose) ||
       pluginFor(map.purpose)?.switchesWith?.includes(p.id),
   );
+  const simple = !!plugin.simple;
+  const startNew = () => {
+    setStartError("");
+    setStarting(true);
+  };
   const modes: [string, string][] = switches
     .map((p): [string, string, number] => [p.id, p.label, p.order ?? 50])
     .sort((a, b) => a[2] - b[2])
@@ -154,7 +197,10 @@ export default function App() {
       <header className="grid grid-cols-[minmax(min(160px,20%),1fr)_minmax(0,auto)_auto] items-center gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Mark size={22} className="shrink-0" />
-          <div className="truncate text-[15px] font-semibold text-ink">
+          <div
+            className="truncate text-[15px] font-semibold text-ink"
+            data-content
+          >
             {map.title}
           </div>
         </div>
@@ -163,6 +209,7 @@ export default function App() {
             working={live.working}
             queued={live.queued}
             onStop={stop}
+            compact={simple}
           />
         </div>
         <div className="flex items-center justify-end gap-2">
@@ -194,16 +241,16 @@ export default function App() {
             onOpen={(id) => {
               void openMap(id);
             }}
+            onNew={simple ? startNew : undefined}
           />
-          <button
-            onClick={() => {
-              setStartError("");
-              setStarting(true);
-            }}
-            className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
-          >
-            New
-          </button>
+          {!simple && (
+            <button
+              onClick={startNew}
+              className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
+            >
+              New
+            </button>
+          )}
         </div>
       </header>
       <WorkingBar

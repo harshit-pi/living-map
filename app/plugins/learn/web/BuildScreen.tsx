@@ -1,21 +1,29 @@
 import { ReactFlowProvider } from "@xyflow/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { BuildCanvas, SmallBtn, type WhatIfMode } from "./BuildCanvas.tsx";
 import { CheckCard, CheckFindings } from "./CheckCard.tsx";
 import { DiagramView } from "./DiagramView.tsx";
+import { More, type MoreSection } from "./More.tsx";
 import { PathRail, type RailMark } from "./PathRail.tsx";
-import { ReviewPanel, ReviewStart, ReviewStrip } from "./ReviewPanel.tsx";
+import {
+  ClosingCard,
+  ReviewPanel,
+  ReviewStart,
+  ReviewStrip,
+} from "./ReviewPanel.tsx";
 import { ScenePlay } from "./ScenePlay.tsx";
-import { LevelChooser, PredictCard, StageStrip } from "./StepTop.tsx";
+import { LevelCard, PredictCard } from "./StepTop.tsx";
 import { Tray } from "./Tray.tsx";
 import {
   canvasMode,
   CREDIT,
-  creditCls,
-  inDays,
+  helpLine,
+  howTo,
+  LEVELS,
   moving,
   stepNumber,
+  toCarryOn,
   topSteps,
   useLearnAct,
   WAIT_TITLE,
@@ -28,10 +36,7 @@ import { act as send } from "../../../web/lib/api.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
   countsBuilt,
-  RUNGS,
-  showsCase,
   type LearnView,
-  type Rung,
   type StepView,
   type Sure,
 } from "../shared.ts";
@@ -48,49 +53,28 @@ const JUDGING = "Reading your why";
 const NEW_CASE = "Writing a new case";
 const BUILDING_SCENE = "Building a playable scene";
 
-const RUNG_WORD: Record<Rung, string> = {
-  built: "Built",
-  why: "Why",
-  whatif: "What if",
-  case: "New case",
-  kept: "Kept",
-};
-
-// what is due on a step is its key links: "3 due for review" under one
-// step read as three steps, beside "1 step is due"
-const dueWord = (n: number) =>
-  `due for review · ${n} key ${n === 1 ? "link" : "links"}`;
-
+// What the rail says under a step: a word only where something is going
+// on (drawing, building, done, due); a step still to do says nothing, its
+// number is enough.
 function railMark(st: StepView): RailMark {
-  const meter = RUNGS.filter((r) => r !== "case" || showsCase(st)).map((r) => {
-    const c = st.rungs[r];
-    return {
-      sym: c ? CREDIT[c].sym : "·",
-      cls: creditCls(c),
-      title: `${RUNG_WORD[r]}: ${c ? CREDIT[c].word : "not yet"}`,
-    };
-  });
   const due = st.itemsDue > 0 || st.recallDue;
   if (st.model === "none" || st.model === "writing")
     return {
       mark: "",
       cls: "border-warning bg-surface text-warning-strong",
-      word: st.model === "writing" ? "being drawn" : "to do",
-      meter,
+      word: st.model === "writing" ? "drawing" : "",
     };
   if (st.model === "broken")
     return {
       mark: "!",
       cls: "border-danger bg-danger-soft text-danger-strong",
-      word: "did not hold together",
-      meter,
+      word: "did not draw",
     };
   if (st.reviewing || st.recall)
     return {
       mark: "↻",
       cls: "border-primary bg-primary-soft text-primary-strong",
       word: st.recall ? "quick rebuild" : "rebuilding",
-      meter,
     };
   // a step part way through its optional new case is built: what is due
   // comes first
@@ -98,8 +82,7 @@ function railMark(st: StepView): RailMark {
     return {
       mark: "↻",
       cls: "border-primary bg-surface text-primary-strong",
-      word: `${dueWord(st.itemsDue)} · new case open`,
-      meter,
+      word: "due for review",
     };
   if (st.stage === "built")
     return due
@@ -107,44 +90,47 @@ function railMark(st: StepView): RailMark {
           mark: "↻",
           cls: "border-primary bg-surface text-primary-strong",
           // due for review wins: the review rebuilds it, and the quick
-          // rebuild goes when it opens ("quick rebuild waiting" sat under a
-          // card counting the step due)
-          word:
-            st.itemsDue > 0 ? dueWord(st.itemsDue) : "quick rebuild waiting",
-          meter,
+          // rebuild goes when it opens
+          word: st.itemsDue > 0 ? "due for review" : "quick rebuild",
         }
       : {
           mark: "✓",
           cls: "border-success bg-success text-on-primary",
           word:
             st.rungs.built === "shown"
-              ? "built, shown"
+              ? "done · shown"
               : st.rungs.built === "hints"
-                ? "built with hints"
-                : "built by you",
-          meter,
+                ? "done · with hints"
+                : "done",
         };
   if (st.stage === "why")
     return {
       mark: "",
       cls: "border-warning bg-warning-soft text-warning-strong",
       word: "say why",
-      meter,
     };
   if (st.stage === "build")
     return {
       mark: "",
       cls: "border-primary bg-surface text-primary-strong",
-      word: st.onCase ? "new case" : `building · L${st.help}`,
-      meter,
+      word: st.onCase ? "new example" : "building",
     };
   return {
     mark: "",
     cls: "border-warning bg-surface text-warning-strong",
-    word: st.model === "ready" ? "to see" : "to do",
-    meter,
+    word: "",
   };
 }
+
+// what a review that closed itself said, kept on the card (`at`: when that
+// review opened)
+type Closed = {
+  at: number;
+  unaided: number;
+  of: number;
+  last: number | null;
+  card: { right: boolean; correct: string | null } | null;
+};
 
 // a step rebuilt from memory (a review, a quick rebuild): its scene stays
 // shut until the rebuild is checked, as the server has it (rebuilding)
@@ -165,6 +151,14 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   const [pinned, setPinned] = useState<string | null>(null);
   const [centre, setCentre] = useState<"step" | "topic" | "play">("step");
   const [thread, setThread] = useState(false);
+  // a review that has just closed itself: what it said, kept on the card
+  // until you go on (the server logs the visit when it closes, so "next
+  // review" is the real day)
+  const [closed, setClosed] = useState<Closed | null>(null);
+  // the review last closed from here, by when it opened: sent once (the
+  // view saying it closed can come after the reply, and a second "done" was
+  // refused)
+  const ended = useRef<number | null>(null);
   const [whatifOn, setWhatifOn] = useState(false);
   // the what-if's marks are drawn on the build you clicked them on, right
   // after its check: drawn again on a later rebuild, they marked parts of a
@@ -228,6 +222,35 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
     setWiSure(null);
   }
 
+  // A review with every rebuild done and every "which idea" card answered
+  // closes itself (I'm done today, pressed for you): there is nothing left
+  // in it, and its score and next day are said on the closing card.
+  const finished =
+    !!review &&
+    !view.steps.some((s) => s.reviewing) &&
+    !review.cards.some((c) => c.picked === null);
+  const endReview = () => {
+    if (!review || ended.current === review.at) return;
+    ended.current = review.at;
+    const last = review.cards.filter((c) => c.picked !== null).at(-1);
+    const snap: Closed = {
+      at: review.at,
+      unaided: review.unaided,
+      of: review.of,
+      last: view.last?.unaided ?? null,
+      card: last ? { right: !!last.right, correct: last.correct } : null,
+    };
+    void act("done").then((r) => {
+      if (r.error) ended.current = null;
+      else setClosed(snap);
+    });
+  };
+  useEffect(() => {
+    if (finished) endReview();
+  });
+  // a new review puts the closing card away (so does going on: openStep)
+  if (closed && review && review.at !== closed.at) setClosed(null);
+
   const w = live.working;
   const isWriting = (st: StepView) =>
     st.model === "writing" ||
@@ -249,6 +272,7 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   const openStep = (id: string) => {
     setSelection([id]);
     setOnPath(true);
+    setClosed(null);
     const st = find(id);
     if (st && st.model === "none" && !isWriting(st))
       void here.act("open", { step: id });
@@ -269,27 +293,6 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   const built = tops.filter((s) =>
     countsBuilt(map.nodes[s.step]?.status, s.rungs),
   ).length;
-
-  const footer = (
-    <div className="text-[12px] text-muted">
-      {view.due.now > 0 ? (
-        <button
-          onClick={() => {
-            setSelection([]);
-            setOnPath(false);
-          }}
-          className="font-medium text-primary-strong hover:underline"
-        >
-          Due: {view.due.now} {view.due.now === 1 ? "step" : "steps"} now
-        </button>
-      ) : (
-        <span>Due: nothing</span>
-      )}
-      {view.due.next !== null && view.due.now === 0 && (
-        <span> · next {inDays(view.due.next, view.now)}</span>
-      )}
-    </div>
-  );
 
   // the step's own node panel: its thread, Explain, Skip; never Show answer
   // (Show the model is the build's own, and counts as shown)
@@ -337,10 +340,9 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
         onSelect={(id) => (find(id) ? openStep(id) : setSelection([id]))}
         busy={false}
         workingId={live.working?.nodeId ?? null}
-        onNext={goNext}
         marks={marks}
-        progress={{ got: built, word: "built" }}
-        footer={footer}
+        progress={{ got: built, word: "done" }}
+        simple
       />
       {/* a narrow window stacks the parts, the canvas and the side card,
           so the canvas keeps its width (at 1024 side by side, the canvas
@@ -386,6 +388,8 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
             }}
             onPick={openStep}
             onNext={nextAfter(current.step) ? goNext : null}
+            closed={closed}
+            onEndReview={endReview}
           />
         )}
         <div onClick={(e) => e.stopPropagation()}>
@@ -432,6 +436,8 @@ function StepArea({
   onThread,
   onPick,
   onNext,
+  closed,
+  onEndReview,
 }: {
   here: Here;
   st: StepView;
@@ -452,6 +458,8 @@ function StepArea({
   onThread: () => void;
   onPick: (id: string) => void;
   onNext: (() => void) | null;
+  closed: Closed | null;
+  onEndReview: () => void;
 }) {
   const { ws, view, busy, act, pending } = here;
   const { map, live } = ws;
@@ -470,6 +478,7 @@ function StepArea({
   const buildingScene =
     live.working?.nodeId === st.step && live.working.label === BUILDING_SCENE;
   const first = topSteps(view)[0]?.step === st.step;
+  const node = map.nodes[st.step];
 
   // the what-if: on while you click parts; its result marks them after
   const wiResult = st.stage === "built" ? st.whatif?.result : null;
@@ -509,49 +518,165 @@ function StepArea({
   const verdicts: Record<string, string> = {};
   for (const c of map.chat) if (c.blankId) verdicts[c.blankId] = c.text;
 
-  // A review whose rebuilds are all done says so first: under the step's
-  // old Why and its extras, its result sat below the fold. So does one with
-  // a step still to rebuild, on a step you rebuilt out of its order: what is
-  // left, and a way to it, before the step's old cards.
-  const reviewDone = !!review && !view.steps.some((s) => s.reviewing);
-  const reviewFirst = !!review && (reviewDone || !st.reviewing);
+  // The review owns the card while it is open: the step being rebuilt has
+  // its check card over the review's line; any other step shows only the
+  // review (the step still to rebuild, the "which idea" cards). The step's
+  // old Why and What if stay out of it.
+  const inReview = !!review && st.reviewing;
+  const reviewOnly = !!review && !st.reviewing;
+  const closing = !!closed && !review;
+  // How much do you know? tops the card on a map with no level yet, and on
+  // step 1 while it is drawn (the answer held from the loading screen
+  // marked): the first choice never waits for step 1
+  const levelCard =
+    !review &&
+    !closing &&
+    st.stage === "see" &&
+    !st.worked &&
+    (view.level === null || (first && !ready));
+  const own = !reviewOnly && !closing && ready;
 
-  // nothing to say beside a step whose model is not drawn yet (an empty
-  // column sat at the window's right edge)
-  const side = (ready || review) && (
-    <aside className="flex max-h-[45%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 lg:max-h-none lg:w-[260px] lg:border-t-0 lg:border-l xl:w-[280px] 2xl:w-[300px]">
-      <div className="space-y-4">
-        {review && reviewFirst && (
-          <div className="border-b border-line pb-3">
-            <ReviewPanel
-              here={here}
-              review={review}
-              current={st.step}
-              onPick={onPick}
-            />
-          </div>
+  // Everything that is not the one next thing, behind the card's ⋯.
+  const firstTry =
+    mode === "build" &&
+    st.checks === 0 &&
+    !st.reviewing &&
+    !st.recall &&
+    !st.onCase;
+  const sections: MoreSection[] = [
+    {
+      head: view.level && !review ? "Starting help" : undefined,
+      items:
+        view.level && !review
+          ? LEVELS.map(([lv, label, says]) => ({
+              label,
+              title: says,
+              on: view.level === lv,
+              onClick: () => void act("level", { level: lv }),
+            }))
+          : [],
+    },
+    {
+      items: [
+        ...(ready && firstTry && centre === "step"
+          ? [
+              {
+                label: "Peek at the example",
+                title: "It counts as shown",
+                onClick: () => void act("showModel", { step: st.step }),
+              },
+            ]
+          : []),
+        ...(ready && st.stage === "build" && st.check && st.canHint
+          ? [
+              {
+                label:
+                  st.hintOn === "place" ? "Show one place" : "Show one link",
+                title:
+                  st.hintOn === "place"
+                    ? "Puts one part where it goes; it counts as shown"
+                    : "Draws one link for you; it counts as shown",
+                onClick: () => void act("showLink", { step: st.step }),
+              },
+            ]
+          : []),
+        ...(ready &&
+        st.stage === "build" &&
+        st.check &&
+        !st.reviewing &&
+        !st.recall
+          ? [
+              {
+                label: "Show the model",
+                title:
+                  "Shows the whole model as long as you want, then you rebuild it with the parts placed. It counts as shown.",
+                onClick: () => void act("showModel", { step: st.step }),
+              },
+            ]
+          : []),
+        ...(view.topic && st.stage !== "build"
+          ? [
+              {
+                label:
+                  centre === "topic" ? "Back to this step" : "Topic diagram",
+                onClick: () => setCentre(centre === "topic" ? "step" : "topic"),
+              },
+            ]
+          : []),
+        { label: "Talk about this step", onClick: onThread },
+        ...(node?.parent && node.status !== "answered" && !node.dropped
+          ? [
+              {
+                label: "Skip this step",
+                onClick: () => void ws.run({ type: "drop", nodeId: st.step }),
+              },
+            ]
+          : []),
+      ],
+    },
+  ];
+  // Claude's opening note on the path, to read again (it was "How to start"
+  // in the rail)
+  const intro = map.chat.find(
+    (c) => c.role === "claude" && !c.blankId && !c.nodeId,
+  )?.text;
+
+  const reviewAt = review ? review.order.indexOf(st.step) + 1 : 0;
+  const passed = st.check?.pass ? st.check : null;
+
+  const side = (ready || review || levelCard || closing) && (
+    <aside className="relative flex max-h-[45%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 lg:max-h-none lg:w-[260px] lg:border-t-0 lg:border-l xl:w-[280px] 2xl:w-[300px]">
+      {/* ⋯ sits at the top right of the card, beside the one next thing */}
+      <div className="absolute top-2.5 right-2.5 z-10">
+        <More sections={sections} intro={intro} />
+      </div>
+      <div className="space-y-4 [&>*:first-child]:pr-8">
+        {closing && closed && (
+          <ClosingCard
+            view={view}
+            closed={closed}
+            onCarryOn={(() => {
+              const c = toCarryOn(view);
+              return c ? { step: c.step, go: () => onPick(c.step) } : null;
+            })()}
+          />
         )}
-        {/* a quick rebuild that passed says so first: the card went
-            straight back to the step's old Why, as if nothing had happened */}
-        {ready && st.stage === "built" && st.recalled && (
+        {levelCard && <LevelCard here={here} level={view.level} />}
+        {reviewOnly && review && (
+          <ReviewPanel
+            here={here}
+            review={review}
+            current={st.step}
+            onPick={onPick}
+            onDone={onEndReview}
+          />
+        )}
+        {/* a quick rebuild that passed says so first */}
+        {own && st.stage === "built" && st.recalled && (
           <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] font-medium text-success-strong">
             ↻ Quick rebuild ✓ · {CREDIT[st.recalled.credit].word}
             {st.recalled.tries > 1 ? ` · on try ${st.recalled.tries}` : ""}
           </div>
         )}
-        {ready && st.stage === "see" && (
+        {own && !levelCard && st.stage === "see" && (
           <PredictCard key={st.step} here={here} st={st} />
         )}
-        {ready && st.stage === "build" && <CheckCard here={here} st={st} />}
-        {/* a check that passed goes on to the Why: what it found (a
-            mix-up's refutation, a "?" to argue for, the order) stays here */}
-        {ready && (st.stage === "why" || st.stage === "built") && st.check && (
-          <CheckFindings key={`${st.step}:check`} here={here} st={st} passed />
+        {own && st.stage === "build" && <CheckCard here={here} st={st} />}
+        {inReview && review && (
+          <div className="border-t border-line pt-3">
+            <ReviewPanel here={here} review={review} onDone={onEndReview} />
+          </div>
         )}
-        {ready && (st.stage === "why" || st.stage === "built") && (
+        {/* the pass stays above the Why: it is what you just earned */}
+        {own && st.stage === "why" && passed && (
+          <div className="text-[13px] font-medium text-success-strong">
+            ✓ Right: {passed.keyRight} of {passed.keys} key links.
+          </div>
+        )}
+        {own && st.stage === "why" && (
           <WhyCard key={st.step} here={here} st={st} judging={judging} />
         )}
-        {ready && st.stage === "built" && (
+        {own && st.stage === "built" && (
           <BuiltCard
             here={here}
             st={st}
@@ -568,15 +693,15 @@ function StepArea({
               checked: () => setWiShown(true),
             }}
             onWhatIf={() => setWhatifOn(true)}
-            // with a review step still to rebuild, the review says where
-            // next; Next step went along the path
-            onNext={review && !reviewDone ? null : onNext}
-          />
+            onNext={onNext}
+          >
+            <WhyCard key={st.step} here={here} st={st} judging={judging} />
+          </BuiltCard>
         )}
-        {review && !reviewFirst && (
-          <div className="border-t border-line pt-3">
-            <ReviewPanel here={here} review={review} />
-          </div>
+        {/* what a passing check found (a mix-up's refutation, a "?" to
+            argue for): feedback, kept whenever it applies */}
+        {own && (st.stage === "why" || st.stage === "built") && st.check && (
+          <CheckFindings key={`${st.step}:check`} here={here} st={st} passed />
         )}
       </div>
     </aside>
@@ -644,17 +769,17 @@ function StepArea({
         {st.model === "broken" ? (
           <div className="max-w-sm text-center">
             <div className="text-[15px] font-medium text-ink">
-              Claude's model did not hold together
-            </div>
-            <div className="mt-1 text-[12px] text-muted">
-              It was asked once more and still did not. Try again draws it
-              afresh.
+              This step did not draw
             </div>
             <div className="mt-3">
               <SmallBtn
                 primary
                 disabled={busy}
-                title={busy ? WAIT_TITLE : "One Claude move"}
+                title={
+                  busy
+                    ? WAIT_TITLE
+                    : "Claude's model did not hold together, twice: this draws it afresh"
+                }
                 onClick={() => void act("open", { step: st.step })}
               >
                 Try again
@@ -672,36 +797,29 @@ function StepArea({
               ))}
             </div>
             <div className="mt-5 text-sm text-muted">
-              Claude is drawing this step on one concrete case…
+              <Drawing since={live.working?.since} />
             </div>
           </div>
         ) : (
-          <div className="text-center">
-            <div className="text-[13px] text-muted">
-              This step's model is written when you open it.
-            </div>
-            <div className="mt-2">
-              <SmallBtn
-                primary
-                disabled={busy}
-                title={busy ? WAIT_TITLE : "One Claude move"}
-                onClick={() => void act("open", { step: st.step })}
-              >
-                Draw this step
-              </SmallBtn>
-            </div>
-          </div>
+          <SmallBtn
+            primary
+            disabled={busy}
+            title={
+              busy
+                ? WAIT_TITLE
+                : "One Claude move: this step's model is written when you open it"
+            }
+            onClick={() => void act("open", { step: st.step })}
+          >
+            Draw this step
+          </SmallBtn>
         )}
       </div>
     );
   else if (st.stage === "see" && !st.worked)
-    // the worked case waits for the level chooser (view): "I'm new" shows it
-    body = (
-      <div className="flex h-full items-center justify-center p-6 text-center text-[13px] text-muted">
-        Say how much you know above. “I'm new” shows you a worked case first;
-        the other two start you building.
-      </div>
-    );
+    // the example waits for the level ("I'm new" shows it): the card on
+    // the right asks, and nothing here repeats it
+    body = <div className="h-full" />;
   else
     body = (
       <ReactFlowProvider
@@ -713,9 +831,31 @@ function StepArea({
           mode={mode}
           whatif={whatif}
           onDeeper={onDeeper}
+          line={
+            mode === "build"
+              ? {
+                  say: helpLine(
+                    st,
+                    review && reviewAt > 0
+                      ? { at: reviewAt, of: review.order.length }
+                      : undefined,
+                  ),
+                  how: howTo(st),
+                  lowered: st.lowered,
+                }
+              : undefined
+          }
         />
       </ReactFlowProvider>
     );
+
+  // the tray, only while it has a part in it (all placed, it was a column
+  // that said so)
+  const trayOn =
+    ready &&
+    mode === "build" &&
+    centre === "step" &&
+    (st.trayCount > 0 || !!st.typed);
 
   return (
     <>
@@ -723,9 +863,7 @@ function StepArea({
           card scrolls in under it: let shrink to fit, the canvas ran past
           its end and the message box sat on the check card's heading */}
       <div className="flex min-w-0 flex-none flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
-        {ready && mode === "build" && centre === "step" && (
-          <Tray here={here} st={st} />
-        )}
+        {trayOn && <Tray here={here} st={st} />}
         {/* stacked (under 1024 wide), the canvas keeps a height of its own
           and the side card follows below it: squeezed to fit, the build had
           about 170px between its header and the message box */}
@@ -739,19 +877,13 @@ function StepArea({
                 onPick={onPick}
               />
             )}
-            {/* on any step while no level is picked: its worked case waits
-                for it (a step opened before step 1 had none to pick from) */}
-            {!review &&
-              (view.level === null || (first && st.stage !== "built")) && (
-                <LevelChooser here={here} level={view.level} />
-              )}
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[15px] font-semibold text-ink">
                   <span className="mr-1.5 text-muted">
                     {stepNumber(view, st.step)}
                   </span>
-                  {st.title}
+                  <span data-content>{st.title}</span>
                 </div>
               </div>
               {st.mode === "play" && !fromMemory(st) && (
@@ -764,98 +896,34 @@ function StepArea({
                   onChange={setCentre}
                 />
               )}
-              {/* the old diagram may draw the links you are rebuilding: it
-                stays out of view while you build */}
-              {view.topic && st.stage !== "build" && (
-                <Toggle
-                  value={centre === "topic" ? "topic" : "step"}
-                  options={[
-                    ["step", "This step"],
-                    ["topic", "◧ Topic diagram"],
-                  ]}
-                  onChange={setCentre}
-                />
-              )}
-              <button
-                onClick={onThread}
-                className="rounded-lg border border-line-strong px-2.5 py-1 text-xs text-body hover:border-primary"
-              >
-                💬 Thread
-              </button>
             </div>
-            {ready && (
-              <StageStrip
-                st={st}
-                skippedSee={
-                  // the chooser, or Practise this as builds on a step you had
-                  // worked out, starts it past See
-                  (view.level === "some" ||
-                    view.level === "cold" ||
-                    view.topic) &&
-                  st.help > 0
-                }
-              />
-            )}
+            {/* the example's name, and what happens in it, while you see
+                it; while you build, its name stays in view (a sort step's
+                columns weigh evidence for a claim said only on the See you
+                skipped). The server leaves it out where it names a part
+                you are to recall. */}
             {ready &&
-              st.worked &&
               centre === "step" &&
-              (st.caseTitle || st.case) && (
-                <div className="text-[11.5px] text-muted">
-                  <span className="font-semibold tracking-wide text-faint uppercase">
-                    Worked case
-                  </span>{" "}
-                  ·{" "}
-                  {/* the case's name, then what happens in it: joined by a
-                  comma they read as one run-on line */}
+              (st.worked
+                ? st.caseTitle || st.case
+                : mode === "build" && !st.onCase && st.caseTitle) && (
+                <div className="text-[11.5px] text-muted" data-content>
                   {st.caseTitle && (
                     <span className="font-medium text-body">
                       {st.caseTitle}
                     </span>
                   )}
-                  {st.caseTitle && st.case && " — "}
-                  {st.case}
+                  {st.worked && st.caseTitle && st.case && " — "}
+                  {st.worked && st.case}
                 </div>
-              )}
-            {/* while you build, the case's name stays in view: a sort
-                step's columns weigh evidence for a claim, and the claim was
-                said only on the See you skipped ("The case against Germany,
-                1914"). The server leaves it out where it names a part you
-                are to recall. */}
-            {ready &&
-              mode === "build" &&
-              centre === "step" &&
-              !st.onCase &&
-              st.caseTitle && (
-                <div className="text-[11.5px] text-muted">
-                  <span className="font-semibold tracking-wide text-faint uppercase">
-                    Case
-                  </span>{" "}
-                  · <span className="text-body">{st.caseTitle}</span>
-                </div>
-              )}
-            {ready &&
-              mode === "build" &&
-              centre === "step" &&
-              st.help < 3 &&
-              st.checks === 0 &&
-              !st.reviewing &&
-              !st.recall &&
-              !st.onCase && (
-                <button
-                  onClick={() => void act("showModel", { step: st.step })}
-                  className="text-[11.5px] text-muted hover:text-ink"
-                  title="It counts as shown"
-                >
-                  Peek at the worked case
-                </button>
               )}
             {ready && st.onCase && st.stage === "build" && (
               <button
                 onClick={() => void act("onCase", { step: st.step, on: false })}
                 className="text-[11.5px] text-muted hover:text-ink"
-                title="The new case is optional: it waits here for you"
+                title="The new example is optional: it waits here for you"
               >
-                ← Back to my build (the new case waits)
+                ← Back to my build
               </button>
             )}
           </div>
@@ -866,6 +934,7 @@ function StepArea({
             ws={ws}
             beside={false}
             sticky
+            collapsed
             scope={st.step}
             placeholder="Ask anything about the topic, or tell Claude where you are stuck…"
           />
@@ -873,6 +942,20 @@ function StepArea({
       </div>
       {side}
     </>
+  );
+}
+
+// "Drawing · 12 s": the seconds since Claude started, so a wait is seen to
+// move
+function Drawing({ since }: { since: number | undefined }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = since ? Math.max(0, Math.round((now - since) / 1000)) : 0;
+  return (
+    <span className="tabular-nums">Drawing{since ? ` · ${secs}s` : "…"}</span>
   );
 }
 
