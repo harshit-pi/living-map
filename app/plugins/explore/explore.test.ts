@@ -816,9 +816,14 @@ test("Next takes the first gap, rule by rule", () => {
   const gap = () => nextGap((s = live(map)), nodes, "q");
   const op = (o: Raw) => applyExploreOp(live(map), nodes, o);
 
+  // 0: no list of what you want (an older board): Claude suggests one
+  assert.deepEqual(
+    [gap().kind, gap().short],
+    ["suggest", "Suggest what to weigh"],
+  );
   // 1: wants but no cells
   op({ op: "want", q: "q", id: "w-cost", title: "Cost", weight: "must" });
-  assert.equal(gap().kind, "fill");
+  assert.deepEqual([gap().kind, gap().short], ["fill", "Fill the board"]);
   s.boards.q.rows[0].suggested = false;
   op({ op: "want", q: "q", id: "w-speed", title: "Speed", weight: "matters" });
   s = live(map);
@@ -879,6 +884,10 @@ test("Next takes the first gap, rule by rule", () => {
   g = gap();
   assert.equal(g.kind, "against");
   assert.equal(g.option, "dyn");
+  // the label keeps the option (the server knows the move by it); the
+  // button never names the option Claude prefers
+  assert.match(g.label, /^Strongest case against "DynamoDB"/);
+  assert.equal(g.short, "Case against the lead");
   op({ op: "against", option: "dyn", text: "lock-in" });
   // 5: an empty cell on a matters row
   delete live(map).boards.q.cells["dyn|w-speed"];
@@ -893,12 +902,18 @@ test("Next takes the first gap, rule by rule", () => {
       mark: "same",
       facts: ["f-pg"],
     });
+  // 5b: Claude leads, the musts are judged and the lead has its case
+  // against: deciding is yours, for no move, and Next names no option
+  g = gap();
+  assert.deepEqual([g.kind, g.short], ["choose", "Decide…"]);
+  assert.equal(g.option, undefined);
+  assert.ok(YOURS.has(g.kind));
   // 6: a choice with no pre-mortem
   nodes.pg.status = "chosen";
   nodes.keep.status = "dropped";
   nodes.dyn.status = "dropped";
   g = gap();
-  assert.equal(g.kind, "wrap");
+  assert.deepEqual([g.kind, g.short], ["wrap", "How could it fail?"]);
   live(map).boards.q.commit!.premortem.claude = ["a"];
   // 7: an open choice elsewhere, with a board of its own: Next opens it
   // there, for no move (QA round 6: a move from here left it open)
@@ -913,9 +928,37 @@ test("Next takes the first gap, rule by rule", () => {
   g = gap();
   assert.deepEqual([g.kind, g.q], ["question", "q3"]);
   assert.match(g.label, /^Open question/);
+  assert.equal(g.short, "Next question");
   // 9: nothing open
   nodes.q3.status = "answered";
-  assert.equal(gap().kind, "sum");
+  assert.deepEqual([gap().kind, gap().short], ["sum", "Sum up"]);
+});
+
+test("Next suggests wants on a bare board, and deciding pays for no move", async () => {
+  const m = storedMap(boardNodes());
+  const { run, turns } = stub(m);
+  // an older board with no list of what you want: Next asks Claude for one
+  await run("next", { q: "q" });
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].opts.label, "Suggesting what to weigh");
+  const op = (o: Raw) => applyExploreOp(live(m), m.nodes, o);
+  op({ op: "want", q: "q", id: "w-cost", title: "Cost", weight: "must" });
+  op({ op: "want", q: "q", id: "w-speed", title: "Speed", weight: "matters" });
+  for (const r of live(m).boards.q.rows) r.suggested = false;
+  for (const o of ["keep", "pg", "dyn"])
+    for (const w of ["w-cost", "w-speed"])
+      op({ op: "cell", option: o, want: w, mark: "same", facts: ["f-pg"] });
+  op({ op: "stand", q: "q", lead: "pg", line: "joins" });
+  op({ op: "against", option: "pg", text: "ops load" });
+  const g = nextGap(live(m), m.nodes, "q");
+  assert.deepEqual([g.kind, g.short], ["choose", "Decide…"]);
+  // the button never names an option, least of all Claude's lead
+  for (const id of ["keep", "pg", "dyn"])
+    assert.ok(!g.short.includes(m.nodes[id].title), g.short);
+  // the choice is yours: Next from elsewhere starts no move for it
+  const r = await run("next", { q: "q" });
+  assert.match(String((r as { error?: string }).error), /Decide sheet/);
+  assert.equal(turns.length, 1);
 });
 
 test("on run 1 after a Choose, Next never goes deeper than a choice open above", () => {
@@ -1819,6 +1862,7 @@ test("a choice under a cause no one marked likely waits: Next tells the causes a
   assert.equal(g.kind, "question");
   assert.equal(g.q, "q-organic-cause");
   assert.match(g.label, /^Which check to run first/);
+  assert.equal(g.short, "Pick the first check");
   // once the cause is marked likely, its choice is Next's
   await run("commit", { option: "opt-org-serp" });
   assert.match(nextGap(peek(m), m.nodes).label, /^Open choice: How to confirm/);
@@ -2169,7 +2213,9 @@ test("a check's result reported in its thread is weighed, then settling is yours
     },
     { now: t0 + 1 },
   );
-  assert.equal(nextGap(peek(m), m.nodes).kind, "run");
+  const ran = nextGap(peek(m), m.nodes);
+  assert.equal(ran.kind, "run");
+  assert.equal(ran.short, `Run ${m.nodes[ran.option!].title}`);
   // you ran it; Claude's thread answer wrote the result into the card
   m.nodes["fact-query-split"] = {
     ...m.nodes["fact-query-split"],
@@ -2183,6 +2229,7 @@ test("a check's result reported in its thread is weighed, then settling is yours
     ["question", "q-organic-cause", "fact-query-split"],
   );
   assert.match(g.label, /^Weigh what came in/);
+  assert.equal(g.short, "Weigh the new result");
   await run("next", {});
   assert.match(turns.at(-1)!.action, /WEIGH what came in/);
   assert.match(turns.at(-1)!.action, /Write a stand op/);

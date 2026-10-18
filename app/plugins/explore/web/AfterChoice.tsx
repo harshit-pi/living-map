@@ -45,13 +45,13 @@ export function AfterChoice({ here, board }: { here: Here; board: BoardView }) {
           </span>
         ) : (
           empty && (
+            // Next says the same step, filled: here it is a quiet second way in
             <Btn
               small
-              primary
               busy={here.busy}
               onClick={() => void here.act("wrap", { q })}
             >
-              Write the pre-mortem ▸
+              How could it fail? ▸
             </Btn>
           )
         )}
@@ -61,16 +61,17 @@ export function AfterChoice({ here, board }: { here: Here; board: BoardView }) {
           <div className={head}>If it failed, why?</div>
           <ol className="mb-2 list-decimal space-y-0.5 pl-4 text-[12.5px] leading-snug text-body">
             {c.premortem.claude.map((r, i) => (
-              <li key={i}>{r}</li>
+              <li key={i} data-content>
+                {r}
+              </li>
             ))}
           </ol>
           <label className="block text-xs text-muted">
-            yours:
             <input
               // the server's text is the start value; a new one replaces it
               key={c.premortem.you ?? ""}
               defaultValue={c.premortem.you ?? ""}
-              placeholder="…optional"
+              placeholder="Add your own reason"
               maxLength={240}
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.currentTarget.blur();
@@ -95,7 +96,7 @@ export function AfterChoice({ here, board }: { here: Here; board: BoardView }) {
                     : a.status === "holds"
                       ? "✓ "
                       : "▲ "}
-                  {a.text}
+                  <span data-content>{a.text}</span>
                   {a.by === "you" && (
                     <span className="ml-1 text-[10.5px] font-semibold">
                       you
@@ -103,7 +104,9 @@ export function AfterChoice({ here, board }: { here: Here; board: BoardView }) {
                   )}
                 </div>
                 {a.breaksIf && (
-                  <div className="text-muted">breaks if: {a.breaksIf}</div>
+                  <div className="text-muted">
+                    breaks if: <span data-content>{a.breaksIf}</span>
+                  </div>
                 )}
                 <div className="mt-0.5 flex items-center gap-1 text-xs">
                   {(["holds", "broken"] as const).map((st) => (
@@ -184,8 +187,10 @@ export function AfterChoice({ here, board }: { here: Here; board: BoardView }) {
                     className="mt-0.5"
                   />
                   <span className={s.done ? "text-muted line-through" : ""}>
-                    {s.when && <>{s.when} → </>}
-                    {s.do}
+                    <span data-content>
+                      {s.when && <>{s.when} → </>}
+                      {s.do}
+                    </span>
                   </span>
                 </label>
               </li>

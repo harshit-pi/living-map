@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { BuildCanvas, SmallBtn, type WhatIfMode } from "./BuildCanvas.tsx";
 import { CheckCard, CheckFindings } from "./CheckCard.tsx";
 import { DiagramView } from "./DiagramView.tsx";
-import { More, type MoreSection } from "./More.tsx";
 import { PathRail, type RailMark } from "./PathRail.tsx";
 import {
   ClosingCard,
@@ -31,6 +30,7 @@ import {
 } from "./view.ts";
 import { BuiltCard, WhyCard } from "./WhyCard.tsx";
 import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
+import { More, type MoreSection } from "../../../web/components/More.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
 import { act as send } from "../../../web/lib/api.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";

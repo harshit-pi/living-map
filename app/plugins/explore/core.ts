@@ -1031,6 +1031,7 @@ function tellGap(
     label: tell.check
       ? `Answer ${named(nodes, tell.check)} to settle ${plural(cells, "cell")}`
       : `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
+    short: tell.check ? "Answer the check" : "Say what you know",
     reason: `${what} Claude ${tell.guess ? "can only guess at" : "can't tell"} without you${tell.note ? ` (${clip(tell.note, 24, 160)})` : ""}`,
   };
 }
@@ -1046,11 +1047,21 @@ export function nextGap(
   const b = own(s.boards, q);
   if (b && b.shape === "choose" && !chosenHere(nodes, q)) {
     const cols = columnsOf(nodes, b).filter(inPlay);
+    // an older board with no list of what you want: nothing to fill yet
+    if (!b.rows.length)
+      return {
+        kind: "suggest",
+        q,
+        label: "Suggest what to weigh",
+        short: "Suggest what to weigh",
+        reason: "this board has no list of what you want yet",
+      };
     if (needsFill(nodes, b))
       return {
         kind: "fill",
         q,
         label: "Fill the board",
+        short: "Fill the board",
         reason: "Claude judges each option on what you want",
       };
     const keep = b.keepAsIs ? own(nodes, b.keepAsIs) : undefined;
@@ -1059,6 +1070,7 @@ export function nextGap(
         kind: "something",
         q,
         label: "Add another option",
+        short: "Add another option",
         reason:
           cols.length < 2
             ? "a choice with one option fails far more often"
@@ -1081,6 +1093,7 @@ export function nextGap(
         option: must.option,
         want: must.want,
         label: checkLabel(nodes, must.option, must.want),
+        short: "Check a must",
         reason: must.guess ? "a must, only a guess" : "a must, still empty",
       };
     if (tell) return tellGap(nodes, b, tell, "a must");
@@ -1093,6 +1106,9 @@ export function nextGap(
           q,
           option: o.id,
           label: `Strongest case against ${named(nodes, o.id)}`,
+          // the lead is the option Claude prefers: Next names the step, not it
+          short:
+            o === lead ? "Case against the lead" : "Case against your lean",
           reason: "before you choose",
         };
     const matters = holes(s, nodes, b, "matters", { guesses: false })[0];
@@ -1103,7 +1119,19 @@ export function nextGap(
         option: matters.option,
         want: matters.want,
         label: checkLabel(nodes, matters.option, matters.want),
+        short: "Check a cell",
         reason: "it matters, still empty",
+      };
+    // Claude leads, no must is empty and the lead has its case against: the
+    // step is yours, choosing. Next opens the Decide sheet with nothing
+    // picked; it never names Claude's lead, which the star already shows
+    if (lead)
+      return {
+        kind: "choose",
+        q,
+        label: "Decide",
+        short: "Decide…",
+        reason: "the musts are judged and the lead has its case against",
       };
   }
   // After a Choose the other columns are out, but what is unknown about the
@@ -1133,6 +1161,7 @@ export function nextGap(
         option: cell.option,
         want: cell.want,
         label: checkLabel(nodes, cell.option, cell.want),
+        short: must ? "Check a must" : "Check a cell",
         reason: must
           ? `a must on your choice, ${must.guess ? "only a guess" : "still empty"}`
           : "it matters to your choice, still empty",
@@ -1145,6 +1174,7 @@ export function nextGap(
       q,
       option: b.commit.option,
       label: wrapLabel(nodes, b.commit.option),
+      short: "How could it fail?",
       reason: "how it could fail, what it rests on, and the first steps",
     };
   // elsewhere, shallowest first, so Next never goes deeper on a settled
@@ -1165,6 +1195,7 @@ export function nextGap(
       kind: own(s.boards, choice.id) ? "open" : "question",
       q: choice.id,
       label: `Open choice: ${choice.title}`,
+      short: "Open the next choice",
       reason: "the highest choice still open",
     };
   // a cause marked likely is not an answer: a causes question stays open
@@ -1196,6 +1227,7 @@ export function nextGap(
         q: question.id,
         option: result.id,
         label: `Weigh what came in: ${question.title}`,
+        short: "Weigh the new result",
         reason: `${named(nodes, result.id)} came in after Claude's last word on it`,
       };
     // the cause you marked likely is the one Claude's last word leads, and
@@ -1210,6 +1242,7 @@ export function nextGap(
         kind: "settle",
         q: question.id,
         label: `Settle it: ${question.title}`,
+        short: "Settle it",
         reason: `you marked ${named(nodes, st!.lead!)} likely and Claude's last word agrees`,
       };
     // Claude's last word leads a cause, and surely, but you have marked none
@@ -1227,6 +1260,8 @@ export function nextGap(
         q: question.id,
         option: st.lead,
         label: `Mark ${named(nodes, st.lead)} likely, then settle`,
+        // the cause Claude leads is not named on the button (its star is)
+        short: "Mark the best guess likely",
         reason: `Claude's last word leads it, ~${st.sure}% sure`,
       };
     if (question.shape === "causes")
@@ -1238,6 +1273,11 @@ export function nextGap(
           : checks
             ? `Which check to run first: ${question.title}`
             : `Tell the causes apart: ${question.title}`,
+        short: likely.length
+          ? "Confirm it, then settle"
+          : checks
+            ? "Pick the first check"
+            : "Tell the causes apart",
         reason: likely.length
           ? "you marked it likely; a fact that confirms it lets you settle the question"
           : checks
@@ -1248,6 +1288,7 @@ export function nextGap(
       kind: "question",
       q: question.id,
       label: `Open question: ${question.title}`,
+      short: "Next question",
       reason: "the highest question still open",
     };
   }
@@ -1259,12 +1300,14 @@ export function nextGap(
       q: waiting.id,
       option: check.id,
       label: `Run ${named(nodes, check.id)}, then say what it found`,
+      short: `Run ${own(nodes, check.id)?.title ?? "the check"}`,
       reason: `Claude's pick: ${check.why}`,
     };
   return {
     kind: "sum",
     q: root?.id ?? q,
     label: "Sum up where it stands",
+    short: "Sum up",
     reason: "nothing is open",
   };
 }

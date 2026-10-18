@@ -47,10 +47,13 @@ export function Btn({
   busy,
   title,
   small,
+  lead,
 }: {
   children: ReactNode;
   onClick: (e: ClickEvent<HTMLButtonElement>) => void;
   primary?: boolean;
+  // the one next action of what is open (a sheet, a panel): data-primary
+  lead?: boolean;
   disabled?: boolean;
   // it starts a paid move and one runs or waits: off, and says why
   busy?: boolean;
@@ -59,6 +62,7 @@ export function Btn({
 }) {
   return (
     <button
+      data-primary={lead || undefined}
       disabled={disabled || busy}
       onClick={onClick}
       title={busy ? WAIT_TITLE : title}
@@ -78,11 +82,16 @@ export function MarkText({
   mark,
   must = false,
   className = "",
+  terse = false,
 }: {
   mark: Mark;
   // on a must row: "same" reads "meets"
   must?: boolean;
   className?: string;
+  // in a board cell: "can't tell" is its "?" alone (said on hover and to a
+  // screen reader by the cell), two words in every cell Claude could not
+  // judge
+  terse?: boolean;
 }) {
   const look = MARK_LOOK[mark];
   const tone =
@@ -93,7 +102,8 @@ export function MarkText({
         : "text-ink";
   return (
     <span className={`whitespace-nowrap font-medium ${tone} ${className}`}>
-      <span aria-hidden>{look.symbol}</span> {markWord(mark, must)}
+      <span aria-hidden>{look.symbol}</span>
+      {!(terse && mark === "unknown") && <> {markWord(mark, must)}</>}
     </span>
   );
 }

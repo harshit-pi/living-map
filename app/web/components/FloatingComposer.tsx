@@ -16,6 +16,7 @@ export function FloatingComposer({
   sticky = false,
   scope,
   collapsed = false,
+  docked = false,
 }: {
   ws: Workspace;
   placeholder: string;
@@ -32,6 +33,10 @@ export function FloatingComposer({
   // a "💬 Ask Claude" pill until you want it: a wide empty box with two
   // pickers sat over every canvas, read as one more thing to do
   collapsed?: boolean;
+  // a bar at the bottom of the screen's own layout, not over the canvas: an
+  // overlay covered the board's last rows and their buttons. Claude's reply
+  // shows inside it, at most three lines (it scrolls)
+  docked?: boolean;
 }) {
   const { map, live, selection, setSelection, roomy } = ws;
   const [asking, setAsking] = useState(false);
@@ -62,6 +67,49 @@ export function FloatingComposer({
     caption.live &&
     ((!!live.working?.nodeId && live.working.nodeId === one) ||
       !!live.working?.blankId);
+  const chips =
+    selection.length > 1
+      ? selection.map((id) => (
+          <Chip
+            key={id}
+            onRemove={() => setSelection((s) => s.filter((x) => x !== id))}
+          >
+            {map.nodes[id]?.title ?? id}
+          </Chip>
+        ))
+      : undefined;
+  if (docked)
+    return (
+      <div className="shrink-0 border-t border-line bg-canvas px-4 py-2">
+        <div className="mx-auto w-full max-w-2xl">
+          {caption.text && !inPanel && (
+            <div
+              onClick={caption.clear}
+              title="Click to hide"
+              className="answer answer-sm mb-1.5 max-h-[3lh] cursor-pointer overflow-y-auto px-1 leading-snug"
+              data-content
+            >
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {caption.text}
+              </ReactMarkdown>
+            </div>
+          )}
+          <Composer
+            foldSettings
+            busy={live.busy}
+            settings={ws.settings}
+            onSettings={ws.onSettings}
+            rows={1}
+            onStop={ws.stop}
+            placeholder={placeholder}
+            chips={chips}
+            onSend={(text) => {
+              void ws.run({ type: "message", text, selection });
+            }}
+          />
+        </div>
+      </div>
+    );
   return (
     <div
       className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 px-4 pb-4"
@@ -99,20 +147,7 @@ export function FloatingComposer({
             rows={1}
             onStop={ws.stop}
             placeholder={placeholder}
-            chips={
-              selection.length > 1
-                ? selection.map((id) => (
-                    <Chip
-                      key={id}
-                      onRemove={() =>
-                        setSelection((s) => s.filter((x) => x !== id))
-                      }
-                    >
-                      {map.nodes[id]?.title ?? id}
-                    </Chip>
-                  ))
-                : undefined
-            }
+            chips={chips}
             onSend={(text) => {
               void ws.run({ type: "message", text, selection });
               if (collapsed) setAsking(false);
