@@ -104,7 +104,11 @@ function railMark(st: StepView): RailMark {
       ? {
           mark: "↻",
           cls: "border-primary bg-surface text-primary-strong",
-          word: st.recallDue ? "quick rebuild waiting" : dueWord(st.itemsDue),
+          // due for review wins: the review rebuilds it, and the quick
+          // rebuild goes when it opens ("quick rebuild waiting" sat under a
+          // card counting the step due)
+          word:
+            st.itemsDue > 0 ? dueWord(st.itemsDue) : "quick rebuild waiting",
           meter,
         }
       : {
@@ -183,7 +187,10 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
       tops.find((s) => s.stage !== "built") ??
       tops.find((s) => s.recallDue) ??
       tops[0]);
-  if (current && !selStep && pinned !== current.step) setPinned(current.step);
+  // the step on screen is kept, picked or not: Escape lets go of the
+  // selection (App), and a step picked in the rail gave way to the one
+  // pinned before it (a quick rebuild jumped to step 2 mid-edit)
+  if (current && pinned !== current.step) setPinned(current.step);
 
   // a different step starts on its own canvas, with nothing half-done. A
   // play step not yet built opens on its scene, which comes first (spec §1):
@@ -682,6 +689,14 @@ function StepArea({
         )}
       </div>
     );
+  else if (st.stage === "see" && !st.worked)
+    // the worked case waits for the level chooser (view): "I'm new" shows it
+    body = (
+      <div className="flex h-full items-center justify-center p-6 text-center text-[13px] text-muted">
+        Say how much you know above. “I'm new” shows you a worked case first;
+        the other two start you building.
+      </div>
+    );
   else
     body = (
       <ReactFlowProvider
@@ -719,9 +734,10 @@ function StepArea({
                 onPick={onPick}
               />
             )}
-            {first &&
-              !review &&
-              (view.level === null || st.stage !== "built") && (
+            {/* on any step while no level is picked: its worked case waits
+                for it (a step opened before step 1 had none to pick from) */}
+            {!review &&
+              (view.level === null || (first && st.stage !== "built")) && (
                 <LevelChooser here={here} level={view.level} />
               )}
             <div className="flex items-center gap-2">
@@ -839,10 +855,13 @@ function StepArea({
             )}
           </div>
           <div className="relative min-h-0 flex-1">{body}</div>
+          {/* a reply stays until clicked away, on its own step: it sat over
+              the next step's canvas */}
           <FloatingComposer
             ws={ws}
             beside={false}
             sticky
+            scope={st.step}
             placeholder="Ask anything about the topic, or tell Claude where you are stuck…"
           />
         </div>

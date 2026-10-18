@@ -19,15 +19,18 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
   const loose =
     st.frame.kind === "free" ? 0 : st.placed.filter((p) => !p.slot).length;
 
-  // The box empties once a name is placed, but only of that name: typed
-  // straight after Enter, the next one was wiped when the reply came.
+  // The box empties at Enter, so the next name typed straight after it is
+  // a name of its own (kept until the reply, the two ran together: "real
+  // returnpurchasing power"); a name that matched nothing comes back to be
+  // corrected, unless you have typed on since.
   const clear = (sent: string) => setText((cur) => (cur === sent ? "" : cur));
   const send = async () => {
     const sent = text;
     const t = sent.trim();
     if (!t) return;
+    setText("");
     const r = await act("type", { step, text: t, ...spot() });
-    if (r.ok) clear(sent);
+    if (!r.ok) setText((cur) => (cur === "" ? sent : cur));
   };
 
   return (

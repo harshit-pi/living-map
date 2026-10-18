@@ -294,10 +294,10 @@ export function CheckFindings({
     c?.marks.filter(
       (x) => x.mark === m && st.links.some((l) => l.id === x.link),
     ) ?? [];
-  const argueFor = (link: LinkView, mixup: boolean) => (
+  const argueFor = (link: LinkView, mark: Mark) => (
     <ArgueBox
       here={here}
-      mixup={mixup}
+      mark={mark}
       link={link}
       text={text}
       setText={setText}
@@ -313,6 +313,7 @@ export function CheckFindings({
     (of("miscon").length > 0 ||
       of("reversed").some((m) => m.note) ||
       of("extra").length > 0 ||
+      of("family").length > 0 ||
       c.refutes.length > 0 ||
       c.outOfOrder > 0 ||
       (c.loose ?? 0) > 0 ||
@@ -363,7 +364,7 @@ export function CheckFindings({
                     I think it holds
                   </button>
                 ) : (
-                  argueFor(l, true)
+                  argueFor(l, "miscon")
                 )}
               </div>
             );
@@ -411,7 +412,40 @@ export function CheckFindings({
                     </button>
                   )}
                 </div>
-                {arguing === m.link && argueFor(l, false)}
+                {arguing === m.link && argueFor(l, "extra")}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* the verbs are a closed list: a "~" may mean what Claude's verb
+          means, and says so here (only the link editor offered it) */}
+      {of("family").length > 0 && (
+        <div className="space-y-1.5 border-t border-line pt-2">
+          <div className="text-[11.5px] text-muted">
+            The right pair, with another verb ({MARK.family.sym}). Mean the same
+            thing by yours? Say what.
+          </div>
+          {of("family").map((m) => {
+            const l = st.links.find((x) => x.id === m.link);
+            if (!l) return null;
+            return (
+              <div key={m.link} className="text-[12px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-body">{words(m.link)}</span>
+                  {arguing !== m.link && (
+                    <button
+                      onClick={() => {
+                        setArguing(m.link);
+                        setText("");
+                      }}
+                      className="shrink-0 text-[11.5px] text-primary-strong hover:underline"
+                    >
+                      Argue for it
+                    </button>
+                  )}
+                </div>
+                {arguing === m.link && argueFor(l, "family")}
               </div>
             );
           })}
@@ -430,9 +464,16 @@ export function CheckFindings({
               </span>{" "}
               “{labelOf(a.from)}” {a.rel} “{labelOf(a.to)}”.{" "}
               <span className="text-muted">{a.say}</span>
-              {/* an accepted link is one of yours, right; it never stands
-                  in for a key link, which the card still counts missing */}
-              {a.holds && c.keyRight < c.keys && (
+              {/* another verb on a link of Claude's says that link, from
+                  the next check; any other accepted link is one of yours,
+                  right, and never stands in for a key link */}
+              {a.holds && a.pair && (
+                <span className="text-muted">
+                  {" "}
+                  Check again: your verb counts for that link now.
+                </span>
+              )}
+              {a.holds && !a.pair && c.keyRight < c.keys && (
                 <span className="text-muted">
                   {" "}
                   It counts as a right link of yours, not as a key link: a key

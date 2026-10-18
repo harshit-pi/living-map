@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 
-import { BUILD_ACTIONS } from "./build.ts";
+import { applyBuildOp, BUILD_ACTIONS } from "./build.ts";
 import {
   acceptArgued,
   addLinks,
@@ -38,6 +38,7 @@ import {
   localDay,
   markRecall,
   matchPart,
+  misconOf,
   mixedOrder,
   movePart,
   namedKeys,
@@ -45,17 +46,21 @@ import {
   newState,
   nextHint,
   openLink,
+  openPlace,
   outcomes,
   outlineOf,
   paraphrases,
   placePart,
+  predictChoices,
   predictTold,
   record,
   redactLinks,
   relinkParts,
   repeats,
   revealNames,
+  reviewHelp,
   sameGraph,
+  sameLink,
   sameModel,
   scrub,
   setPredict,
@@ -79,7 +84,13 @@ import {
 } from "./core.ts";
 import fixture from "./prompts.fixture.json" with { type: "json" };
 import { learn } from "./server.ts";
-import { offersCase, verbsFor, type Verb } from "./shared.ts";
+import {
+  ARGUABLE,
+  offersCase,
+  placingIsAnswer,
+  verbsFor,
+  type Verb,
+} from "./shared.ts";
 import {
   blocked,
   drawn,
@@ -198,7 +209,7 @@ const PREDICT = {
   choices: [
     { text: "Memory B cell" },
     { text: "More antibody", miscon: "x1" },
-    { text: "Plasma cell" },
+    { text: "Killer T cell" },
   ],
   answer: "Memory B cell",
   hides: "l4",
@@ -949,17 +960,17 @@ test("view: a wrong predict pick shows why it is not, and the right one; the tra
   const { m: map, s } = buildMap("new");
   const mo = s.models["m-s1"];
   mo.predict!.choices[2] = {
-    text: "Plasma cell",
-    why: "Plasma cells die within weeks.",
+    text: "Killer T cell",
+    why: "Killer T cells make no antibody.",
   };
   s.steps.s1 = {
     stage: "see",
     help: 0,
-    predicted: { pick: "Plasma cell", sure: "sure" },
+    predicted: { pick: "Killer T cell", sure: "sure" },
     rungs: { built: null, why: null, whatif: null, case: null, kept: null },
   };
   const p = viewOf(s, map.nodes, 0).steps[0].predict!;
-  assert.equal(p.refute, "Plasma cells die within weeks.");
+  assert.equal(p.refute, "Killer T cells make no antibody.");
   assert.equal(p.correct, "Memory B cell");
   s.steps.s1.predicted = undefined;
   assert.equal(viewOf(s, map.nodes, 0).steps[0].predict!.correct, undefined);
@@ -988,11 +999,16 @@ test("fade: what each help level gives", () => {
     ],
     "every link but the key ones, given",
   );
-  // laid out along the links, as the worked case is drawn
+  // laid out along the links, as the worked case is drawn, three columns
+  // to a row before the layers fold back under (four opened at 0.68)
   const x = (b: Build, p: string) => b.placed.find((y) => y.part === p)!.x;
+  const y = (b: Build, p: string) => b.placed.find((q) => q.part === p)!.y;
   assert.ok(
-    x(l0, "virus") < x(l0, "dendritic") && x(l0, "helpert") < x(l0, "bcell"),
+    x(l0, "virus") < x(l0, "dendritic") &&
+      x(l0, "dendritic") < x(l0, "helpert"),
   );
+  assert.ok(Math.max(...l0.placed.map((p) => p.x)) <= 2 * 260);
+  assert.ok(y(l0, "helpert") < y(l0, "bcell"), "the fourth layer folds under");
   // a link that closes a loop does not stack every part in one column
   const loop = startBuild(
     model({
@@ -1372,7 +1388,7 @@ test("view: no accept list, rubric, unasked hint, affected list, predict answer 
   assert.deepEqual(see.predict?.choices, [
     "Memory B cell",
     "More antibody",
-    "Plasma cell",
+    "Killer T cell",
   ]);
   assert.equal(see.predict?.right, null);
   assert.equal(at("build").steps[0].worked, null);
@@ -1383,7 +1399,7 @@ test("view: no accept list, rubric, unasked hint, affected list, predict answer 
   mo.predict = {
     ...mo.predict!,
     ask: "Which cell gives the go signal on day 5?",
-    choices: [{ text: "Helper T cell" }, { text: "Plasma cell" }],
+    choices: [{ text: "Helper T cell" }, { text: "Killer T cell" }],
     answer: "Helper T cell",
     hides: "l3",
   };
@@ -2945,7 +2961,7 @@ test("predict: the '?' is the end the answer names, and a part left on screen th
   assert.equal(predictTold(atp), true);
   // one settled before this was checked is not asked
   assert.equal(livePredict(atp), undefined);
-  assert.equal(livePredict(ms), ms.predict);
+  assert.deepEqual(livePredict(ms), ms.predict);
   assert.equal(
     scrub(atp, { title: "Light to energy", summary: "" }).predict,
     true,
@@ -3280,4 +3296,240 @@ test("a review starts afresh: the quick rebuild's old result goes", async () => 
   assert.deepEqual(await act(engine, learnAct("review")), { ok: true });
   assert.equal(s.steps.s1.recalled, undefined);
   assert.equal(viewOf(s, m.nodes, noon(3)).steps[0].recalled, null);
+});
+
+// ---------------------------------------------------------------- QA round 6
+
+test("a misconception drawn with another verb on its two parts is still the mix-up, unless Claude's model links them", () => {
+  const m = model();
+  // x1 is "Antibody becomes Memory B cell"; "makes" says it as well
+  const b = linksOf(startBuild(m, 0), [["antibody", "memb", "makes"]]);
+  const c = grade(m, b, { keyOnly: true });
+  assert.equal(c.miscon, 1);
+  assert.equal(c.marks[0].refute, MISCON[0].refute);
+  assert.equal(
+    misconOf(m, { from: "memb", to: "antibody", rel: "makes" }),
+    undefined,
+    "the other way round is not it",
+  );
+  // on a pair the model links, the verb is graded against that link
+  m.miscon[0].link = { from: "bcell", to: "plasma", rel: "makes" };
+  assert.equal(
+    misconOf(m, { from: "bcell", to: "plasma", rel: "causes" }),
+    undefined,
+  );
+  assert.ok(
+    misconOf(m, { from: "bcell", to: "plasma", rel: "makes" }),
+    "its own verb still is",
+  );
+});
+
+test("raises and lowers are cause verbs; another verb on Claude's pair may be argued, and an accepted one counts for that link, key or not", () => {
+  assert.ok(verbsFor("lanes").includes("lowers"));
+  assert.ok(verbsFor("axis").includes("raises"));
+  assert.ok(ARGUABLE.includes("family"));
+  const { m: map, s } = buildMap("some");
+  const mo = s.models["m-s1"];
+  s.steps.s1 = {
+    stage: "build",
+    help: 1,
+    rungs: { built: null, why: null, whatif: null, case: null, kept: null },
+  };
+  // the key link "Helper T cell activates B cell", drawn with "causes"
+  const b = linksOf(startBuild(mo, 1), [
+    ["helpert", "bcell", "causes"],
+    ["bcell", "memb", "becomes"],
+    ["plasma", "antibody", "makes"],
+  ]);
+  s.builds[mo.id] = b;
+  b.last = grade(mo, b);
+  assert.equal(b.last.family, 1);
+  assert.equal(b.last.keyRight, 2);
+  b.argue = {
+    from: "helpert",
+    to: "bcell",
+    rel: "causes",
+    said: "it sets it off",
+  };
+  assert.equal(
+    applyBuildOp(
+      map,
+      { op: "accept", model: "m-s1", holds: true, say: "Yes." },
+      null,
+    ),
+    1,
+  );
+  assert.deepEqual(mo.links.find((l) => l.id === "l3")?.also, ["causes"]);
+  assert.ok(!mo.links.some((l) => l.argued), "no link of its own beside it");
+  assert.equal(b.argued?.[0].pair, true);
+  assert.equal(
+    b.last.marks.find((x) => x.link === b.links[0].id)?.mark,
+    "right",
+  );
+  const again = grade(mo, b);
+  assert.equal(again.keyRight, 3, "the key link is right with your verb");
+  assert.equal(again.family, 0);
+  assert.ok(
+    sameLink(
+      mo.links.find((l) => l.id === "l3")!,
+      b.links[0],
+    ),
+  );
+  // the browser never sees the accepted verbs on the reference
+  assert.ok(!JSON.stringify(viewOf(s, map.nodes, 0)).includes('"also"'));
+});
+
+test("predict: a wrong choice that is a part on screen is dropped, and a predict left with no wrong choice is not asked", () => {
+  const m = model();
+  m.predict = {
+    ...PREDICT,
+    choices: [...PREDICT.choices, { text: "Plasma cell" }],
+  };
+  assert.deepEqual(
+    predictChoices(m).map((c) => c.text),
+    ["Memory B cell", "More antibody", "Killer T cell"],
+    "Plasma cell is on the canvas; More antibody is a claim, not the part",
+  );
+  assert.deepEqual(
+    livePredict(m)?.choices.map((c) => c.text),
+    ["Memory B cell", "More antibody", "Killer T cell"],
+  );
+  m.predict.choices = [
+    { text: "Memory B cell" },
+    { text: "Plasma cell" },
+    { text: "Antibody" },
+  ];
+  assert.equal(livePredict(m), undefined, "found by elimination");
+  assert.equal(
+    scrub(m, { title: "First infection", summary: "" }).predict,
+    true,
+  );
+  assert.equal(m.predict, undefined);
+});
+
+test("no worked case before a level is picked: I know some cannot read it first", () => {
+  const { m: map, s } = buildMap(null);
+  s.steps.s1 = {
+    stage: "see",
+    help: 0,
+    rungs: { built: null, why: null, whatif: null, case: null, kept: null },
+  };
+  const v = viewOf(s, map.nodes, 0).steps[0];
+  assert.equal(v.worked, null);
+  assert.equal(v.predict, null);
+  s.level = "new";
+  assert.ok(viewOf(s, map.nodes, 0).steps[0].worked);
+  // Peek at the worked case shows it, and counts as shown
+  s.level = null;
+  s.steps.s1.shownModel = true;
+  assert.ok(viewOf(s, map.nodes, 0).steps[0].worked);
+});
+
+test("on a sort frame L1 leaves the parts outside the columns: which column is the answer", () => {
+  const sort = model({
+    frame: { kind: "sort", columns: ["strong", "weak", "against"] },
+    parts: PARTS.map((p, i) => ({
+      ...p,
+      slot: [["strong", "weak", "against"][i % 3]],
+    })),
+  });
+  assert.ok(placingIsAnswer(sort.frame));
+  const b = startBuild(sort, 1);
+  assert.equal(b.placed.length, PARTS.length);
+  assert.ok(b.placed.every((p) => !p.slot));
+  linksOf(b, ALL_RIGHT);
+  assert.equal(grade(sort, b).pass, false, "they must be sorted");
+});
+
+test("axis hint: a part on its own tick is not the one named when a part beside it is out of place", () => {
+  const ticks = ["t0", "t10", "t20", "t20+"];
+  const m = model({
+    mode: "play",
+    frame: { kind: "axis", ticks },
+    parts: PARTS.slice(0, 4).map((p, i) => ({ ...p, slot: [ticks[i]] })),
+    links: [],
+  });
+  const b = startBuild(m, 2);
+  // virus on t0 and dendritic on t10, right; helpert and bcell swapped,
+  // helpert sharing t10 with dendritic
+  b.placed = [
+    { part: "virus", x: 0, y: 0, slot: "t0" },
+    { part: "dendritic", x: 0, y: 0, slot: "t10" },
+    { part: "helpert", x: 0, y: 0, slot: "t10" },
+    { part: "bcell", x: 0, y: 0, slot: "t20" },
+  ];
+  assert.equal(openPlace(m, b), "helpert");
+});
+
+test("review help: never more help than the last rebuild that was all by you, and more after a quick rebuild that needed a second check", () => {
+  const m = model();
+  const t = noon(0);
+  const items = newItems(m, t);
+  for (const i of items) record(i, "unaided", t);
+  assert.equal(reviewHelp(items, 2), 2, "built cold at L2, by you: not L1");
+  assert.equal(reviewHelp(items, 0), 1, "built at L0: the box's L1");
+  assert.equal(
+    reviewHelp(items, 2, true),
+    0,
+    "a quick rebuild that came out wrong",
+  );
+  record(items[0], "hinted", t);
+  assert.equal(reviewHelp(items, 2), 1, "a hinted link: the box decides");
+});
+
+test("which idea is this: a wrong pick names the step it was", () => {
+  const { m: map, s } = buildMap("new");
+  const now = noon(0);
+  for (const step of ["s1", "s2", "s3"])
+    s.steps[step] = {
+      stage: "built",
+      help: 0,
+      rungs: { built: "you", why: "you", whatif: null, case: null, kept: null },
+    };
+  s.review = {
+    at: now,
+    since: 1,
+    order: ["s1"],
+    items: 0,
+    cards: [
+      {
+        id: "c1",
+        ask: "Which?",
+        choices: ["s1", "s2", "s3"],
+        answer: "s1",
+        picked: "s2",
+      },
+    ],
+  };
+  const card = viewOf(s, map.nodes, now).review!.cards[0];
+  assert.equal(card.right, false);
+  assert.equal(card.correct, "s1");
+  s.review.cards[0].picked = "s1";
+  assert.equal(viewOf(s, map.nodes, now).review!.cards[0].correct, null);
+});
+
+test("Skip: show me shows the reason, and a new case after Show the model keeps its own help", async () => {
+  const { m, s } = buildMap("new");
+  s.steps.s1 = {
+    stage: "why",
+    help: 0,
+    whyLink: "l4",
+    rungs: { built: "you", why: null, whatif: null, case: null, kept: null },
+  };
+  const { engine } = setup(m);
+  await act(engine, learnAct("why", { step: "s1", show: true }));
+  const v = viewOf(s, m.nodes, Date.now()).steps[0];
+  assert.equal(v.why?.state, "shown");
+  assert.equal(v.why?.say, "The rubric of l4");
+  // a new case rebuilt at L1 after Show the model says L1, and the step's
+  // own help is left as it was
+  const c = model({ id: "m-s1-case", of: "m-s1" });
+  c.id = "m-s1-case";
+  s.models[c.id] = c;
+  Object.assign(s.steps.s1, { stage: "build", caseModel: c.id, onCase: true });
+  s.builds[c.id] = startBuild(c, 1);
+  const onCase = viewOf(s, m.nodes, Date.now()).steps[0];
+  assert.equal(onCase.onCase, true);
+  assert.equal(onCase.help, 1);
+  assert.equal(s.steps.s1.help, 0);
 });

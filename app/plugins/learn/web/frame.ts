@@ -719,9 +719,12 @@ const ELBOWS: [Side, Side][] = [
 ];
 
 // How to draw a link so it reads as linking its own two parts: the
-// cheapest of straight lines between any two sides and arcs out of one
-// side, near or far (cost). `nth`: a second link on the same two parts
-// arcs out further, so each label is its own. `seen`: the links drawn
+// cheapest of straight lines between any two sides, elbows and arcs out of
+// one side, near or far (cost). `nth`: a second link on the same two parts
+// is never the straight line the first may be on: it bends (an elbow at
+// another turn, kept off the first by its cost) or arcs out further, so
+// each label is its own. Arcs alone left it nothing but a run round the
+// outside and down through the part above its end. `seen`: the links drawn
 // before this one, which it is kept off and is added to; `within`: the box
 // both ends sit in, which it stays inside when it can (a hint's ghost ran
 // out of its box to the canvas's edge and back).
@@ -744,32 +747,32 @@ export function route(
   const tries: Route[] = [
     ...(nth
       ? []
-      : [
-          ...SIDES.flatMap((source) =>
-            SIDES.map((target): Route => ({
-              type: "straight",
-              source,
-              target,
-            })),
-          ),
-          ...ELBOWS.flatMap(([source, target]) =>
-            [undefined, 0.25, 0.75].map((mid): Route => ({
-              type: "elbow",
-              source,
-              target,
-              ...(mid ? { mid } : {}),
-            })),
-          ),
-        ]),
+      : SIDES.flatMap((source) =>
+          SIDES.map((target): Route => ({
+            type: "straight",
+            source,
+            target,
+          })),
+        )),
+    ...ELBOWS.flatMap(([source, target]) =>
+      [undefined, 0.25, 0.75].map((mid): Route => ({
+        type: "elbow",
+        source,
+        target,
+        ...(mid ? { mid } : {}),
+      })),
+    ),
     ...[30, 54, 84, 120, 170].flatMap((o) =>
       arcs.map((side): Route => ({ type: "arc", side, offset: o + 24 * nth })),
     ),
   ];
   let best = tries[0];
   let low = Infinity;
-  // the label half way, or to one side when that clears it
+  // the label half way, or to one side when that clears it: a little way
+  // first, so a label on a crossing moves just off it (with 0.3 on a card
+  // edge, "enables" stayed on the line it crossed and read as that link's)
   for (const base of tries)
-    for (const f of label ? [0.5, 0.3, 0.7, 0.2, 0.8] : [0.5]) {
+    for (const f of label ? [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8] : [0.5]) {
       const r = f === 0.5 ? base : { ...base, at: f };
       const c =
         cost(from, to, at, r, label, seen, within) + (f === 0.5 ? 0 : 1);

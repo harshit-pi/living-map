@@ -14,18 +14,22 @@ export function useCaption(
   busy: boolean,
   stream: Stream,
   sticky = false,
+  // what the caption belongs to inside the map (Learn's step): a new scope
+  // starts with nothing shown, as a new map does
+  scope = "",
 ) {
   const len = map?.chat.length ?? 0;
   const last = map?.chat[len - 1];
-  // how long the conversation was when this map came into view
+  const id = map ? `${map.id}:${scope}` : "";
+  // how long the conversation was when this map (or scope) came into view
   const [base, setBase] = useState<{ id: string; len: number } | null>(null);
-  if (map && base?.id !== map.id) setBase({ id: map.id, len });
+  if (map && base?.id !== id) setBase({ id, len });
   // the message length at which the caption was dismissed or timed out
   const [hiddenAt, setHiddenAt] = useState(-1);
 
   const fresh =
     !!base &&
-    base.id === map?.id &&
+    base.id === id &&
     len > base.len &&
     hiddenAt !== len &&
     (last?.role === "claude" || last?.role === "system") &&

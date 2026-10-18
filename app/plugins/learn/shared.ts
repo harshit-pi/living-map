@@ -12,7 +12,10 @@ export const PLUGIN_ID = "learn";
 // the right pair is half right (never a pass for a key link); `stem` is what
 // the giveaway check looks for in a text ("becom" catches "become").
 export const FAMILIES = {
-  cause: ["causes", "enables", "prevents", "activates"],
+  // raises and lowers say which way a quantity moves: with "causes" alone,
+  // "8% price rise causes Real value" left out the whole point (it lowers
+  // it), and a learner who drew it with "prevents" for "cuts" was marked ~
+  cause: ["causes", "enables", "prevents", "activates", "raises", "lowers"],
   change: ["becomes", "makes"],
   structure: ["part of", "kind of", "contains"],
   flow: [
@@ -46,6 +49,8 @@ export const STEMS: Record<Verb, string> = {
   enables: "enabl",
   prevents: "prevent",
   activates: "activat",
+  raises: "rais",
+  lowers: "lower",
   becomes: "becom",
   makes: "mak",
   "part of": "part of",
@@ -116,6 +121,13 @@ export function slotsOf(frame: Frame): string[] {
 // sort column it sits in is marked and does not.
 export const orderStops = (f: Frame): boolean => f.kind === "axis";
 
+// Where a part sits is what the step asks: on an axis its place in the
+// order, in sort columns the claim it is weighed as (a sort step at L1 put
+// every picking rule in its own traffic column, the answer before a link was
+// drawn). At L1 these parts wait outside the frame for you to put in.
+export const placingIsAnswer = (f: Frame): boolean =>
+  f.kind === "axis" || f.kind === "sort";
+
 // A play step's model is the method's subgoal order, the same on any input:
 // a new case of it can only be the original renamed, which the shape check
 // refuses, so it is not offered (two paid moves ended "did not hold
@@ -178,11 +190,13 @@ export type WhyState = "right" | "partial" | "wrong" | "shown";
 // extra (not in Claude's model: never wrong, and you may argue for it)
 export type Mark = "right" | "reversed" | "family" | "miscon" | "extra";
 
-// The marks you may argue against: a link not in Claude's model, and one
-// that matched a misconception's pattern (a fair causal link in history was
+// The marks you may argue against: a link not in Claude's model, one that
+// matched a misconception's pattern (a fair causal link in history was
 // marked ✗ with no way to say why it holds, as the pattern was wider than
-// the claim). Claude's verdict decides; an accepted one is right from then.
-export const ARGUABLE: readonly Mark[] = ["extra", "miscon"];
+// the claim), and the right pair with another verb (the verbs are a closed
+// list, so "prevents" for "cuts" was a verb guess with no way to say what it
+// meant). Claude's verdict decides; an accepted one is right from then.
+export const ARGUABLE: readonly Mark[] = ["extra", "miscon", "family"];
 
 export type LinkMark = {
   // your link's id
@@ -346,6 +360,9 @@ export type StepView = {
     rel: Verb;
     holds: boolean;
     say: string;
+    // accepted as another verb for a link of Claude's own: it counts for
+    // that link from the next check
+    pair?: true;
   }[];
   rungs: Record<Rung, Credit | null>;
   // a quick rebuild waiting (in-session spacing), or one under way
@@ -354,6 +371,9 @@ export type StepView = {
   // how the quick rebuild came out, once it passed
   recalled: { credit: Credit; tries: number } | null;
   reviewing: boolean;
+  // this review's help is one more than the items earn: the quick rebuild
+  // before it needed a second check
+  lowered: boolean;
   itemsDue: number;
 };
 
@@ -375,6 +395,8 @@ export type ReviewView = {
     choices: { step: string; title: string }[];
     picked: string | null;
     right: boolean | null;
+    // the step it was, once you picked another
+    correct: string | null;
   }[];
 };
 

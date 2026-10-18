@@ -49,10 +49,13 @@ export function ReviewStart({
         </div>
         <div className="mt-1 text-[13px] text-muted">
           {links} key {links === 1 ? "link" : "links"} to rebuild from memory,
-          about {reviewMinutes(steps.length)} min. Each step comes back with a
-          little less help than last time
+          about {reviewMinutes(steps.length)} min
           {/* two can come back in path order (mixedOrder) */}
-          {steps.length >= MIXED_FROM ? ", in a mixed order" : ""}.
+          {steps.length >= MIXED_FROM ? ", in a mixed order" : ""}.{" "}
+          {/* what the levels do (reviewHelp): "a little less help than last
+              time" was false on a first review, which comes back at L1 */}
+          The help fades as you rebuild a step by yourself; a step you needed
+          help with comes back with a little more.
         </div>
         {view.last && (
           <div className="mt-2 text-[12.5px] text-body">
@@ -218,6 +221,7 @@ export function ReviewPanel({
               <div className="flex flex-wrap gap-1">
                 {c.choices.map((ch) => {
                   const mine = c.picked === ch.step;
+                  const it = c.correct === ch.step;
                   return (
                     <button
                       key={ch.step}
@@ -225,10 +229,11 @@ export function ReviewPanel({
                       onClick={() =>
                         void act("idea", { card: c.id, pick: ch.step })
                       }
-                      className={`rounded-lg border px-2 py-0.5 text-[12px] ${mine ? (c.right ? "border-success bg-success-soft text-success-strong" : "border-danger bg-danger-soft text-danger-strong") : "border-line-strong text-body hover:border-primary disabled:opacity-60 disabled:hover:border-line-strong"}`}
+                      className={`rounded-lg border px-2 py-0.5 text-[12px] ${mine ? (c.right ? "border-success bg-success-soft text-success-strong" : "border-danger bg-danger-soft text-danger-strong") : it ? "border-success-line text-success-strong" : "border-line-strong text-body hover:border-primary disabled:opacity-60 disabled:hover:border-line-strong"}`}
                     >
                       {ch.title}
                       {mine && (c.right ? " ✓" : " ✗")}
+                      {it && " ✓ it was this one"}
                     </button>
                   );
                 })}

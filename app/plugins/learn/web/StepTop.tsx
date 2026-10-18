@@ -116,6 +116,11 @@ export function StageStrip({
       {st.stage === "build" && (
         <span className="ml-2 text-[12px] text-muted">· {helpLine(st)}</span>
       )}
+      {st.stage === "build" && st.lowered && (
+        <span className="text-[12px] text-warning-strong">
+          · more help this time: your quick rebuild needed a second check
+        </span>
+      )}
     </div>
   );
 }

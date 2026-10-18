@@ -13,6 +13,7 @@ export function FloatingComposer({
   left,
   beside = true,
   sticky = false,
+  scope,
 }: {
   ws: Workspace;
   placeholder: string;
@@ -24,9 +25,11 @@ export function FloatingComposer({
   beside?: boolean;
   // a reply to the box stays until clicked away (see useCaption)
   sticky?: boolean;
+  // what a reply belongs to inside the map: it goes when this changes
+  scope?: string;
 }) {
   const { map, live, selection, setSelection, roomy } = ws;
-  const caption = useCaption(map, live.busy, live.stream, sticky);
+  const caption = useCaption(map, live.busy, live.stream, sticky, scope);
   const one = selection.length === 1 ? selection[0] : null;
   // the panel already shows what is being written for its own node; a blank's
   // verdict streams on the blank (a right one comes up here once it is checked)

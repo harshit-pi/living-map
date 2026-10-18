@@ -8,6 +8,7 @@ import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
   HELP,
   orderStops,
+  placingIsAnswer,
   PLUGIN_ID,
   type Credit,
   type LearnView,
@@ -137,20 +138,24 @@ const placeNeed = (frame: StepView["frame"]): string =>
       : `, with every part in a ${slotWord(frame)}`;
 
 export const helpLine = (st: StepView): string => {
-  // on an axis the order is what you build: at L1 its parts wait under it
-  const order = orderStops(st.frame) && st.help === 1;
+  // where a part sits is the answer (an axis's order, a sort's columns): at
+  // L1 its parts wait under the frame
+  const loose = placingIsAnswer(st.frame) && st.help === 1;
+  const put = orderStops(st.frame)
+    ? "put the parts in order along the axis"
+    : "put each part in its column";
   const keys = `only the key links are checked${placeNeed(st.frame)}`;
   if (st.recall)
-    return `Quick rebuild · L1 · ${HELP[1].name}: ${order ? "put the parts in order; " : ""}${keys}`;
-  // a new case is always built at L2 (build.ts), whatever the step's help
-  if (st.onCase) return `New case · L2 · ${HELP[2].name}: ${st.caseTitle}`;
+    return `Quick rebuild · L1 · ${HELP[1].name}: ${loose ? `${put}; ` : ""}${keys}`;
+  // a new case's own help (the view sends it): L2, or L1 after Show the model
+  if (st.onCase)
+    return `New case · L${st.help} · ${HELP[st.help].name}: ${st.caseTitle}`;
   // a review checks only the key links, as a quick rebuild does
   if (st.reviewing)
-    return `Review · L${st.help} · ${HELP[st.help].name}: ${order ? "put the parts in order along the axis" : HELP[st.help].says.toLowerCase()}; ${keys}`;
+    return `Review · L${st.help} · ${HELP[st.help].name}: ${loose ? put : HELP[st.help].says.toLowerCase()}; ${keys}`;
   if (st.help === 0)
     return `L0 · ${HELP[0].name}: draw the key links that are missing`;
-  if (order)
-    return `L1 · ${HELP[1].name}: put the parts in order along the axis, then link them`;
+  if (loose) return `L1 · ${HELP[1].name}: ${put}, then link them`;
   return `L${st.help} · ${HELP[st.help].name}: ${HELP[st.help].says.toLowerCase()}`;
 };
 

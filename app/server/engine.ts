@@ -262,7 +262,15 @@ export function createEngine({
       blankId: opts.blankId ?? null,
       since: Date.now(),
     };
-    hub.emit({ type: "busy", busy: true, threadId, working: state.working });
+    // what waits goes with it: a map pushed by the action that queued this
+    // move still held its ticket, and "1 waiting" stayed with nothing queued
+    hub.emit({
+      type: "busy",
+      busy: true,
+      threadId,
+      working: state.working,
+      waiting: state.waiting,
+    });
 
     const messages = threadOf(m, threadId);
     const notes = m.notes.splice(0);

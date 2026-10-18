@@ -279,6 +279,7 @@ export type ServerEvent =
       busy: boolean;
       threadId: string | null;
       working: Working | null;
+      waiting: Waiting[];
     }
   | { type: "delta"; text: string; threadId: string | null }
   | { type: "ping" }

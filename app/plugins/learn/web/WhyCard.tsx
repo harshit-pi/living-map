@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { SmallBtn, WaitNote } from "./BuildCanvas.tsx";
 import { HowSure } from "./CheckCard.tsx";
-import { WAIT_TITLE, type Here } from "./view.ts";
+import { CREDIT, WAIT_TITLE, type Here } from "./view.ts";
 import {
   offersCase,
   orderStops,
@@ -258,7 +258,9 @@ export function BuiltCard({
           </div>
           {st.rungs.case ? (
             <div className="text-[12.5px] text-success-strong">
-              ✓ New case built
+              {/* its credit, as Built says its own: a case built after Show
+                  the model read as if it were yours */}
+              ✓ New case built · {CREDIT[st.rungs.case].word}
             </div>
           ) : st.newCase === "ready" && !caseWriting ? (
             <>

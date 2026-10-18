@@ -49,6 +49,7 @@ import {
   ARGUABLE,
   FAMILIES,
   familyOf,
+  placingIsAnswer,
   type Family,
   type LinkView,
   type Mark,
@@ -444,9 +445,15 @@ export function BuildCanvas({
     frame,
     parts.filter((p) => "slot" in p && p.slot),
   );
-  // the zone for parts outside the frame, while any wait there
+  // the zone for parts outside the frame, while any wait there, and for the
+  // whole build where parts start outside it (it went with the last part
+  // taken out of it, and the frame was fitted afresh)
   const waiting =
-    mode === "build" && (st.trayCount > 0 || st.placed.some((p) => !p.slot));
+    mode === "build" &&
+    (st.trayCount > 0 ||
+      st.help >= 2 ||
+      (st.help === 1 && placingIsAnswer(frame)) ||
+      st.placed.some((p) => !p.slot));
   // the worked case's hidden part has no slot (its slot would point at the
   // answer) and is drawn under the frame: the zone says why it is out there
   const hiddenOut = !!worked?.hidden;
@@ -460,18 +467,6 @@ export function BuildCanvas({
     return z ? [...rs, z] : rs;
   }, [frame, span, waiting, hiddenOut, all]);
 
-  // A part placed out of sight brings the view round to show it, and so
-  // does a layout that moved (the predict answered, the worked case redrawn
-  // whole: its revealed part sat behind the side card). A canvas opened, or
-  // turned from your passed build to a rebuild of it, fits its whole frame
-  // (a quick rebuild opened at the passed build's zoom, a box under the side
-  // card). Nothing moves while all is in view: a refit on every placement
-  // moved the next drop target. It waits until the cards are measured:
-  // fitView skips a card with no size, so a fit run on fresh cards (the
-  // build opening from See) frames nothing. It also waits for React Flow's
-  // own idea of the canvas's size, which lags a change of layout: the tray
-  // opening beside a quick rebuild narrowed the canvas, the fit framed the
-  // old width, and a box sat under the side card. A new size fits again.
   const count = parts.length;
   const shape = parts.map((p) => `${p.id}@${p.x},${p.y}`).join(";");
   const ready = useNodesInitialized();
@@ -479,44 +474,6 @@ export function BuildCanvas({
   const flowH = useStore((s) => s.height);
   const opened = useRef("");
   const sized = useRef("");
-  useEffect(() => {
-    const el = box.current;
-    if (!el || !count || !ready) return;
-    if (
-      Math.abs(flowW - el.clientWidth) > 2 ||
-      Math.abs(flowH - el.clientHeight) > 2
-    )
-      return;
-    const size = `${flowW}x${flowH}`;
-    const resized = !!sized.current && sized.current !== size;
-    sized.current = size;
-    const fresh = opened.current !== `${canvas}:${mode}`;
-    opened.current = `${canvas}:${mode}`;
-    // a window made smaller or larger leaves the parts where they were
-    // drawn, off the edge or in a corner
-    if (resized) {
-      void rf.fitView({ ...fit, duration: 200 });
-      return;
-    }
-    const refit = () => {
-      const { x, y, zoom } = rf.getViewport();
-      const out = rf.getNodes().some((n) => {
-        if (n.type !== "part" && !fresh) return false;
-        const w = (n.type === "part" ? NODE_W : (n.width ?? 0)) * zoom;
-        const h = (n.type === "part" ? NODE_H : (n.height ?? 0)) * zoom;
-        const sx = n.position.x * zoom + x;
-        const sy = n.position.y * zoom + y;
-        return (
-          sx < -1 ||
-          sy < -1 ||
-          sx + w > el.clientWidth + 1 ||
-          sy + h > el.clientHeight - (n.type === "part" ? 100 : 40)
-        );
-      });
-      if (out) void rf.fitView({ ...fit, duration: 200 });
-    };
-    refit();
-  }, [canvas, mode, count, shape, ready, rf, fit, flowW, flowH]);
 
   const rawKey = (p: { x: number; y: number; slot?: string }) =>
     `${p.x},${p.y},${p.slot ?? ""}`;
@@ -720,6 +677,64 @@ export function BuildCanvas({
     });
   }
 
+  // A part placed out of sight brings the view round to show it, and so
+  // does a layout that moved (the predict answered, the worked case redrawn
+  // whole: its revealed part sat behind the side card). A canvas opened, or
+  // turned from your passed build to a rebuild of it, fits its whole frame
+  // (a quick rebuild opened at the passed build's zoom, a box under the side
+  // card). Nothing moves while all is in view: a refit on every placement
+  // moved the next drop target. It waits until the cards are measured:
+  // fitView skips a card with no size, so a fit run on fresh cards (the
+  // build opening from See) frames nothing. It also waits for React Flow's
+  // own idea of the canvas's size, which lags a change of layout: the tray
+  // opening beside a quick rebuild narrowed the canvas, the fit framed the
+  // old width, and a box sat under the side card. A new size fits again.
+  // where the links reach (the extent node): a link drawn out past the
+  // parts brings the view round too (its label was cut at the canvas's edge
+  // until Fit view)
+  const extent = nodes.find((n) => n.id === "extent");
+  const reach = extent
+    ? `${extent.position.x},${extent.position.y},${extent.width},${extent.height}`
+    : "";
+  useEffect(() => {
+    const el = box.current;
+    if (!el || !count || !ready) return;
+    if (
+      Math.abs(flowW - el.clientWidth) > 2 ||
+      Math.abs(flowH - el.clientHeight) > 2
+    )
+      return;
+    const size = `${flowW}x${flowH}`;
+    const resized = !!sized.current && sized.current !== size;
+    sized.current = size;
+    const fresh = opened.current !== `${canvas}:${mode}`;
+    opened.current = `${canvas}:${mode}`;
+    // a window made smaller or larger leaves the parts where they were
+    // drawn, off the edge or in a corner
+    if (resized) {
+      void rf.fitView({ ...fit, duration: 200 });
+      return;
+    }
+    const refit = () => {
+      const { x, y, zoom } = rf.getViewport();
+      const out = rf.getNodes().some((n) => {
+        if (n.type === "region" && !fresh) return false;
+        const w = (n.type === "part" ? NODE_W : (n.width ?? 0)) * zoom;
+        const h = (n.type === "part" ? NODE_H : (n.height ?? 0)) * zoom;
+        const sx = n.position.x * zoom + x;
+        const sy = n.position.y * zoom + y;
+        return (
+          sx < -1 ||
+          sy < -1 ||
+          sx + w > el.clientWidth + 1 ||
+          sy + h > el.clientHeight - (n.type === "part" ? 100 : 40)
+        );
+      });
+      if (out) void rf.fitView({ ...fit, duration: 200 });
+    };
+    refit();
+  }, [canvas, mode, count, shape, reach, ready, rf, fit, flowW, flowH]);
+
   // Where a popover opens: at the click, kept inside the canvas and the
   // window; one low on the part of the canvas in view opens upward, so its
   // last row is not cut off and it stays clear of the message box. It is
@@ -837,6 +852,10 @@ export function BuildCanvas({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         connectionMode={"loose" as never}
+        // the frame is fitted to the canvas: a part dragged out of the strip
+        // at its foot panned the view a little each time, and the frame
+        // drifted down until a refit moved every part
+        autoPanOnNodeDrag={false}
         fitView
         fitViewOptions={fit}
         minZoom={0.3}
@@ -870,7 +889,17 @@ export function BuildCanvas({
             y: Math.round(n.position.y),
           };
           const slot = slotAt(frame, p, span, all);
-          void act("move", { step, part: n.id, ...p, slot: slot ?? null });
+          // once the server has answered, the part is drawn where it says
+          // (on its slot's spot): a drag that ended on the very spot it was
+          // dropped on before left the server's copy unchanged, and the part
+          // stayed where it was dropped, over the one beside it
+          void act("move", { step, part: n.id, ...p, slot: slot ?? null }).then(
+            () =>
+              setDrag((d) => {
+                const { [n.id]: _gone, ...rest } = d;
+                return rest;
+              }),
+          );
         }}
         onNodeClick={(e, n) => {
           if (n.type !== "part") return;
@@ -988,7 +1017,7 @@ export function BuildCanvas({
           {popMark && ARGUABLE.includes(popMark.mark) && (
             <ArgueBox
               here={here}
-              mixup={popMark.mark === "miscon"}
+              mark={popMark.mark}
               link={popLink}
               text={argue}
               setText={setArgue}
@@ -1145,12 +1174,13 @@ export function ArgueBox({
   text,
   setText,
   onSend,
-  mixup = false,
+  mark = "extra",
 }: {
   here: Here;
   link: LinkView;
-  // the check marked it as a common mix-up, rather than not in the model
-  mixup?: boolean;
+  // what the check marked it: not in the model, a common mix-up, or the
+  // right pair with another verb
+  mark?: Mark;
   text: string;
   setText: (t: string) => void;
   onSend: () => void;
@@ -1159,9 +1189,11 @@ export function ArgueBox({
   return (
     <div className="mt-2 border-t border-line pt-2">
       <div className="text-[11.5px] text-muted">
-        {mixup
+        {mark === "miscon"
           ? "Marked as a common mix-up. Think it holds here all the same? Say why."
-          : "Not in Claude's model, and not wrong. Think it holds here? Say why."}
+          : mark === "family"
+            ? "Claude's model links these two with another verb. Think yours says it too? Say what you mean by it."
+            : "Not in Claude's model, and not wrong. Think it holds here? Say why."}
       </div>
       <textarea
         value={text}

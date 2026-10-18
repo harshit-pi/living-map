@@ -172,6 +172,30 @@ test("moves asked while the model is busy wait their turn instead of being refus
   assert.deepEqual(await b, {});
 });
 
+test("a move that starts says what waits: a map pushed while its ticket was queued is not the last word", async () => {
+  const { engine, calls, events } = setup();
+  const first = act(engine, {
+    type: "new",
+    text: "Which DB?",
+    purpose: "explore",
+  });
+  await settled(calls, 1);
+  calls[0].release(ROOT);
+  await first;
+  // a ticket queued and a map pushed at once, as an action that starts a
+  // move and then saves the map does
+  const running = engine.turn("one", {} as never, { label: "Drawing" });
+  engine.push();
+  const pushed = events.at(-1);
+  assert.equal(pushed?.type === "map" && pushed.waiting.length, 1);
+  await settled(calls, 2);
+  const busy = events.findLast((e) => e.type === "busy");
+  assert.ok(busy?.type === "busy" && busy.busy);
+  assert.deepEqual(busy.type === "busy" && busy.waiting, []);
+  calls[1].release("Done.");
+  await running;
+});
+
 test("Stop ends the running move and cancels what waits", async () => {
   const { engine, calls } = setup();
   const first = act(engine, {

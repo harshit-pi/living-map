@@ -17,7 +17,6 @@ import {
   endReview,
   freshStep,
   grade,
-  helpFor,
   ideaCards,
   itemsOf,
   keepVisit,
@@ -60,6 +59,9 @@ import {
   whatifItem,
   whyPrecheck,
   isSure,
+  misconOf,
+  reviewHelp,
+  samePair,
   DAY,
   type Build,
   type LearnState,
@@ -120,7 +122,7 @@ const MODEL = `MODEL OPS (in the same map block as node ops; write the model op 
 FRAMES: {"kind":"free"} | {"kind":"lanes","lanes":["…"]} (each part has a "slot": its lane) | {"kind":"axis","ticks":["…"]} (order matters; each part's "slot" is its tick) | {"kind":"boxes","boxes":[{"id":"…","label":"…"}]} (each part's "slot" is the box it sits in) | {"kind":"sort","columns":["strong evidence","weak","against"]} (a part's "slot" may be a list when more than one column is fair).
 VERBS ("rel"), by family: ${verbList}. Each frame takes only some families: ${frameVerbs}.
 LAYERS ("layer"): parts · behaviour · function · failure. For a system, the first step is its parts and what each is for, the next how they interact; the why questions are its function and the what-if is its failure.
-RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that says what the part IS, never names another part and never says what it does to or gets from one ("refused the veterans' land" on "Senate" is a link, not a role). A lane, tick, box or column label never holds a part's label or the predict answer ("Right heart side" spells the part "Right heart"). At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, nor in the label of any part but the one it names ("ATP synthase" beside a hidden "ATP" answers it), and "hides" names the key link whose end the answer names. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it). Each step teaches a new idea or adds to the one before: its key links are never another step's key links (the outline lists them), and its what-if breaks something else. "title" names the case as the learner reads it ("Flu, your first infection"), never the step's layer or a word about the model ("the cast", "the parts").`;
+RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that says what the part IS, never names another part and never says what it does to or gets from one ("refused the veterans' land" on "Senate" is a link, not a role). A lane, tick, box or column label never holds a part's label or the predict answer ("Right heart side" spells the part "Right heart"). At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, nor in the label of any part but the one it names ("ATP synthase" beside a hidden "ATP" answers it), and "hides" names the key link whose end the answer names. Its wrong choices are never the label of another part (one part is drawn as "?", so a choice that is on screen is ruled out by looking, and the server drops it): name things that are not drawn. Its answer cannot be worked out from numbers on the parts left on screen ("$10,000 cash" and "Prices 2.43x" beside "what does it buy?" make it a sum, not a guess). The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. On an amount, the verb says which way it moves: "raises" or "lowers" ("8% price rise" lowers "Real value"), never "causes" or "prevents". "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it). Each step teaches a new idea or adds to the one before: its key links are never another step's key links (the outline lists them), and its what-if breaks something else. "title" names the case as the learner reads it ("Flu, your first infection"), never the step's layer or a word about the model ("the cast", "the parts").`;
 
 const WHY = `WHY on a key link: judge the learner's answer against that link's rubric (in the outline). The words do not have to match; the idea does. Write one op: {"op":"why","model":"<model id>","link":"<link id>","state":"right|partial|wrong","say":"at most 30 words"}. If partial or wrong, "say" asks ONE question that leads them on, never the fix. The caption is one short sentence.`;
 
@@ -225,7 +227,13 @@ function applyAccept(s: LearnState, op: Raw): number {
   // the verdict is on the link you argued for, whatever ids the reply used
   const { from, to, rel } = b.argue;
   const holds = op.holds === true;
-  if (
+  // another verb on a link of Claude's own: it says that link too, key or
+  // not (an accepted one stood beside it as a link of its own, and the key
+  // link it meant still failed)
+  const same = m.links.find((l) => !l.argued && samePair(l, { from, to, rel }));
+  if (holds && same) {
+    if (!sameLink(same, { from, to, rel })) (same.also ??= []).push(rel);
+  } else if (
     holds &&
     !m.links.some((l) => l.from === from && l.to === to && l.rel === rel)
   )
@@ -243,6 +251,7 @@ function applyAccept(s: LearnState, op: Raw): number {
     rel,
     holds,
     say: str(op.say, 200).trim(),
+    ...(holds && same ? { pair: true as const } : {}),
   });
   if (holds) acceptArgued(b, { from, to, rel });
   delete b.argue;
@@ -352,8 +361,11 @@ function at(ctx: Ctx, a: Raw, stages?: Stage[]): At | string {
 const buildOf = (x: At): Build =>
   (x.s.builds[x.m.id] ??= startBuild(x.m, x.st.help));
 
+// A rebuild from scratch at a help. A new case's help is its own: Show the
+// model on a new case set the step's help to L1, and the header went on
+// saying L2.
 const fresh = (x: At, help = x.st.help) => {
-  x.st.help = help;
+  if (x.m === x.main) x.st.help = help;
   x.s.builds[x.m.id] = startBuild(x.m, help);
 };
 
@@ -710,9 +722,13 @@ const open: Act = (ctx, a) => {
   return writeStep(ctx, s, step);
 };
 
+// the worked case is not on screen before you pick a level (view)
+const LEVEL_FIRST = "Say how much you know first.";
+
 const predict: Act = (ctx, a) => {
   const x = at(ctx, a, ["see"]);
   if (fail(x)) return err(x);
+  if (!x.s.level && !x.st.shownModel) return err(LEVEL_FIRST);
   const p = livePredict(x.main);
   if (!p) return err("This step has no question to predict.");
   const pick = p.choices.find((c) => c.text === a?.pick)?.text;
@@ -726,6 +742,7 @@ const predict: Act = (ctx, a) => {
 const hide: Act = (ctx, a) => {
   const x = at(ctx, a, ["see"]);
   if (fail(x)) return err(x);
+  if (!x.s.level && !x.st.shownModel) return err(LEVEL_FIRST);
   if (
     livePredict(x.main) &&
     !x.st.predicted &&
@@ -886,7 +903,13 @@ const why: Act = async (ctx, a) => {
   const { st, main, step } = x;
   const link = main.links.find((l) => l.id === st.whyLink);
   if (a?.show === true || !link?.ask) {
-    st.why = { state: "shown", tries: st.why?.tries ?? 0 };
+    // shown means shown: the reason is the link's rubric (the card read
+    // "◉ Shown." with nothing after it)
+    st.why = {
+      state: "shown",
+      tries: st.why?.tries ?? 0,
+      say: link?.rubric ?? "",
+    };
     built(ctx, x);
     return ok(ctx);
   }
@@ -953,9 +976,11 @@ const argue: Act = async (ctx, a) => {
     return err(
       "Argue for a link the last check marked as not in Claude's model, or as a common mix-up.",
     );
-  const mix =
-    mark === "miscon"
-      ? x.m.miscon.find((y) => y.link && sameLink(y.link, l))
+  const mix = mark === "miscon" ? misconOf(x.m, l) : undefined;
+  // the link of Claude's on the same two parts, when only the verb differs
+  const near =
+    mark === "family"
+      ? x.m.links.find((y) => !y.argued && samePair(y, l))
       : undefined;
   const text = str(a?.text, 400).trim();
   if (!text) return err("Say in a line why it holds.");
@@ -964,7 +989,7 @@ const argue: Act = async (ctx, a) => {
   b.argue = { from: l.from, to: l.to, rel: l.rel, said: text };
   ctx.say(text);
   const r = await ctx.engine.turn(
-    `ARGUE on step [${x.step}] "${ctx.map.nodes[x.step].title}": the learner drew ${linkWords(x.m, l)}, which ${mix ? `the server marked as your misconception "${mix.claim}" (they did not say that claim; judge the link they drew)` : "is not in your model"}, and says why it holds. Say whether it holds in this case with one accept op (model "${x.m.id}", link {"from":"${l.from}","to":"${l.to}","rel":"${l.rel}"}).`,
+    `ARGUE on step [${x.step}] "${ctx.map.nodes[x.step].title}": the learner drew ${linkWords(x.m, l)}, which ${mix ? `the server marked as your misconception "${mix.claim}" (they did not say that claim; judge the link they drew)` : near ? `has the two parts of your link ${linkWords(x.m, near)} with another verb (the verbs are a closed list: judge whether theirs says the same thing here)` : "is not in your model"}, and says why it holds. Say whether it holds in this case with one accept op (model "${x.m.id}", link {"from":"${l.from}","to":"${l.to}","rel":"${l.rel}"}).`,
     ctx.settings,
     { text, label: ARGUING, nodeId: x.step, sections: ["argue"] },
   );
@@ -1112,7 +1137,9 @@ const review: Act = (ctx) => {
     // the quick rebuild's result is of its day: kept, it headed the card
     // once this review's rebuild passed, over the review's own result
     delete st.recalled;
-    st.help = helpFor(itemsOf(s, m.id), st.recallWrong);
+    const last = own(s.builds, m.id)?.help ?? null;
+    st.help = reviewHelp(itemsOf(s, m.id), last, st.recallWrong);
+    st.lowered = !!st.recallWrong;
     st.recallWrong = false;
     s.builds[m.id] = startBuild(m, st.help);
     // a what-if that is due is asked again once the rebuild is done: the

@@ -13,6 +13,7 @@ import {
   LEVEL_HELP,
   MIXED_FROM,
   orderStops,
+  placingIsAnswer,
   RUNGS,
   slotsOf,
   STEMS,
@@ -72,6 +73,9 @@ export type RefLink = {
   reversed?: string;
   // a link you argued for and Claude accepted: it counts as right from then on
   argued?: true;
+  // other verbs you argued for on this very link and Claude accepted: the
+  // verbs are a closed list, and "prevents" said "cuts" as well as "lowers"
+  also?: Verb[];
 };
 export type Miscon = {
   id: string;
@@ -132,9 +136,11 @@ export type StepState = {
   recallDue?: boolean;
   recallDone?: boolean;
   // a quick rebuild under way; and one that came out wrong lowers the next
-  // visit's help by one
+  // visit's help by one (`lowered`: this review's help was, which the step
+  // says: the card's "less help" read false beside an L0 rebuild)
   recall?: boolean;
   recallWrong?: boolean;
+  lowered?: boolean;
   // how the quick rebuild came out, once it passed (the card said nothing,
   // and the step went back to its old Why as if nothing had happened)
   recalled?: { credit: Credit; tries: number };
@@ -191,6 +197,8 @@ export type Build = {
     rel: Verb;
     holds: boolean;
     say: string;
+    // accepted as another verb for a link of Claude's own
+    pair?: true;
   }[];
   // the next id for a link of yours
   next: number;
@@ -474,10 +482,44 @@ export const canon = (l: Triple): Triple =>
     ? { from: l.to, to: l.from, rel: "part of" }
     : { from: l.from, to: l.to, rel: l.rel };
 
-export function sameLink(a: Triple, b: Triple): boolean {
+// One link, whichever way it is said; a reference link's argued-for verbs
+// (`also`) say it too, wherever a build is held against it.
+export function sameLink(
+  a: Triple & { also?: Verb[] },
+  b: Triple & { also?: Verb[] },
+): boolean {
+  const eq = (p: Triple, q: Triple) => {
+    const x = canon(p);
+    const y = canon(q);
+    return x.from === y.from && x.to === y.to && x.rel === y.rel;
+  };
+  return (
+    eq(a, b) ||
+    (a.also ?? []).some((rel) => eq({ ...a, rel }, b)) ||
+    (b.also ?? []).some((rel) => eq(a, { ...b, rel }))
+  );
+}
+
+// the same two parts the same way round, whatever the verb
+export function samePair(a: Triple, b: Triple): boolean {
   const x = canon(a);
   const y = canon(b);
-  return x.from === y.from && x.to === y.to && x.rel === y.rel;
+  return x.from === y.from && x.to === y.to;
+}
+
+// The misconception a link of yours draws: its own link exactly, or, when
+// Claude's model has nothing on those two parts either way, its two parts
+// the same way round with any verb. Only the exact verb counted: the mix-up
+// a learner had just picked with "sure" in the predict ("inflation takes
+// money out of your account") was "not in Claude's model, and not wrong"
+// drawn with "prevents" rather than "makes".
+export function misconOf(m: RefModel, l: Triple): Miscon | undefined {
+  const exact = m.miscon.find((y) => y.link && sameLink(y.link, l));
+  if (exact) return exact;
+  const flip = { from: l.to, to: l.from, rel: l.rel };
+  if (m.links.some((r) => samePair(r, l) || samePair(r, flip)))
+    return undefined;
+  return m.miscon.find((y) => y.link && samePair(y.link, l));
 }
 
 // A link's ends must be parts of its model and its verb one the frame
@@ -831,11 +873,34 @@ export function predictTold(m: RefModel): boolean {
   );
 }
 
+// The wrong choices that are not parts on screen while the predict is open.
+// One part is drawn as "?": a choice that is another part's label is ruled
+// out by looking ("Which part takes it off the list?" offered "Round-robin
+// picker" and "DNS record", both on the canvas, so the one missing from it
+// was the answer, on every step of the map).
+export function predictChoices(m: RefModel): Predict["choices"] {
+  const p = m.predict;
+  if (!p) return [];
+  const hidden = hiddenEnd(m);
+  // the label itself: "More antibody" is a claim about the part "Antibody",
+  // not the part, and stays
+  const same = (a: string, b: string) => normAnswer(a) === normAnswer(b);
+  return p.choices.filter(
+    (c) =>
+      same(c.text, p.answer) ||
+      !m.parts.some((x) => x.id !== hidden && same(x.label, c.text)),
+  );
+}
+
 // The predict a step asks, unless a part on screen beside it names its
-// answer: a model settled before that was checked keeps it on disk, and it
-// is not asked (nor waited for by Hide it).
-export const livePredict = (m: RefModel): Predict | undefined =>
-  m.predict && !predictTold(m) ? m.predict : undefined;
+// answer, or the parts on screen rule out every wrong choice: a model
+// settled before that was checked keeps it on disk, and it is not asked (nor
+// waited for by Hide it). Its choices are the ones not on screen.
+export function livePredict(m: RefModel): Predict | undefined {
+  if (!m.predict || predictTold(m)) return undefined;
+  const choices = predictChoices(m);
+  return choices.length >= 2 ? { ...m.predict, choices } : undefined;
+}
 
 // Take giveaways out of what the learner reads before they build: a hint that
 // gives a key link away drops its rung; a summary is cut to its first clause
@@ -858,10 +923,15 @@ export function scrub(
       answer.trim() !== "" &&
       (phrase(step.title).includes(answer) ||
         phrase(step.summary).includes(answer));
-    if (givesAway(m, m.predict.ask).length || inStep || predictTold(m)) {
+    if (
+      givesAway(m, m.predict.ask).length ||
+      inStep ||
+      predictTold(m) ||
+      !livePredict(m)
+    ) {
       delete m.predict;
       predict = true;
-    }
+    } else m.predict.choices = predictChoices(m);
   }
   let summary: string | null = null;
   const leaks = (t: string) =>
@@ -935,7 +1005,7 @@ export function grade(
       marks.push({ link: l.id, mark: "right" });
       continue;
     }
-    const x = m.miscon.find((y) => y.link && sameLink(y.link, l));
+    const x = misconOf(m, l);
     if (x) {
       miscon++;
       marks.push({ link: l.id, mark: "miscon", refute: x.refute });
@@ -1529,6 +1599,11 @@ export function mixedOrder(ids: readonly string[], seed: number): string[] {
 // the verb between two of them
 const COL = 260;
 const ROW = 110;
+// L0's columns before its layers fold: the build's canvas sits between the
+// tray and the side card (about 730 wide at 1440), and four columns of 260
+// opened a free step at 0.68, its role lines at 7px; the worked case has the
+// width and keeps four (frame.ts)
+const BUILD_COLS = 3;
 
 // The links with each one that closes a loop left out ("Antibody prevents
 // H1N1 virus" after the virus started the chain). Layered with a loop in,
@@ -1554,8 +1629,8 @@ function acyclic(m: RefModel): RefLink[] {
 // plain grid in a shuffled order, each in its slot of the frame (Link it
 // tests the links: a part left outside its lane was marked wrong under a
 // line saying all parts were placed), no links; L2 and L3 nothing placed.
-// On an axis the slots are the order, which is the answer: at L1 its parts
-// wait beside the axis for you to put in order.
+// Where the slot is the answer (placingIsAnswer: an axis's order, a sort's
+// columns), at L1 its parts wait beside the frame for you to put in.
 export function startBuild(m: RefModel, help: Help): Build {
   const b: Build = {
     help,
@@ -1596,10 +1671,10 @@ export function startBuild(m: RefModel, help: Help): Build {
       const d = depth.get(p.id)!;
       const r = rows.get(d)!;
       rows.set(d, r + 1);
-      // past four columns the layers fold into rows that run back the
-      // other way, as the screen draws the worked case
-      const fold = Math.floor(d / 4);
-      const col = fold % 2 ? 3 - (d % 4) : d % 4;
+      // past BUILD_COLS columns the layers fold into rows that run back
+      // the other way, as the screen draws the worked case
+      const fold = Math.floor(d / BUILD_COLS);
+      const col = fold % 2 ? BUILD_COLS - 1 - (d % BUILD_COLS) : d % BUILD_COLS;
       b.placed.push({
         part: p.id,
         ...(slotted.get(p.id) ?? {
@@ -1619,7 +1694,7 @@ export function startBuild(m: RefModel, help: Help): Build {
           given: true,
         });
   } else if (help === 1) {
-    const slotted = !orderStops(m.frame);
+    const slotted = !placingIsAnswer(m.frame);
     const order = shuffled(m.parts, seedOf(m.id));
     const at = slotted ? inSlots(m, order) : new Map<string, Spot>();
     order.forEach((p, i) =>
@@ -1859,8 +1934,11 @@ export function openLink(
 }
 
 // The part whose place stops a pass: on an axis, the first in the model's
-// order of the parts out of order or off the ticks; on another frame, the
-// first left outside it that the model has a slot for.
+// order of the parts out of order or off the ticks, one that is not on its
+// own tick first (a part on its very tick is in a pair out of order only
+// through the part wrongly beside it, and "Look at where /healthz probe
+// sits" sent you to move the one part that was right); on another frame,
+// the first left outside it that the model has a slot for.
 export function openPlace(m: RefModel, b: Build): string | undefined {
   const valid = slotsOf(m.frame);
   if (!valid.length) return undefined;
@@ -1874,7 +1952,7 @@ export function openPlace(m: RefModel, b: Build): string | undefined {
   const byRank = [...placed].sort((a, c) => rank(a.part) - rank(c.part));
   if (m.frame.kind === "axis") {
     const tick = (x: { slot?: string }) => valid.indexOf(x.slot!);
-    const wrong = byRank.find(
+    const wrong = byRank.filter(
       (a) =>
         !on(a) ||
         placed.some(
@@ -1885,7 +1963,7 @@ export function openPlace(m: RefModel, b: Build): string | undefined {
               (rank(c.part) < rank(a.part) && tick(c) >= tick(a))),
         ),
     );
-    return wrong?.part;
+    return (wrong.find((a) => a.slot !== homeOf(m, a.part)) ?? wrong[0])?.part;
   }
   return byRank.find((x) => !on(x) && !!ref.get(x.part)!.p.slot?.length)?.part;
 }
@@ -1981,7 +2059,7 @@ export function showOneLink(
       l.given ||
       !tries(l) ||
       m.links.some((r) => sameLink(r, l)) ||
-      m.miscon.some((x) => x.link && sameLink(x.link, l)),
+      !!misconOf(m, l),
   );
   b.links.push({
     id: `y${b.next++}`,
@@ -2134,6 +2212,24 @@ export function helpFor(items: Item[], recallWrong = false): Help {
   const low = live.length ? Math.min(...live.map((i) => i.box)) : 3;
   const h = low <= 1 ? 1 : low === 2 ? 2 : 3;
   return Math.max(0, recallWrong ? h - 1 : h) as Help;
+}
+
+// A step's help when a review opens: its items' level (helpFor), never more
+// help than its last rebuild had when every key link of it came out by you
+// (a step built cold at L2 came back at L1, with the parts placed, under a
+// card promising less help). `last`: that rebuild's help, if any.
+export function reviewHelp(
+  items: Item[],
+  last: Help | null,
+  recallWrong = false,
+): Help {
+  const h = helpFor(items, recallWrong);
+  const live = items.filter(rebuilt);
+  const byYou =
+    !recallWrong &&
+    live.length > 0 &&
+    live.every((i) => i.log.at(-1)?.how === "unaided");
+  return (byYou && last !== null ? Math.max(h, last) : h) as Help;
 }
 
 // How many steps are due now (a step with a live item due), and when the
@@ -2309,6 +2405,7 @@ export function acceptArgued(b: Build, link: Triple): void {
     const l = b.links.find((x) => x.id === mk.link);
     if (!ARGUABLE.includes(mk.mark) || !l || !sameLink(l, link)) continue;
     if (mk.mark === "extra") c.extra--;
+    else if (mk.mark === "family") c.family--;
     else c.miscon--;
     mk.mark = "right";
     delete mk.refute;
@@ -2422,7 +2519,7 @@ export function outlineOf(
       "  links:",
       ...m.links.map(
         (l) =>
-          `    [${l.id}] ${linkWords(m, l)}${l.key ? " · KEY" : ""}${l.argued ? " · argued by the learner, accepted" : ""}${l.rubric ? ` · rubric: ${l.rubric}` : ""}`,
+          `    [${l.id}] ${linkWords(m, l)}${l.key ? " · KEY" : ""}${l.argued ? " · argued by the learner, accepted" : ""}${l.also?.length ? ` · also said with: ${l.also.join(", ")} (argued by the learner, accepted)` : ""}${l.rubric ? ` · rubric: ${l.rubric}` : ""}`,
       ),
       ...(m.miscon.length
         ? [
@@ -2588,6 +2685,7 @@ function stepView(
     recall: !!st.recall,
     recalled: st.recall ? null : (st.recalled ?? null),
     reviewing: !!st.reviewing,
+    lowered: !!st.reviewing && !!st.lowered,
     itemsDue: items.filter((i) => rebuilt(i) && i.due <= now).length,
   };
   if (!m || !ready) return base;
@@ -2596,8 +2694,12 @@ function stepView(
 
   // the worked case: while you see it, or after Show the model (with the
   // links you argued for and Claude accepted: they joined it); before you
-  // predict, the link the predict question is about stays hidden
-  if (st.stage === "see" || st.shownModel) {
+  // predict, the link the predict question is about stays hidden. Not before
+  // you say how much you know: it sat under the level chooser, and "I know
+  // some" then built it "by you" with the answer just read (Peek at the
+  // worked case is there for that, and counts as shown).
+  const seeing = st.stage === "see" && s.level !== null;
+  if (seeing || st.shownModel) {
     const hideLink =
       st.stage === "see" && !st.predicted && !st.shownModel
         ? livePredict(m)?.hides
@@ -2648,7 +2750,7 @@ function stepView(
     }
   }
   const pr = livePredict(m);
-  if (st.stage === "see" && pr && !st.shownModel) {
+  if (seeing && pr && !st.shownModel) {
     const pick = st.predicted?.pick ?? null;
     const choice = pr.choices.find((c) => c.text === pick);
     const right =
@@ -2677,6 +2779,9 @@ function stepView(
     own(s.builds, m.id) ??
     (st.stage === "build" ? startBuild(m, st.help) : undefined);
   if (b) {
+    // a new case is built at its own help (L2, or L1 after Show the model),
+    // not the step's
+    if (m !== main) base.help = b.help;
     const label = (id: string) => m.parts.find((x) => x.id === id)!;
     base.placed = b.placed
       .filter((x) => isPart(m, x.part))
@@ -2926,6 +3031,9 @@ function reviewView(
             .map((id) => ({ step: id, title: nodes[id].title })),
           picked: c.picked ?? null,
           right: c.picked ? c.picked === c.answer : null,
+          // a wrong pick is final, so the right step is named then (as the
+          // predict names its answer): only the chip you picked turned red
+          correct: c.picked && c.picked !== c.answer ? c.answer : null,
         }))
       : [],
   };
