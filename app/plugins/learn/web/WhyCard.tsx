@@ -4,6 +4,7 @@ import { SmallBtn, WaitNote } from "./BuildCanvas.tsx";
 import { HowSure } from "./CheckCard.tsx";
 import { WAIT_TITLE, type Here } from "./view.ts";
 import {
+  offersCase,
   orderStops,
   type StepView,
   type Sure,
@@ -79,10 +80,16 @@ export function WhyCard({
             </div>
           )}
           <div className="flex items-center justify-between gap-2">
+            {/* sent as a why, it waits for the map to settle like Send:
+                open while Claude worked, a press was dropped */}
             <button
               onClick={() => void act("why", { step: st.step, show: true })}
-              disabled={judging}
-              title="The step counts as built, with the why shown"
+              disabled={judging || busy}
+              title={
+                busy
+                  ? WAIT_TITLE
+                  : "The step counts as built, with the why shown"
+              }
               className="text-[11.5px] text-muted hover:text-ink disabled:opacity-40"
             >
               Skip: show me
@@ -243,48 +250,51 @@ export function BuiltCard({
         </div>
       )}
 
-      <div className="space-y-1.5 border-t border-line pt-2">
-        <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-          New case · optional
-        </div>
-        {st.rungs.case ? (
-          <div className="text-[12.5px] text-success-strong">
-            ✓ New case built
+      {/* a play step's order is the same on any case (offersCase) */}
+      {offersCase(st) && (
+        <div className="space-y-1.5 border-t border-line pt-2">
+          <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
+            New case · optional
           </div>
-        ) : st.newCase === "ready" && !caseWriting ? (
-          <>
-            <div className="text-[12px] text-muted">
-              Your new case is waiting, built at L2.
+          {st.rungs.case ? (
+            <div className="text-[12.5px] text-success-strong">
+              ✓ New case built
             </div>
-            <SmallBtn onClick={() => void act("onCase", { step, on: true })}>
-              Back to the new case
-            </SmallBtn>
-          </>
-        ) : (
-          <>
-            <div className="text-[12px] text-muted">
-              The same idea on a case that looks different, built at L2.
-              {st.newCase === "broken" &&
-                !caseWriting &&
-                " The last one did not hold together."}
-            </div>
-            {/* the button keeps its place while Claude writes, so a second
+          ) : st.newCase === "ready" && !caseWriting ? (
+            <>
+              <div className="text-[12px] text-muted">
+                Your new case is waiting, built at L2.
+              </div>
+              <SmallBtn onClick={() => void act("onCase", { step, on: true })}>
+                Back to the new case
+              </SmallBtn>
+            </>
+          ) : (
+            <>
+              <div className="text-[12px] text-muted">
+                The same idea on a case that looks different, built at L2.
+                {st.newCase === "broken" &&
+                  !caseWriting &&
+                  " The last one did not hold together."}
+              </div>
+              {/* the button keeps its place while Claude writes, so a second
                 press does not land on Next step below it */}
-            <SmallBtn
-              disabled={busy || caseWriting}
-              title={busy ? WAIT_TITLE : "One Claude move"}
-              onClick={() => void act("newCase", { step })}
-            >
-              {caseWriting
-                ? "Claude is writing a new case…"
-                : st.newCase === "broken"
-                  ? "Try again"
-                  : "New case (about 3 min)"}
-            </SmallBtn>
-            {!caseWriting && <WaitNote here={here} />}
-          </>
-        )}
-      </div>
+              <SmallBtn
+                disabled={busy || caseWriting}
+                title={busy ? WAIT_TITLE : "One Claude move"}
+                onClick={() => void act("newCase", { step })}
+              >
+                {caseWriting
+                  ? "Claude is writing a new case…"
+                  : st.newCase === "broken"
+                    ? "Try again"
+                    : "New case (about 3 min)"}
+              </SmallBtn>
+              {!caseWriting && <WaitNote here={here} />}
+            </>
+          )}
+        </div>
+      )}
 
       {onNext && (
         <div className="border-t border-line pt-2">

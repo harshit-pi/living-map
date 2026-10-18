@@ -11,6 +11,7 @@ import {
   isVerb,
   LAYERS,
   LEVEL_HELP,
+  MIXED_FROM,
   orderStops,
   RUNGS,
   slotsOf,
@@ -158,7 +159,10 @@ export type BuildLink = {
 };
 export type Build = {
   help: Help;
-  placed: { part: string; x: number; y: number; slot?: string }[];
+  // `n`: when the part came into its slot, the order it keeps there (a part
+  // dropped into a box sorted by where it was dropped went to its top, and
+  // moved the ones already in it)
+  placed: { part: string; x: number; y: number; slot?: string; n?: number }[];
   links: BuildLink[];
   // a hint on a link, or on where a part sits ("place:<part id>"); a
   // first rung names the link's `to` end when you had already linked its
@@ -393,9 +397,11 @@ export function cleanModel(op: Raw): RefModel | null {
   // out (the card shows the label alone). Refused instead, a new case was
   // sent back twice for "the outcome of one test run" beside a part "Test
   // run", and broke: three paid moves for one plain phrase.
+  // A word of another part's label that no other label has names that part
+  // too: "council of landowners that refused veterans settlements" on the
+  // Senate said the key link "Senate" prevents "Veteran land grants".
   for (const a of parts)
-    if (parts.some((b) => b !== a && phrase(a.role).includes(phrase(b.label))))
-      a.role = "";
+    if (parts.some((b) => b !== a && roleNames(a, b, parts))) a.role = "";
   const of = safe(op?.of);
   const allowed = verbsFor(frame.kind);
   const verbs = [
@@ -416,6 +422,20 @@ export function cleanModel(op: Raw): RefModel | null {
     miscon: [],
     status: "writing",
   };
+}
+
+// Whether part a's role names part b: b's whole label, or a word of it that
+// is b's alone (no other label, a's own included, has it).
+function roleNames(a: Part, b: Part, parts: readonly Part[]): boolean {
+  if (!a.role.trim()) return false;
+  if (phrase(a.role).includes(phrase(b.label))) return true;
+  const said = new Set(wordsOf(a.role).map(root));
+  const own = (p: Part) =>
+    wordsOf(p.label)
+      .filter((w) => w.length >= 4 && !STOP.has(w))
+      .map(root);
+  const elsewhere = new Set(parts.filter((p) => p !== b).flatMap(own));
+  return own(b).some((w) => !elsewhere.has(w) && said.has(w));
 }
 
 const isPart = (m: RefModel, id: string) => m.parts.some((p) => p.id === id);
@@ -684,8 +704,28 @@ export const keysIn = (m: RefModel, text: string): string[] => [
 // (or sentence of a long one) that names a key link left out: an Explain
 // said "Head pointer: stored in the bucket. It points to the first entry",
 // one of the links you were rebuilding, and it stayed in the panel.
+// A line about one part ("Merge: …", "- **Merge** — …") keeps its part's
+// name and says why the rest is out: an Explain of one line per part
+// lost "Merge" with no word, and read as broken.
 export function redactLinks(m: RefModel, text: string): string {
   if (!keysIn(m, text).length) return text;
+  const byLength = [...m.parts].sort((a, b) => b.label.length - a.label.length);
+  const leftOut = (line: string): string => {
+    const lead = /^(\s*(?:[-*•]|\d+[.)])?\s*)/.exec(line)![1];
+    const rest = line
+      .slice(lead.length)
+      .replace(/^[*_"“'‘]+/, "")
+      .toLowerCase();
+    const p = byLength.find((x) => {
+      const l = x.label.toLowerCase();
+      return (
+        rest.startsWith(l) && /^[*_"”'’]*\s*[:—–-]/.test(rest.slice(l.length))
+      );
+    });
+    return p
+      ? `${lead}"${p.label}": left out here, as it said what this part links to.`
+      : "";
+  };
   const lines = text.split("\n").map((line) =>
     line.length > 300
       ? line
@@ -693,7 +733,7 @@ export function redactLinks(m: RefModel, text: string): string {
           .filter((x) => !namedKeys(m, x).length)
           .join(" ")
       : namedKeys(m, line).length
-        ? ""
+        ? leftOut(line)
         : line,
   );
   const kept = lines
@@ -762,9 +802,45 @@ export function validate(
 export const firstClause = (s: string): string =>
   s.split(/[,;:(—–]| - | because | so that | which /)[0].trim();
 
+// The part the worked case draws as "?" while the predict is open: the end
+// of its link that the answer names, in its own words or the label's. Picked
+// by the exact label alone, "Reaching a one-item list" hid the other end
+// ("Split"), and the part the answer named sat on screen beside the question.
+export function hiddenEnd(m: RefModel): string | null {
+  const l = m.predict && m.links.find((x) => x.id === m.predict!.hides);
+  if (!l) return null;
+  const answer = m.predict!.answer;
+  const exact = (id: string) =>
+    normAnswer(labelOf(m, id)) === normAnswer(answer);
+  const names = (id: string) =>
+    exact(id) ||
+    namesAll(answer, labelOf(m, id)) ||
+    namesAll(labelOf(m, id), answer);
+  if (exact(l.from)) return l.from;
+  if (exact(l.to)) return l.to;
+  return names(l.from) && !names(l.to) ? l.from : l.to;
+}
+
+// Whether a part left on screen while the predict is open names its
+// answer: "ATP synthase makes ?" answered "what carries the energy… ATP?".
+export function predictTold(m: RefModel): boolean {
+  if (!m.predict?.answer.trim()) return false;
+  const hidden = hiddenEnd(m);
+  return m.parts.some(
+    (p) => p.id !== hidden && namesAll(p.label, m.predict!.answer),
+  );
+}
+
+// The predict a step asks, unless a part on screen beside it names its
+// answer: a model settled before that was checked keeps it on disk, and it
+// is not asked (nor waited for by Hide it).
+export const livePredict = (m: RefModel): Predict | undefined =>
+  m.predict && !predictTold(m) ? m.predict : undefined;
+
 // Take giveaways out of what the learner reads before they build: a hint that
 // gives a key link away drops its rung; a summary is cut to its first clause
-// (or emptied); a predict that gives its answer away is dropped.
+// (or emptied); a predict that gives its answer away is dropped, in its own
+// question or in a part's label left on screen beside it.
 export function scrub(
   m: RefModel,
   step: { title: string; summary: string },
@@ -782,7 +858,7 @@ export function scrub(
       answer.trim() !== "" &&
       (phrase(step.title).includes(answer) ||
         phrase(step.summary).includes(answer));
-    if (givesAway(m, m.predict.ask).length || inStep) {
+    if (givesAway(m, m.predict.ask).length || inStep || predictTold(m)) {
       delete m.predict;
       predict = true;
     }
@@ -885,13 +961,13 @@ export function grade(
       });
       continue;
     }
+    // the right pair, the right way round, with another verb: a near verb
+    // from its family, or one from another ("One list runs out" then "Copy
+    // the leftovers" where the model has enables). Marked "?", it read as a
+    // pair Claude's model does not have, and sent you away from it.
     const fam = refs.find((r) => {
       const cr = canon(r);
-      return (
-        cr.from === c.from &&
-        cr.to === c.to &&
-        familyOf(cr.rel) === familyOf(c.rel)
-      );
+      return cr.from === c.from && cr.to === c.to;
     });
     if (fam) {
       family++;
@@ -1439,10 +1515,10 @@ export function shuffled<T>(xs: readonly T[], seed: number): T[] {
 }
 
 // Due steps in a shuffled order, stable for a seed, and never in path order
-// when there are 3 or more (mixing them is the point).
+// when there are MIXED_FROM or more (mixing them is the point).
 export function mixedOrder(ids: readonly string[], seed: number): string[] {
   const out = shuffled(ids, seed);
-  if (ids.length >= 3 && out.every((x, i) => x === ids[i]))
+  if (ids.length >= MIXED_FROM && out.every((x, i) => x === ids[i]))
     out.push(out.shift()!);
   return out;
 }
@@ -1602,6 +1678,19 @@ const nextSpot = (b: Build) => ({
   y: Math.floor(b.placed.length / 3) * ROW,
 });
 
+// A spot the browser sends, kept on the canvas: a number, rounded, within
+// a range far wider than any frame (1e308 opened the step at 3e38 px, and
+// the build could not be used until the part was taken back).
+export const COORD = 5000;
+export function coord(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v)
+    ? Math.max(-COORD, Math.min(COORD, Math.round(v)))
+    : undefined;
+}
+
+// the next place in the order parts come into their slots
+const nextN = (b: Build) => Math.max(0, ...b.placed.map((p) => p.n ?? 0)) + 1;
+
 export function placePart(
   m: RefModel,
   b: Build,
@@ -1611,14 +1700,12 @@ export function placePart(
   if (!isPart(m, part)) return "No such part.";
   if (placedHas(b, part)) return "That part is already placed.";
   const spot = nextSpot(b);
-  const num = (v: unknown, d: number) =>
-    typeof v === "number" && Number.isFinite(v) ? Math.round(v) : d;
   const slot = cleanSlot(slotFrom(m.frame, at?.slot), m.frame)?.[0];
   b.placed.push({
     part,
-    x: num(at?.x, spot.x),
-    y: num(at?.y, spot.y),
-    ...(slot ? { slot } : {}),
+    x: coord(at?.x) ?? spot.x,
+    y: coord(at?.y) ?? spot.y,
+    ...(slot ? { slot, n: nextN(b) } : {}),
   });
   return null;
 }
@@ -1631,12 +1718,19 @@ export function movePart(
 ): string | null {
   const p = b.placed.find((x) => x.part === part);
   if (!p) return "That part is not placed.";
-  if (typeof at.x === "number" && Number.isFinite(at.x)) p.x = Math.round(at.x);
-  if (typeof at.y === "number" && Number.isFinite(at.y)) p.y = Math.round(at.y);
+  p.x = coord(at.x) ?? p.x;
+  p.y = coord(at.y) ?? p.y;
   if (at.slot !== undefined) {
     const slot = cleanSlot(slotFrom(m.frame, at.slot), m.frame)?.[0];
-    if (slot) p.slot = slot;
-    else delete p.slot;
+    // a part moved into another slot comes last in it; moved within its
+    // own, it keeps its place
+    if (slot && slot !== p.slot) {
+      p.slot = slot;
+      p.n = nextN(b);
+    } else if (!slot) {
+      delete p.slot;
+      delete p.n;
+    }
   }
   return null;
 }
@@ -1847,10 +1941,12 @@ export function nextHint(
 }
 
 // Show one link: what openAid aims at, shown and marked so. A link you do
-// not have is drawn for you; it takes the place of your tries on the same
-// two parts that are not right (a near verb, the wrong way round): drawn
-// beside them, the two read as one. A part whose place stops the pass is
-// put in its slot.
+// not have is drawn for you; it takes the place of your tries at it on the
+// same two parts (another verb, or its family's verb the wrong way round):
+// drawn beside them, the two read as one. A link of yours on that pair that
+// says something else (not in Claude's model, or a mix-up) stays: it is a
+// claim of its own, and it went with no word, its Argue for it too. A part
+// whose place stops the pass is put in its slot.
 export function showOneLink(
   m: RefModel,
   b: Build,
@@ -1862,17 +1958,30 @@ export function showOneLink(
     const slot = homeOf(m, aid.part);
     const p = b.placed.find((x) => x.part === aid.part);
     if (!slot || !p) return "Every part is in its place.";
+    if (p.slot !== slot) p.n = nextN(b);
     p.slot = slot;
     b.shown.push(`place:${aid.part}`);
     return aid;
   }
   const target = aid.link;
-  const pair = (l: Triple) => [l.from, l.to].sort().join("|");
+  const t = canon(target);
+  // a try at the target: the same way round with any verb, or the other
+  // way round with a verb of its family (as grade marks them ~ and ↔)
+  const tries = (l: Triple) => {
+    const c = canon(l);
+    return (
+      (c.from === t.from && c.to === t.to) ||
+      (c.from === t.to &&
+        c.to === t.from &&
+        familyOf(c.rel) === familyOf(t.rel))
+    );
+  };
   b.links = b.links.filter(
     (l) =>
       l.given ||
-      pair(l) !== pair(target) ||
-      m.links.some((r) => sameLink(r, l)),
+      !tries(l) ||
+      m.links.some((r) => sameLink(r, l)) ||
+      m.miscon.some((x) => x.link && sameLink(x.link, l)),
   );
   b.links.push({
     id: `y${b.next++}`,
@@ -1890,7 +1999,9 @@ export function showOneLink(
 // ---------------------------------------------------------------- credit
 
 // how each key link came out of a rebuild: right at the first check by you;
-// shown; wrong at the first check while sure; fixed later; never right
+// shown; wrong at the first check while sure; right with help on it
+// (hinted); right after a check, with no help (fixed: it was logged
+// "hinted" with no hint taken); never right
 export function outcomes(
   m: RefModel,
   b: Build,
@@ -1913,7 +2024,10 @@ export function outcomes(
       out[r.id] = { how: "unaided" };
     else if (b.first && !b.first[r.id] && b.firstSure === "sure")
       out[r.id] = { how: "wrong", sure: "sure" };
-    else if (rightNow.has(r.id)) out[r.id] = { how: "hinted" };
+    else if (rightNow.has(r.id))
+      out[r.id] = {
+        how: hinted.has(r.id) || touchesHinted || !b.first ? "hinted" : "fixed",
+      };
     else
       out[r.id] = {
         how: "wrong",
@@ -1977,8 +2091,8 @@ export const whatifItem = (m: RefModel, now: number): Item | null =>
 export const rebuilt = (i: Item): boolean => i.kind === "link" && !i.retired;
 
 // An answer on an item. Unaided right moves it up a box, once a local day
-// (and never on the day it was built); hinted keeps the box, due tomorrow;
-// shown or wrong sends it back to box 1. Wrong while sure flags its
+// (and never on the day it was built); hinted, or fixed after a check,
+// keeps the box, due tomorrow; shown or wrong sends it back to box 1. Wrong while sure flags its
 // refutation for the next check. It retires after unaided answers on 3
 // different days, the last at box 3 or higher.
 export function record(item: Item, how: How, now: number, sure?: Sure): Item {
@@ -2000,7 +2114,7 @@ export function record(item: Item, how: How, now: number, sure?: Sure): Item {
         .filter((d) => d !== localDay(item.made)),
     );
     if (days.size >= 3 && item.box >= 3) item.retired = true;
-  } else if (how === "hinted") {
+  } else if (how === "hinted" || how === "fixed") {
     item.due = now + DAY;
   } else {
     item.box = 1;
@@ -2486,19 +2600,11 @@ function stepView(
   if (st.stage === "see" || st.shownModel) {
     const hideLink =
       st.stage === "see" && !st.predicted && !st.shownModel
-        ? m.predict?.hides
+        ? livePredict(m)?.hides
         : undefined;
     // the end that is the answer is the one drawn as "?": a predict can ask
     // about either end ("which cell deals with the virus?" asks the from end)
-    const link = hideLink ? m.links.find((l) => l.id === hideLink) : undefined;
-    const answer = normAnswer(m.predict?.answer ?? "");
-    const label = (id: string) =>
-      normAnswer(m.parts.find((x) => x.id === id)?.label ?? "");
-    const hidden = link
-      ? label(link.from) === answer
-        ? link.from
-        : link.to
-      : null;
+    const hidden = hideLink ? hiddenEnd(m) : null;
     // The hidden part goes out under a name of no meaning: its own id
     // ("house") was in the canvas's labels, read out by a screen reader.
     // The parts linked to it keep their labels but not their roles until
@@ -2541,14 +2647,15 @@ function stepView(
       };
     }
   }
-  if (st.stage === "see" && m.predict && !st.shownModel) {
+  const pr = livePredict(m);
+  if (st.stage === "see" && pr && !st.shownModel) {
     const pick = st.predicted?.pick ?? null;
-    const choice = m.predict.choices.find((c) => c.text === pick);
+    const choice = pr.choices.find((c) => c.text === pick);
     const right =
-      pick === null ? null : normAnswer(pick) === normAnswer(m.predict.answer);
+      pick === null ? null : normAnswer(pick) === normAnswer(pr.answer);
     base.predict = {
-      ask: m.predict.ask,
-      choices: m.predict.choices.map((c) => c.text),
+      ask: pr.ask,
+      choices: pr.choices.map((c) => c.text),
       picked: pick,
       sure: st.predicted?.sure ?? null,
       right,
@@ -2562,7 +2669,7 @@ function stepView(
           : null,
       // and the right one: the pick is final, and the whole case is on
       // screen from now on (a case may not show it: a resized array)
-      ...(right === false ? { correct: m.predict.answer } : {}),
+      ...(right === false ? { correct: pr.answer } : {}),
     };
   }
 
@@ -2578,6 +2685,7 @@ function stepView(
         x: x.x,
         y: x.y,
         ...(x.slot ? { slot: x.slot } : {}),
+        ...(x.slot && x.n ? { n: x.n } : {}),
       }));
     base.links = b.links.map(linkView);
     base.check = b.last;

@@ -1,18 +1,24 @@
 import { SmallBtn } from "./BuildCanvas.tsx";
 import { stepNumber, type Here } from "./view.ts";
 import { reviewMinutes } from "../../../web/lib/ago.ts";
-import type { How, LearnView, ReviewView } from "../shared.ts";
+import {
+  MIXED_FROM,
+  type How,
+  type LearnView,
+  type ReviewView,
+} from "../shared.ts";
 
 const HOW: Record<How, string> = {
   unaided: "by you",
   hinted: "hinted",
+  fixed: "fixed after the check",
   shown: "shown",
   wrong: "wrong",
 };
 const howCls = (h: How | null) =>
   h === "unaided"
     ? "text-success-strong"
-    : h === "hinted"
+    : h === "hinted" || h === "fixed"
       ? "text-warning-strong"
       : h === "shown"
         ? "text-hint-strong"
@@ -45,7 +51,8 @@ export function ReviewStart({
           {links} key {links === 1 ? "link" : "links"} to rebuild from memory,
           about {reviewMinutes(steps.length)} min. Each step comes back with a
           little less help than last time
-          {steps.length > 1 ? ", in a mixed order" : ""}.
+          {/* two can come back in path order (mixedOrder) */}
+          {steps.length >= MIXED_FROM ? ", in a mixed order" : ""}.
         </div>
         {view.last && (
           <div className="mt-2 text-[12.5px] text-body">
@@ -121,23 +128,43 @@ export function ReviewStrip({
 
 // Beside a review: each key link last time → today, once its step's rebuild
 // is checked; Today, unaided; the "which idea is this?" cards once the
-// rebuilds are done; and I'm done today.
+// rebuilds are done; and I'm done today. `onPick`: on a step you rebuilt
+// out of the review's order, the step still to rebuild, first (it said
+// nothing, under the step's old cards, and Next step went along the path).
 export function ReviewPanel({
   here,
   review,
+  current,
+  onPick,
 }: {
   here: Here;
   review: ReviewView;
+  current?: string;
+  onPick?: (step: string) => void;
 }) {
   const { view, act } = here;
-  const left = review.order.filter(
+  const due = review.order.filter(
     (id) => view.steps.find((s) => s.step === id)?.reviewing,
-  ).length;
+  );
+  const left = due.length;
+  const next = onPick && !due.includes(current ?? "") ? due[0] : undefined;
+  const nextSt = next ? view.steps.find((s) => s.step === next) : undefined;
   return (
     <div className="space-y-3">
       {left === 0 && (
         <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] font-medium text-success-strong">
           ✓ Review done · today, unaided {review.unaided} of {review.of}
+        </div>
+      )}
+      {nextSt && onPick && (
+        <div className="space-y-1.5 rounded-lg bg-primary-soft/60 px-2.5 py-2 ring-1 ring-primary-line">
+          <div className="text-[12.5px] text-body">
+            {left === 1 ? "One step is" : `${left} steps are`} still to rebuild
+            in this review.
+          </div>
+          <SmallBtn primary onClick={() => onPick(nextSt.step)}>
+            Next: rebuild {stepNumber(view, nextSt.step)} {nextSt.title} →
+          </SmallBtn>
         </div>
       )}
       <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">

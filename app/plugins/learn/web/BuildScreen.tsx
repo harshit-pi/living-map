@@ -140,6 +140,11 @@ function railMark(st: StepView): RailMark {
   };
 }
 
+// a step rebuilt from memory (a review, a quick rebuild): its scene stays
+// shut until the rebuild is checked, as the server has it (rebuilding)
+const fromMemory = (st: StepView) =>
+  st.stage === "build" && (st.reviewing || st.recall);
+
 // Learn on a build map: the path on the left; the step's tray, canvas and
 // side card; Review when something is due.
 export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
@@ -183,14 +188,18 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   // a different step starts on its own canvas, with nothing half-done. A
   // play step not yet built opens on its scene, which comes first (spec §1):
   // "I know some" skipped See, and the step opened on Build the order. Its
-  // mode is known once its model is in, so that counts as a new key too.
-  const key = current ? `${current.step}:${current.mode}` : "";
+  // mode is known once its model is in, so that counts as a new key too. A
+  // review or a quick rebuild opens on the order: the scene acts it out.
+  const key = current
+    ? `${current.step}:${current.mode}:${!!(current.reviewing || current.recall)}`
+    : "";
   // empty at first, so the step the map opens on starts the same way
   const [shownFor, setShownFor] = useState("");
   if (shownFor !== key) {
     setShownFor(key);
     setCentre(
       current?.mode === "play" &&
+        !fromMemory(current) &&
         (current.stage === "see" ||
           (current.stage === "build" && current.checks === 0))
         ? "play"
@@ -444,7 +453,7 @@ function StepArea({
   // are not building (it may draw the links), the scene only on a play step
   const centre =
     (asked === "topic" && (!view.topic || st.stage === "build")) ||
-    (asked === "play" && st.mode !== "play")
+    (asked === "play" && (st.mode !== "play" || fromMemory(st)))
       ? "step"
       : asked;
   const ready = st.model === "ready";
@@ -491,16 +500,26 @@ function StepArea({
   const verdicts: Record<string, string> = {};
   for (const c of map.chat) if (c.blankId) verdicts[c.blankId] = c.text;
 
-  // a review whose rebuilds are all done says so first: under the step's
-  // old Why and its extras, its result sat below the fold
+  // A review whose rebuilds are all done says so first: under the step's
+  // old Why and its extras, its result sat below the fold. So does one with
+  // a step still to rebuild, on a step you rebuilt out of its order: what is
+  // left, and a way to it, before the step's old cards.
   const reviewDone = !!review && !view.steps.some((s) => s.reviewing);
+  const reviewFirst = !!review && (reviewDone || !st.reviewing);
 
-  const side = (
+  // nothing to say beside a step whose model is not drawn yet (an empty
+  // column sat at the window's right edge)
+  const side = (ready || review) && (
     <aside className="flex max-h-[45%] w-full shrink-0 flex-col overflow-y-auto border-t border-line bg-surface px-4 py-3 lg:max-h-none lg:w-[260px] lg:border-t-0 lg:border-l xl:w-[280px] 2xl:w-[300px]">
       <div className="space-y-4">
-        {review && reviewDone && (
+        {review && reviewFirst && (
           <div className="border-b border-line pb-3">
-            <ReviewPanel here={here} review={review} />
+            <ReviewPanel
+              here={here}
+              review={review}
+              current={st.step}
+              onPick={onPick}
+            />
           </div>
         )}
         {/* a quick rebuild that passed says so first: the card went
@@ -540,10 +559,12 @@ function StepArea({
               checked: () => setWiShown(true),
             }}
             onWhatIf={() => setWhatifOn(true)}
-            onNext={onNext}
+            // with a review step still to rebuild, the review says where
+            // next; Next step went along the path
+            onNext={review && !reviewDone ? null : onNext}
           />
         )}
-        {review && !reviewDone && (
+        {review && !reviewFirst && (
           <div className="border-t border-line pt-3">
             <ReviewPanel here={here} review={review} />
           </div>
@@ -712,7 +733,7 @@ function StepArea({
                   {st.title}
                 </div>
               </div>
-              {st.mode === "play" && (
+              {st.mode === "play" && !fromMemory(st) && (
                 <Toggle
                   value={centre === "play" ? "play" : "step"}
                   options={[

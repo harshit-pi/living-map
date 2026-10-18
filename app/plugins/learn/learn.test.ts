@@ -17,7 +17,10 @@ import {
   caseEdges,
   caseShape,
   cleanModel,
+  coord,
+  COORD,
   HIDDEN,
+  hiddenEnd,
   creditOf,
   DAY,
   dueOf,
@@ -31,10 +34,12 @@ import {
   keysIn,
   lastVisit,
   linkParts,
+  livePredict,
   localDay,
   markRecall,
   matchPart,
   mixedOrder,
+  movePart,
   namedKeys,
   newItems,
   newState,
@@ -44,6 +49,7 @@ import {
   outlineOf,
   paraphrases,
   placePart,
+  predictTold,
   record,
   redactLinks,
   relinkParts,
@@ -73,7 +79,7 @@ import {
 } from "./core.ts";
 import fixture from "./prompts.fixture.json" with { type: "json" };
 import { learn } from "./server.ts";
-import { verbsFor, type Verb } from "./shared.ts";
+import { offersCase, verbsFor, type Verb } from "./shared.ts";
 import {
   blocked,
   drawn,
@@ -767,7 +773,17 @@ test("credit: fixed after a check with no hint is yours; a hint or a link shown 
   assert.equal(creditOf(b), "hints");
   b.shown.push("l3");
   assert.equal(creditOf(b), "shown");
-  assert.equal(outcomes(m, { ...b, hints: [], shown: [] }).l3.how, "hinted");
+  // on the schedule it was fixed after the check, not hinted: no hint was
+  // taken (it read "by you → hinted" after a Reverse)
+  assert.equal(outcomes(m, { ...b, hints: [], shown: [] }).l3.how, "fixed");
+  assert.equal(
+    outcomes(m, { ...b, hints: [{ link: "l3", rung: 1 }], shown: [] }).l3.how,
+    "hinted",
+  );
+  const item = newItems(m, noon(0)).find((i) => i.ref === "l3")!;
+  record(item, "fixed", noon(1));
+  assert.equal(item.box, 1, "fixed keeps the box, as hinted does");
+  assert.equal(item.due, noon(1) + DAY);
 });
 
 test("verbs: the ones Claude names for the subject, the ones its links use, filled to six from their families", () => {
@@ -1361,22 +1377,24 @@ test("view: no accept list, rubric, unasked hint, affected list, predict answer 
   assert.equal(see.predict?.right, null);
   assert.equal(at("build").steps[0].worked, null);
   assert.equal(at("why").steps[0].worked, null);
-  // a predict about the from end ("which cell becomes the Memory B cell?")
-  // hides that end, not the other one
+  // a predict about the from end ("which cell gives the B cell its go
+  // signal?") hides that end, not the other one (one whose answer "B cell"
+  // sat inside "Memory B cell" on screen is not asked: livePredict)
   mo.predict = {
     ...mo.predict!,
-    ask: "Which cell turns into the one still there on day 60?",
-    choices: [{ text: "B cell" }, { text: "Plasma cell" }],
-    answer: "B cell",
+    ask: "Which cell gives the go signal on day 5?",
+    choices: [{ text: "Helper T cell" }, { text: "Plasma cell" }],
+    answer: "Helper T cell",
+    hides: "l3",
   };
   const from = at("see").steps[0].worked!;
   assert.equal(from.hidden, HIDDEN);
-  assert.ok(!from.parts.some((p) => p.id === "bcell"));
-  assert.equal(from.parts.find((p) => p.id === "memb")?.label, "Memory B cell");
+  assert.ok(!from.parts.some((p) => p.id === "helpert"));
+  assert.equal(from.parts.find((p) => p.id === "bcell")?.label, "B cell");
   // the links that touch it point at the hidden name
   assert.ok(from.links.some((l) => l.to === HIDDEN || l.from === HIDDEN));
   // a case line that names the answer is held back while the question is open
-  mo.case = "the B cell turns, on day 9, into the cell still there on day 60";
+  mo.case = "the Helper T cell gives its signal on day 5, and a cell lasts";
   assert.equal(at("see").steps[0].case, "");
   mo.case = "days 0-14, a virus you have never met";
   assert.equal(at("see").steps[0].case, mo.case);
@@ -2872,4 +2890,394 @@ test("the mode does not switch while a move runs: the next click could land on a
     {},
   );
   assert.equal(m.purpose, "explore");
+});
+
+// ---------------------------------------------------------------- QA round 5
+
+test("predict: the '?' is the end the answer names, and a part left on screen that names the answer drops the predict", () => {
+  // merge sort: the answer names "One-item list", the from end of its link
+  const ms = cleanModel({
+    step: "s1",
+    id: "ms",
+    parts: [
+      { id: "split", label: "Split", role: "" },
+      { id: "halves", label: "Two halves", role: "" },
+      { id: "base", label: "One-item list", role: "" },
+      { id: "merge", label: "Merge", role: "" },
+    ],
+  })!;
+  addLinks(ms, [
+    { id: "l1", from: "split", to: "halves", rel: "makes" },
+    { id: "l4", from: "base", to: "split", rel: "prevents", key: true },
+    { id: "l5", from: "halves", to: "merge", rel: "sends to" },
+  ]);
+  setPredict(ms, {
+    ask: "What makes the method stop cutting?",
+    choices: ["Reaching a one-item list", "Reaching a two-item list"],
+    answer: "Reaching a one-item list",
+    hides: "l4",
+  });
+  assert.equal(hiddenEnd(ms), "base");
+  assert.equal(predictTold(ms), false);
+  // "ATP synthase makes ?" beside "what carries the energy… ATP?"
+  const atp = cleanModel({
+    step: "s1",
+    id: "atp",
+    parts: [
+      { id: "atpsyn", label: "ATP synthase", role: "" },
+      { id: "atp", label: "ATP", role: "" },
+      { id: "calvin", label: "Calvin cycle", role: "" },
+      { id: "nadph", label: "NADPH", role: "" },
+    ],
+  })!;
+  addLinks(atp, [
+    { id: "l4", from: "atpsyn", to: "atp", rel: "makes" },
+    { id: "l5", from: "atp", to: "calvin", rel: "sends to", key: true },
+    { id: "l6", from: "nadph", to: "calvin", rel: "sends to", key: true },
+  ]);
+  setPredict(atp, {
+    ask: "Besides NADPH, what carries the energy into the sugar-building enzymes?",
+    choices: ["ATP", "Glucose"],
+    answer: "ATP",
+    hides: "l5",
+  });
+  assert.equal(hiddenEnd(atp), "atp");
+  assert.equal(predictTold(atp), true);
+  // one settled before this was checked is not asked
+  assert.equal(livePredict(atp), undefined);
+  assert.equal(livePredict(ms), ms.predict);
+  assert.equal(
+    scrub(atp, { title: "Light to energy", summary: "" }).predict,
+    true,
+  );
+  assert.equal(atp.predict, undefined);
+  // the fixture's predict stays: "B cell" does not name "Memory B cell"
+  const m = model();
+  assert.equal(predictTold(m), false);
+  assert.equal(hiddenEnd(m), "memb");
+});
+
+test("clean: a role that names another part by a word of its own is left out", () => {
+  const m = cleanModel({
+    step: "s1",
+    parts: [
+      {
+        id: "senate",
+        label: "Senate",
+        role: "council of landowners that refused veterans settlements",
+      },
+      {
+        id: "grants",
+        label: "Veteran land grants",
+        role: "farms for soldiers",
+      },
+      { id: "loyal", label: "Army loyalty", role: "whom the army follows" },
+      { id: "pay", label: "Army pay", role: "coins each month" },
+    ],
+  })!;
+  assert.equal(m.parts[0].role, "");
+  assert.equal(m.parts[1].role, "farms for soldiers");
+  // "army" is in two labels: it names neither
+  assert.equal(m.parts[2].role, "whom the army follows");
+});
+
+test("grade: the right pair with a verb from another family is the right pair with another verb, not '?'", () => {
+  const m = model();
+  const b = linksOf(startBuild(m, 2), [["helpert", "bcell", "sends to"]]);
+  const r = grade(m, b);
+  assert.equal(r.marks[0].mark, "family");
+  assert.equal(r.extra, 0);
+  assert.equal(r.pass, false, "never a pass for a key link");
+});
+
+test("Show one link replaces your try at it, and keeps a link of yours that says something else", () => {
+  const m = model();
+  const b = startBuild(m, 1);
+  // a try at l3 (reversed, its family's verb) and a claim of its own on the
+  // pair of l4 (the other way, another family)
+  linksOf(b, [
+    ["bcell", "helpert", "activates"],
+    ["memb", "bcell", "prevents"],
+  ]);
+  b.checks = 1;
+  const first = showOneLink(m, b);
+  assert.ok(
+    typeof first !== "string" && "link" in first && first.link.id === "l3",
+  );
+  assert.ok(!b.links.some((l) => l.from === "bcell" && l.to === "helpert"));
+  const second = showOneLink(m, b);
+  assert.ok(
+    typeof second !== "string" && "link" in second && second.link.id === "l4",
+  );
+  assert.ok(
+    b.links.some((l) => l.from === "memb" && l.to === "bcell" && !l.given),
+    "the learner's own link stays",
+  );
+});
+
+test("place and move: a spot is clamped to the canvas, and a part keeps its place in its slot", () => {
+  const m = model({
+    frame: {
+      kind: "boxes",
+      boxes: [
+        { id: "x", label: "X" },
+        { id: "y", label: "Y" },
+      ],
+    },
+    parts: PARTS.map((p) => ({ ...p, slot: "x" })),
+  });
+  const b = startBuild(m, 2);
+  assert.equal(
+    placePart(m, b, "virus", { x: 1e308, y: "abc", slot: "x" }),
+    null,
+  );
+  const v = b.placed[0];
+  assert.equal(v.x, COORD);
+  assert.equal(typeof v.y, "number");
+  assert.ok(Number.isFinite(v.y));
+  movePart(m, b, "virus", { x: -1e308 });
+  assert.equal(v.x, -COORD);
+  assert.equal(coord(Number.NaN), undefined);
+  // dropped higher in the box than the ones there, a new part comes last
+  placePart(m, b, "dendritic", { x: 0, y: 500, slot: "x" });
+  const before = drawn(
+    m.frame,
+    b.placed.map((p) => ({ ...p, id: p.part })),
+    7,
+  );
+  placePart(m, b, "helpert", { x: 0, y: -400, slot: "x" });
+  const after = drawn(
+    m.frame,
+    b.placed.map((p) => ({ ...p, id: p.part })),
+    7,
+  );
+  assert.deepEqual(after.virus, before.virus);
+  assert.deepEqual(after.dendritic, before.dendritic);
+  // moved to another box, it comes last there; back again, last again
+  movePart(m, b, "virus", { slot: "y" });
+  movePart(m, b, "virus", { slot: "x" });
+  const order = b.placed
+    .filter((p) => p.slot === "x")
+    .sort((p, q) => p.n! - q.n!)
+    .map((p) => p.part);
+  assert.deepEqual(order, ["dendritic", "helpert", "virus"]);
+});
+
+test("canvas: a lane holds its parts on spots in rows, sized for its share, so a drop neither widens nor moves it", () => {
+  const lanes = ["Stroma", "Membrane", "Lumen"];
+  const frame = { kind: "lanes" as const, lanes };
+  const rs = regions(frame, 0, 8);
+  // three to a row: 8 parts in 3 lanes fit 1440 at a readable size
+  assert.ok(rs[0].w <= 900, `${rs[0].w}`);
+  const parts = Array.from({ length: 3 }, (_, i) => ({
+    id: `p${i}`,
+    x: 0,
+    y: 0,
+    slot: "Stroma",
+    n: i + 1,
+  }));
+  const a = drawn(frame, parts, 8);
+  const far = drawn(
+    frame,
+    [...parts, { id: "p3", x: 2000, y: 0, slot: "Membrane", n: 4 }],
+    8,
+  );
+  for (const p of parts) assert.deepEqual(far[p.id], a[p.id], p.id);
+  assert.deepEqual(
+    regions(
+      frame,
+      spanOf(frame, [...parts, { x: 2000, y: 0, slot: "Membrane" }]),
+      8,
+    ),
+    rs,
+    "the frame keeps its size",
+  );
+  // every spot sits inside its lane, and a fourth part in a lane takes a
+  // row of its own
+  const four = drawn(
+    frame,
+    [...parts, { id: "p3", x: 0, y: 0, slot: "Stroma", n: 4 }],
+    8,
+  );
+  const grown = regions(frame, 4, 8)[0];
+  assert.ok(four.p3.y > four.p0.y);
+  assert.ok(four.p3.y + NODE_H <= grown.y + grown.h);
+  assert.equal(slotAt(frame, four.p3, 4, 8), "Stroma");
+});
+
+test("canvas: between diagonal neighbours a link turns through the gap rather than run through a part", () => {
+  // two rows of three: top left to bottom right, past the top middle part
+  const at: Record<string, At> = {};
+  for (let k = 0; k < 6; k++)
+    at[`p${k}`] = { x: (k % 3) * (NODE_W + 48), y: Math.floor(k / 3) * 110 };
+  for (const [a, b] of [
+    ["p0", "p5"],
+    ["p2", "p3"],
+    ["p0", "p4"],
+  ]) {
+    const r = route(a, b, at, "enables");
+    assert.equal(
+      blocked(a, b, at, r, ""),
+      false,
+      `${a} → ${b}: ${JSON.stringify(r)}`,
+    );
+  }
+});
+
+test("canvas: a label keeps off another link's line and off labels a few pixels away", () => {
+  const at: Record<string, At> = {
+    a: { x: 0, y: 0 },
+    b: { x: 400, y: 0 },
+    c: { x: 200, y: -160 },
+    d: { x: 200, y: 160 },
+  };
+  const seen = nothingDrawn();
+  const ab = route("a", "b", at, "causes", 0, seen);
+  const abLine = pathOf(at.a, at.b, ab).pts;
+  const cd = route("c", "d", at, "causes", 0, seen);
+  const c = pathOf(at.c, at.d, cd).label;
+  const w = labelWidth("causes");
+  // the second label is not on the first link's line
+  const onLine = abLine.slice(1).some((q, i) => {
+    const p = abLine[i];
+    const y = p.y + ((q.y - p.y) * (c.x - p.x)) / (q.x - p.x || 1);
+    return (
+      Math.min(p.x, q.x) <= c.x + w / 2 &&
+      Math.max(p.x, q.x) >= c.x - w / 2 &&
+      Math.abs(y - c.y) < 9
+    );
+  });
+  assert.equal(onLine, false);
+});
+
+test("explain while you build: a line about a part that names a key link keeps the part's name", () => {
+  const m = model();
+  const text = [
+    '- "Helper T cell": gives the go signal.',
+    "- **B cell**: the one a Helper T cell activates, later a Memory B cell.",
+    '- "Plasma cell": a factory that lives for days.',
+  ].join("\n");
+  const out = redactLinks(m, text);
+  assert.match(out, /"B cell": left out here/);
+  assert.doesNotMatch(out, /activates/);
+  assert.equal(out.split("\n").filter((l) => l.startsWith("- ")).length, 3);
+});
+
+test("review: a what-if got wrong while sure brings back no link's refutation, nor a misconception of another pair", async () => {
+  const { m, s } = buildMap();
+  const mo = s.models["m-s1"];
+  for (const i of newItems(mo, noon(0))) s.items[i.id] = i;
+  const wi = whatifItem(mo, noon(0))!;
+  wi.refute = true;
+  s.items[wi.id] = wi;
+  s.items[`${mo.id}:l3`].refute = true;
+  s.steps.s1 = {
+    stage: "build",
+    help: 1,
+    reviewing: true,
+    rungs: freshRungs(),
+  };
+  s.builds[mo.id] = linksOf(startBuild(mo, 1), KEYS_RIGHT);
+  const { engine } = setup(m);
+  await act(engine, learnAct("check", { step: "s1" }));
+  assert.deepEqual(s.builds[mo.id].last?.refutes, []);
+});
+
+test("level: a step you are looking at keeps its See, and its build starts with the help you picked", async () => {
+  const { m, s } = buildMap(null);
+  s.steps.s1 = {
+    stage: "see",
+    help: 0,
+    predicted: { pick: "Memory B cell", sure: "sure" },
+    rungs: freshRungs(),
+  };
+  const { engine } = setup(m);
+  await act(engine, learnAct("level", { level: "cold" }));
+  assert.equal(s.steps.s1.stage, "see");
+  assert.equal(s.steps.s1.help, 2);
+  await act(engine, learnAct("hide", { step: "s1" }));
+  assert.equal(s.builds["m-s1"].help, 2);
+});
+
+test("a play step: no new case is offered, and its scene stays shut while it is rebuilt from memory", async () => {
+  const { m, s } = buildMap();
+  s.models["m-s2"].mode = "play";
+  s.steps.s2 = {
+    stage: "built",
+    help: 1,
+    rungs: { ...freshRungs(), built: "you" },
+  };
+  applyOps(m, [
+    {
+      op: "scene",
+      step: "s2",
+      spec: { kind: "array", title: "Merge", start: { items: ["1", "3"] } },
+    },
+    { op: "move", step: "s2", ask: "Which first?", answer: { index: 0 } },
+  ]);
+  const { engine, calls } = setup(m);
+  assert.match(
+    (await act(engine, learnAct("newCase", { step: "s2" }))).error ?? "",
+    /no new case/,
+  );
+  assert.equal(calls.length, 0);
+  assert.equal(offersCase(viewOf(s, m.nodes, 0).steps[1]), false);
+  s.steps.s2 = { ...s.steps.s2, stage: "build", reviewing: true };
+  assert.match(
+    (await act(engine, { type: "replay", nodeId: "s2" })).error ?? "",
+    /Rebuild the order first/,
+  );
+  assert.match(
+    (await act(engine, { type: "play", nodeId: "s2", key: "0" })).error ?? "",
+    /Rebuild the order first/,
+  );
+  s.steps.s2.reviewing = false;
+  s.steps.s2.stage = "built";
+  assert.equal(
+    (await act(engine, { type: "play", nodeId: "s2", key: "0" })).error,
+    undefined,
+  );
+});
+
+test("a new build map's root keeps the question you asked as its title", async () => {
+  const { engine, calls } = setup();
+  const started = act(engine, {
+    type: "new",
+    text: "How does photosynthesis turn light into sugar?",
+    purpose: "learn",
+  });
+  await settled(calls, 1);
+  calls[0].release(reply([...PATH_OPS, ...MODEL_OPS("s1")]));
+  await started;
+  const m = engine.state.map!;
+  assert.equal(m.nodes.root.title, m.title);
+  applyOps(
+    m,
+    [{ op: "update", id: "root", title: "How does it make sugar?" }],
+    {
+      clean: (op) => learn.cleanOp!(m, op),
+    },
+  );
+  assert.equal(
+    m.nodes.root.title,
+    "How does photosynthesis turn light into sugar?",
+  );
+});
+
+test("a review starts afresh: the quick rebuild's old result goes", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(noon(3));
+  const { m, s } = buildMap();
+  const mo = s.models["m-s1"];
+  for (const i of newItems(mo, noon(0))) s.items[i.id] = i;
+  s.steps.s1 = {
+    stage: "built",
+    help: 0,
+    recalled: { credit: "you", tries: 1 },
+    rungs: { ...freshRungs(), built: "you" },
+  };
+  const { engine } = setup(m);
+  assert.deepEqual(await act(engine, learnAct("review")), { ok: true });
+  assert.equal(s.steps.s1.recalled, undefined);
+  assert.equal(viewOf(s, m.nodes, noon(3)).steps[0].recalled, null);
 });

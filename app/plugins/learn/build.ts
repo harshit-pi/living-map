@@ -25,6 +25,7 @@ import {
   keysIn,
   linkParts,
   linkWords,
+  livePredict,
   localDay,
   logOutcomes,
   markRecall,
@@ -70,6 +71,7 @@ import {
   FAMILIES,
   FRAME_FAMILIES,
   LEVEL_HELP,
+  offersCase,
   type Level,
   type Stage,
 } from "./shared.ts";
@@ -118,7 +120,7 @@ const MODEL = `MODEL OPS (in the same map block as node ops; write the model op 
 FRAMES: {"kind":"free"} | {"kind":"lanes","lanes":["…"]} (each part has a "slot": its lane) | {"kind":"axis","ticks":["…"]} (order matters; each part's "slot" is its tick) | {"kind":"boxes","boxes":[{"id":"…","label":"…"}]} (each part's "slot" is the box it sits in) | {"kind":"sort","columns":["strong evidence","weak","against"]} (a part's "slot" may be a list when more than one column is fair).
 VERBS ("rel"), by family: ${verbList}. Each frame takes only some families: ${frameVerbs}.
 LAYERS ("layer"): parts · behaviour · function · failure. For a system, the first step is its parts and what each is for, the next how they interact; the why questions are its function and the what-if is its failure.
-RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. A lane, tick, box or column label never holds a part's label or the predict answer ("Right heart side" spells the part "Right heart"). At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it). Each step teaches a new idea or adds to the one before: its key links are never another step's key links (the outline lists them), and its what-if breaks something else. "title" names the case as the learner reads it ("Flu, your first infection"), never the step's layer or a word about the model ("the cast", "the parts").`;
+RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that says what the part IS, never names another part and never says what it does to or gets from one ("refused the veterans' land" on "Senate" is a link, not a role). A lane, tick, box or column label never holds a part's label or the predict answer ("Right heart side" spells the part "Right heart"). At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, nor in the label of any part but the one it names ("ATP synthase" beside a hidden "ATP" answers it), and "hides" names the key link whose end the answer names. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it). Each step teaches a new idea or adds to the one before: its key links are never another step's key links (the outline lists them), and its what-if breaks something else. "title" names the case as the learner reads it ("Flu, your first infection"), never the step's layer or a word about the model ("the cast", "the parts").`;
 
 const WHY = `WHY on a key link: judge the learner's answer against that link's rubric (in the outline). The words do not have to match; the idea does. Write one op: {"op":"why","model":"<model id>","link":"<link id>","state":"right|partial|wrong","say":"at most 30 words"}. If partial or wrong, "say" asks ONE question that leads them on, never the fix. The caption is one short sentence.`;
 
@@ -664,7 +666,9 @@ const level: Act = (ctx, a) => {
   const lv = a?.level as Level;
   if (!Object.hasOwn(LEVEL_HELP, lv)) return err("Pick one of the levels.");
   s.level = lv;
-  // steps not started yet take the new level; nothing you did is undone
+  // steps not started yet take the new level; nothing you did is undone. A
+  // step you are looking at (its predict answered) keeps its See, and its
+  // build starts with the new help: it opened at L0 under "Test me cold".
   for (const p of pathSteps(ctx.map.nodes)) {
     const st = own(s.steps, p.id);
     const m = modelOf(s, p.id);
@@ -680,6 +684,8 @@ const level: Act = (ctx, a) => {
         ...freshStep(lv),
         rungs: st?.rungs ?? freshStep(lv).rungs,
       };
+    else if (st?.stage === "see" && !(m && own(s.builds, m.id)))
+      st.help = LEVEL_HELP[lv];
   }
   const first = topPath(ctx.map)[0];
   if (first && lv !== "new" && modelOf(s, first)?.status === "ready")
@@ -707,7 +713,7 @@ const open: Act = (ctx, a) => {
 const predict: Act = (ctx, a) => {
   const x = at(ctx, a, ["see"]);
   if (fail(x)) return err(x);
-  const p = x.main.predict;
+  const p = livePredict(x.main);
   if (!p) return err("This step has no question to predict.");
   const pick = p.choices.find((c) => c.text === a?.pick)?.text;
   if (!pick) return err("Pick one of the answers.");
@@ -720,7 +726,12 @@ const predict: Act = (ctx, a) => {
 const hide: Act = (ctx, a) => {
   const x = at(ctx, a, ["see"]);
   if (fail(x)) return err(x);
-  if (x.main.predict && !x.st.predicted && !x.st.shownModel && !x.st.onCase)
+  if (
+    livePredict(x.main) &&
+    !x.st.predicted &&
+    !x.st.shownModel &&
+    !x.st.onCase
+  )
     return err("Pick an answer first.");
   x.st.stage = "build";
   if (x.st.shownModel) {
@@ -760,19 +771,23 @@ const check: Act = (ctx, a) => {
   const x = at(ctx, a, ["build"]);
   if (fail(x)) return err(x);
   const b = buildOf(x);
-  // an item you got wrong while sure last time: its refutation, right after the check
+  // A key link you got wrong while sure last time: the refutation of the
+  // misconception on its two parts, right after the check. Only a key link's
+  // (a rebuild answers those; a what-if is asked again on the built step),
+  // and only its own: falling back to the first misconception, a what-if
+  // got wrong while sure brought back a predict's claim, said as "a link
+  // that did not hold".
   const refutes: string[] = [];
   for (const i of itemsOf(x.s, x.main.id))
-    if (i.refute && x.m === x.main) {
+    if (i.refute && i.kind === "link" && x.m === x.main) {
       const l = x.main.links.find((y) => y.id === i.ref);
-      const mc =
-        x.main.miscon.find(
-          (y) =>
-            y.link &&
-            l &&
-            [y.link.from, y.link.to].sort().join() ===
-              [l.from, l.to].sort().join(),
-        ) ?? x.main.miscon[0];
+      const mc = x.main.miscon.find(
+        (y) =>
+          y.link &&
+          l &&
+          [y.link.from, y.link.to].sort().join() ===
+            [l.from, l.to].sort().join(),
+      );
       if (mc && !refutes.includes(mc.refute)) refutes.push(mc.refute);
       delete i.refute;
     }
@@ -964,6 +979,10 @@ const argue: Act = async (ctx, a) => {
 const newCase: Act = (ctx, a) => {
   const x = at(ctx, a, ["built"]);
   if (fail(x)) return err(x);
+  if (!offersCase(x.main))
+    return err(
+      "A step played as a scene has no new case: its order is the same on any case.",
+    );
   if (ctx.engine.isQueuedOrRunning(x.step, NEW_CASE)) return {};
   const { s, step, main } = x;
   return writeModel(ctx, {
@@ -1090,6 +1109,9 @@ const review: Act = (ctx) => {
     st.reviewing = true;
     st.onCase = false;
     st.stage = "build";
+    // the quick rebuild's result is of its day: kept, it headed the card
+    // once this review's rebuild passed, over the review's own result
+    delete st.recalled;
     st.help = helpFor(itemsOf(s, m.id), st.recallWrong);
     st.recallWrong = false;
     s.builds[m.id] = startBuild(m, st.help);
@@ -1175,6 +1197,15 @@ export const BUILD_ACTIONS: Record<string, Act> = {
   practise,
 };
 
+// A step being rebuilt from memory (a review, a quick rebuild): its scene
+// acts out the very order you are rebuilding, so it is not played until the
+// rebuild is checked (replayed in a review, it gave the subgoals away and the
+// rebuild still counted "by you").
+export function rebuilding(map: StoredMap, step: string): boolean {
+  const st = own(state(map)?.steps ?? {}, step);
+  return !!st && st.stage === "build" && !!(st.reviewing || st.recall);
+}
+
 // the actions only a build-mode map takes (hint and deeper are shared with
 // the classic screen, which sends them as core actions)
 export const isBuildMap = (map: StoredMap) => !!state(map);
@@ -1207,6 +1238,14 @@ function building(
 // reaches the map. The outline already asks for that; this holds when the
 // reply does not.
 export function cleanBuildOp(map: StoredMap, op: Raw): void | false {
+  // The root is the topic, and on a build map it keeps the map's own title,
+  // the question you asked: the rail read "How does photosynthesis make
+  // sugar?" under a header that said "…turn light into sugar?".
+  if (state(map) && typeof op?.title === "string" && map.title.trim()) {
+    const root = Object.values(map.nodes).find((n) => !n.parent);
+    if (root ? op.id === root.id : op.op === "add" && !op.parent)
+      op.title = map.title;
+  }
   const at = building(map, typeof op?.id === "string" ? op.id : null);
   if (!at) return;
   // a note added under a step is never on Learn's screen (its reply said

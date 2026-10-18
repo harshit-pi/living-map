@@ -27,6 +27,7 @@ import {
 
 import {
   drawn,
+  labelWidth,
   looseZone,
   NODE_H,
   NODE_W,
@@ -85,6 +86,43 @@ type RegionData = { label: string; loose: boolean; wide: boolean };
 
 const SIDES = ["top", "right", "bottom", "left"] as const;
 const hidden = "!h-2 !w-2 !min-w-0 !border-0 !bg-transparent";
+
+// A part's handles and size said up front. React Flow draws a link only once
+// both its parts have been measured, and a part that came in with a canvas
+// already drawn (the predict's answer revealed, a step opened after Hide it)
+// could stay unmeasured: its links were missing until a reload. The routed
+// edge draws its own line from where the parts sit, so these only let it be
+// drawn.
+const HANDLES = [
+  {
+    id: "top",
+    type: "source" as const,
+    position: Position.Top,
+    x: NODE_W / 2,
+    y: 0,
+  },
+  {
+    id: "right",
+    type: "source" as const,
+    position: Position.Right,
+    x: NODE_W,
+    y: NODE_H / 2,
+  },
+  {
+    id: "bottom",
+    type: "source" as const,
+    position: Position.Bottom,
+    x: NODE_W / 2,
+    y: NODE_H,
+  },
+  {
+    id: "left",
+    type: "source" as const,
+    position: Position.Left,
+    x: 0,
+    y: NODE_H / 2,
+  },
+];
 
 function PartNode({ data }: NodeProps<Node<PartData>>) {
   const ring =
@@ -155,6 +193,13 @@ function PartNode({ data }: NodeProps<Node<PartData>>) {
   );
 }
 
+// nothing on screen: the room the links and their labels take, so a fit
+// frames them too (a label on an arc out past the parts was cut at the
+// canvas's edge)
+function ExtentNode() {
+  return null;
+}
+
 function RegionNode({ data }: NodeProps<Node<RegionData>>) {
   return (
     <div
@@ -169,7 +214,7 @@ function RegionNode({ data }: NodeProps<Node<RegionData>>) {
   );
 }
 
-const nodeTypes = { part: PartNode, region: RegionNode };
+const nodeTypes = { part: PartNode, region: RegionNode, extent: ExtentNode };
 
 // A link drawn on the line route (frame.ts) chose, with its label where the
 // route put it: React Flow's own step edges bend their own way, and a route
@@ -181,6 +226,8 @@ type RoutedData = {
   path: string;
   lx: number;
   ly: number;
+  // what the link takes up, its label's box included
+  box: Box;
   onLabel?: (e: ReactMouseEvent) => void;
 };
 function RoutedEdge({
@@ -257,9 +304,22 @@ function edgeOf(
   const r = route(from, to, at, label, nth, seen, within);
   const { pts, label: c } = pathOf(at[from], at[to], r);
   const color = TONE[tone];
+  const lw = label ? labelWidth(label) / 2 : 0;
+  const xs = [...pts.map((p) => p.x), c.x - lw, c.x + lw];
+  const ys = [
+    ...pts.map((p) => p.y),
+    c.y - (label ? 9 : 0),
+    c.y + (label ? 9 : 0),
+  ];
+  const box = {
+    x: Math.min(...xs),
+    y: Math.min(...ys),
+    w: Math.max(...xs) - Math.min(...xs),
+    h: Math.max(...ys) - Math.min(...ys),
+  };
   return {
     type: "routed",
-    data: { path: pathD(pts), lx: c.x, ly: c.y },
+    data: { path: pathD(pts), lx: c.x, ly: c.y, box },
     id,
     source: from,
     target: to,
@@ -286,8 +346,9 @@ function labelMark(r: Region, frame: StepView["frame"]): Box {
   };
 }
 
-// a popover's spot; `up`: its bottom edge, from the canvas's bottom
-type Spot = At & { up?: number };
+// a popover's spot; `up`: its bottom edge, from the canvas's bottom;
+// `room`: the most it may be tall and stay in the window
+type Spot = At & { up?: number; room: number };
 type Pop =
   | { kind: "verb"; from: string; to: string; at: Spot }
   | { kind: "link"; id: string; at: Spot }
@@ -523,6 +584,9 @@ export function BuildCanvas({
         type: "part",
         position: at[p.id],
         measured: sizes[`${canvas}:${p.id}`],
+        handles: HANDLES,
+        initialWidth: NODE_W,
+        initialHeight: NODE_H,
         draggable: mode === "build",
         data: {
           label: p.label,
@@ -547,7 +611,7 @@ export function BuildCanvas({
     }),
   ];
 
-  const edges: Edge[] = [];
+  const edges: Edge<RoutedData>[] = [];
   // what is drawn so far, which each next link keeps off
   const seen = nothingDrawn(zones.map((r) => labelMark(r, frame)));
   // the slot a link's two ends both sit in, if they do
@@ -633,19 +697,56 @@ export function BuildCanvas({
             "a hinted link to",
           );
   }
+  const spans = edges.flatMap((ed) => (ed.data ? [ed.data.box] : []));
+  if (spans.length) {
+    const x = Math.min(...spans.map((b) => b.x));
+    const y = Math.min(...spans.map((b) => b.y));
+    const w = Math.max(...spans.map((b) => b.x + b.w)) - x;
+    const h = Math.max(...spans.map((b) => b.y + b.h)) - y;
+    nodes.push({
+      id: "extent",
+      type: "extent",
+      position: { x, y },
+      width: w,
+      height: h,
+      measured: { width: w, height: h },
+      data: {},
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      focusable: false,
+      style: { pointerEvents: "none" },
+      zIndex: -2,
+    });
+  }
 
-  // where a popover opens: at the click, kept inside the canvas; one low on
-  // the canvas opens upward, so its last row is not cut off by the window
-  // and it stays clear of the message box
+  // Where a popover opens: at the click, kept inside the canvas and the
+  // window; one low on the part of the canvas in view opens upward, so its
+  // last row is not cut off and it stays clear of the message box. It is
+  // never taller than the room it has, and scrolls inside: a link editor
+  // ran 40px past the window's foot, its Argue for it out of reach.
   const where = (e: { clientX: number; clientY: number }): Spot => {
     const r = box.current?.getBoundingClientRect();
-    if (!r) return { x: 40, y: 40 };
+    if (!r) return { x: 40, y: 40, room: 300 };
     const x = Math.max(8, Math.min(e.clientX - r.left, r.width - 240));
     const y = e.clientY - r.top;
-    return y > r.height / 2
-      ? { x, y, up: Math.max(8, r.height - y) }
-      : { x, y: Math.max(8, y) };
+    const seen = Math.min(r.height, window.innerHeight - r.top);
+    return y > seen / 2
+      ? { x, y, up: Math.max(8, r.height - y), room: Math.max(120, y - 8) }
+      : { x, y: Math.max(8, y), room: Math.max(120, seen - y - 8) };
   };
+
+  // Escape lets go of a part picked to link from, and closes a popover
+  // (only a click on the empty canvas did)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setPick(null);
+      setPop(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const onDrop = (e: DragEvent) => {
     const part = e.dataTransfer.getData(PART_DRAG);
@@ -947,12 +1048,9 @@ function Popover({
       className="absolute z-30 max-h-[calc(100%-16px)] w-[230px] overflow-y-auto rounded-xl bg-surface p-2.5 shadow-lg ring-1 ring-line"
       style={
         at.up !== undefined
-          ? { left: at.x, bottom: at.up }
-          : { left: at.x, top: at.y }
+          ? { left: at.x, bottom: at.up, maxHeight: at.room }
+          : { left: at.x, top: at.y, maxHeight: at.room }
       }
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
     >
       <button
         onClick={onClose}

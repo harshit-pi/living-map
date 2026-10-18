@@ -19,6 +19,7 @@ import {
   cleanBuildOp,
   enterBuild,
   isBuildMap,
+  rebuilding,
   startBuildMap,
   watched,
 } from "./build.ts";
@@ -163,6 +164,7 @@ function buildScene(
 ): Promise<ActionResult> | ActionResult {
   const found = ctx.node(nodeId);
   if (!found) return { error: "No such step." };
+  if (rebuilding(ctx.map, nodeId)) return { error: REBUILDING };
   // on a build map the scene is played on the step's own case, which its
   // model, its Why and its feedback are about (it was played on another)
   return ctx.engine.turn(
@@ -187,6 +189,9 @@ function finishScene(ctx: Ctx, node: MapNode, p: Play) {
   );
 }
 
+const REBUILDING =
+  "Rebuild the order first: the scene comes back once it is checked.";
+
 function advance(
   ctx: Ctx,
   nodeId: string,
@@ -195,6 +200,7 @@ function advance(
   const scene = ctx.map.scenes[nodeId];
   const node = ctx.map.nodes[nodeId];
   if (!scene || !node) return { error: "No scene on that step." };
+  if (rebuilding(ctx.map, nodeId)) return { error: REBUILDING };
   const before = ctx.map.play[nodeId] ?? newPlay();
   const p = step(before);
   ctx.map.play[nodeId] = p;
@@ -215,6 +221,7 @@ const show = (ctx: Ctx, nodeId: string) =>
 
 function replay(ctx: Ctx, nodeId: string): ActionResult {
   if (!ctx.map.scenes[nodeId]) return { error: "No scene on that step." };
+  if (rebuilding(ctx.map, nodeId)) return { error: REBUILDING };
   ctx.map.play[nodeId] = newPlay();
   ctx.engine.push();
   return {};

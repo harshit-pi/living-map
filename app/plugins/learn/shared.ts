@@ -116,6 +116,13 @@ export function slotsOf(frame: Frame): string[] {
 // sort column it sits in is marked and does not.
 export const orderStops = (f: Frame): boolean => f.kind === "axis";
 
+// A play step's model is the method's subgoal order, the same on any input:
+// a new case of it can only be the original renamed, which the shape check
+// refuses, so it is not offered (two paid moves ended "did not hold
+// together").
+export const offersCase = (m: { mode: "build" | "play" }): boolean =>
+  m.mode !== "play";
+
 export type Layer = "parts" | "behaviour" | "function" | "failure";
 export const LAYERS: readonly Layer[] = [
   "parts",
@@ -143,11 +150,17 @@ export type Level = "new" | "some" | "cold";
 export const LEVEL_HELP: Record<Level, Help> = { new: 0, some: 1, cold: 2 };
 
 export type Stage = "see" | "build" | "why" | "built";
+
+// a review's due steps come back shuffled; from this many they are never in
+// path order (two may come back as they were, so nothing promises a mix)
+export const MIXED_FROM = 3;
 // kept apart everywhere: only "you" moves a review item up a box
 export type Credit = "you" | "hints" | "shown";
 export type Sure = "guess" | "fairly" | "sure";
 export const SURES: readonly Sure[] = ["guess", "fairly", "sure"];
-export type How = "unaided" | "hinted" | "shown" | "wrong";
+// fixed: right after a check said it was not, with no hint taken (the
+// schedule treats it as hinted: only unaided moves an item up)
+export type How = "unaided" | "hinted" | "fixed" | "shown" | "wrong";
 export type Rung = "built" | "why" | "whatif" | "case" | "kept";
 export const RUNGS: readonly Rung[] = [
   "built",
@@ -160,8 +173,8 @@ export type WhyState = "right" | "partial" | "wrong" | "shown";
 
 // ---------------------------------------------------------------- a check
 
-// right · reversed (the right pair the wrong way) · family (the right pair, a
-// verb from the same family: half credit) · miscon (a known misconception) ·
+// right · reversed (the right pair the wrong way) · family (the right pair,
+// another verb: half credit) · miscon (a known misconception) ·
 // extra (not in Claude's model: never wrong, and you may argue for it)
 export type Mark = "right" | "reversed" | "family" | "miscon" | "extra";
 
@@ -229,6 +242,8 @@ export type PlacedView = PartView & {
   x: number;
   y: number;
   slot?: string;
+  // the order it came into its slot, which it keeps there
+  n?: number;
 };
 export type LinkView = {
   id: string;

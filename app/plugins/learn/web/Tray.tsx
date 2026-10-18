@@ -19,11 +19,15 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
   const loose =
     st.frame.kind === "free" ? 0 : st.placed.filter((p) => !p.slot).length;
 
+  // The box empties once a name is placed, but only of that name: typed
+  // straight after Enter, the next one was wiped when the reply came.
+  const clear = (sent: string) => setText((cur) => (cur === sent ? "" : cur));
   const send = async () => {
-    const t = text.trim();
+    const sent = text;
+    const t = sent.trim();
     if (!t) return;
     const r = await act("type", { step, text: t, ...spot() });
-    if (r.ok) setText("");
+    if (r.ok) clear(sent);
   };
 
   return (
@@ -69,9 +73,10 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
                       <button
                         key={label}
                         onClick={() => {
+                          const sent = text;
                           void act("pick", { step, label, ...spot() }).then(
                             (r) => {
-                              if (!r.error) setText("");
+                              if (!r.error) clear(sent);
                             },
                           );
                         }}

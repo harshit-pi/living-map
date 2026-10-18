@@ -220,8 +220,8 @@ function Counts({ st }: { st: StepView }) {
       )}
       {c.family > 0 && (
         <div>
-          {plural(c.family, "link has", "links have")} the right pair with a
-          near verb ~
+          {plural(c.family, "link has", "links have")} the right pair with
+          another verb ~
         </div>
       )}
       {wrongSlots > 0 && (
@@ -321,7 +321,9 @@ export function CheckFindings({
     <div className="text-[11.5px] leading-snug text-muted">
       A reply of Claude's named{" "}
       {st.told === 1 ? "a key link" : `${st.told} key links`} of this step:{" "}
-      {st.told === 1 ? "it counts" : "they count"} as hinted.
+      {/* "it counts as hinted" sat beside "Built · shown" */}
+      {st.told === 1 ? "it no longer counts" : "they no longer count"} as by
+      you.
     </div>
   );
   if (!c) return told || null;

@@ -158,7 +158,7 @@ export const helpLine = (st: StepView): string => {
 export const MARK: Record<Mark, { sym: string; word: string }> = {
   right: { sym: "✓", word: "right" },
   reversed: { sym: "↔", word: "points the wrong way" },
-  family: { sym: "~", word: "right pair, a near verb" },
+  family: { sym: "~", word: "right pair, another verb" },
   miscon: { sym: "✗", word: "a common mix-up" },
   extra: { sym: "?", word: "not in Claude's model" },
 };

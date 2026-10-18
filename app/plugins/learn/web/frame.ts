@@ -35,6 +35,8 @@ export type Region = {
   y: number;
   w: number;
   h: number;
+  // a lane's parts to a row (laneSpot)
+  per?: number;
 };
 
 // lanes run across, so a lane is a band of height; the axis and sort columns
@@ -53,23 +55,37 @@ const boxHeight = (n: number) =>
 const colHeight = (rows: number) =>
   8 + (Math.max(1, rows) - 1) * ALONG_Y + NODE_H + 24;
 
-// The frame's slots on the canvas, sized to hold what is on it (`span`: how
-// far the parts reach, across for lanes and down for columns; for boxes, the
-// most parts in one box). `n`: every part of the step: a column starts deep
-// enough for its share of them, so it does not grow (and move the waiting
-// zone under it) as they arrive; at 420 deep, five mostly empty ticks made
-// the frame twice the height it needed.
+// A lane holds its parts on spots in rows of two or three, as many as its
+// share of the step's parts. Drawn where each was dropped, a lane ran as
+// wide as its farthest part: a lane step opened at 0.55 with 7px words, and
+// the frame grew and moved with each drop.
+const lanePer = (lanes: number, n: number) =>
+  Math.min(3, Math.max(2, Math.ceil(n / Math.max(1, lanes))));
+const laneH = (rows: number) => LANE_H - 8 + (Math.max(1, rows) - 1) * ALONG_Y;
+
+// The frame's slots on the canvas, sized to hold what is on it (`span`: the
+// most parts in one slot; for columns, how far down they reach). `n`: every
+// part of the step: a column or a lane starts big enough for its share of
+// them, so it does not grow (and move the waiting zone under it) as they
+// arrive; at 420 deep, five mostly empty ticks made the frame twice the
+// height it needed.
 export function regions(frame: Frame, span = 0, n = 0): Region[] {
   switch (frame.kind) {
     case "lanes": {
-      const w = Math.max(640, span + NODE_W + 80);
+      const lanes = frame.lanes.length;
+      const per = lanePer(lanes, n);
+      const share = Math.ceil(n / Math.max(1, lanes));
+      const rows = Math.ceil(Math.max(1, share, span) / per);
+      const w = Math.max(640, 16 + (per - 1) * ALONG_X + NODE_W + 40);
+      const h = laneH(rows);
       return frame.lanes.map((l, i) => ({
         slot: l,
         label: l,
         x: -LANE_LABEL,
-        y: i * LANE_H,
+        y: i * (h + 8),
         w: w + LANE_LABEL,
-        h: LANE_H - 8,
+        h,
+        per,
       }));
     }
     case "axis":
@@ -102,16 +118,15 @@ export function regions(frame: Frame, span = 0, n = 0): Region[] {
   }
 }
 
-// how far the parts reach, so the frame grows to hold them: along a lane,
-// how far across; down a column, its lowest spot (parts stack on spots); for
-// boxes, the most parts in one box
+// how far the parts reach, so the frame grows to hold them: down a column,
+// its lowest spot (parts stack on spots); for lanes and boxes, the most
+// parts in one
 export function spanOf(frame: Frame, at: (At & { slot?: string })[]): number {
-  if (across(frame)) return Math.max(0, ...at.map((p) => p.x));
   const n = new Map<string, number>();
   for (const p of at) if (p.slot) n.set(p.slot, (n.get(p.slot) ?? 0) + 1);
   const most = Math.max(0, ...n.values());
   if (down(frame)) return most ? 8 + (most - 1) * ALONG_Y : 0;
-  if (frame.kind === "boxes") return most;
+  if (frame.kind === "boxes" || across(frame)) return most;
   return 0;
 }
 
@@ -191,15 +206,16 @@ const boxSpot = (r: Region, k: number): At => ({
 });
 
 // Where each placed part is drawn. On a free map, where it is. On a frame,
-// along its slot (a lane's middle line), on a column's or a box's spots, in
-// the order they sit (a part at the box's corner sat on "CONGRESS"), and in
-// the waiting zone when it has no slot, on a spot of its own: its place
-// among the parts placed, so taking one out of the zone moves no other (they
-// moved up a spot after each drop, under the pointer). `n`: every part of
-// the step, which the frame and the waiting zone are sized for.
+// on its lane's, column's or box's spots, in the order they came into it (a
+// part at the box's corner sat on "CONGRESS"; sorted by where each was
+// dropped, a new part went to the top of its box and moved the ones in it),
+// and in the waiting zone when it has no slot, on a spot of its own: its
+// place among the parts placed, so taking one out of the zone moves no other
+// (they moved up a spot after each drop, under the pointer). `n`: every
+// part of the step, which the frame and the waiting zone are sized for.
 export function drawn(
   frame: Frame,
-  placed: (At & { id: string; slot?: string })[],
+  placed: (At & { id: string; slot?: string; n?: number })[],
   n = placed.length,
 ): Record<string, At> {
   const span = spanOf(
@@ -214,36 +230,36 @@ export function drawn(
   }
   const z = looseZone(frame, span, undefined, n)!;
   placed.forEach((p, i) => {
-    const r = p.slot ? rs.find((x) => x.slot === p.slot) : undefined;
-    // in a lane a part sits on the lane's middle line: one a little off it
-    // drew its links slanted, and one at a lane's top edge sat higher than
-    // the rest of its row
-    if (!r) out[p.id] = looseSpot(z, i);
-    else if (across(frame))
-      out[p.id] = { x: Math.max(p.x, 8), y: r.y + (r.h - NODE_H) / 2 };
+    if (!p.slot || !rs.some((x) => x.slot === p.slot))
+      out[p.id] = looseSpot(z, i);
   });
-  // in a column or a box, its parts sit on its spots in the order they are
-  // placed in it (by height, then across): kept where they were dropped,
-  // one hung off the bottom of its box while the check counted it in, a
-  // drop low in a column made the column taller and moved the zone under it
-  if (!across(frame))
-    for (const r of rs)
-      placed
-        .filter((p) => p.slot === r.slot)
-        .sort((a, b) => a.y - b.y || a.x - b.x)
-        .forEach((p, k) => {
-          out[p.id] = down(frame) ? colSpot(r, k) : boxSpot(r, k);
-        });
-  // two parts pulled to one spot along a lane would hide each other: a
-  // later one moves on along it until it is clear
-  const done: At[] = [];
-  for (const p of placed) {
-    const q = out[p.id];
-    if (across(frame) && p.slot)
-      for (let k = 0; k < 40 && !clear(done, q); k++) q.x += NODE_W + GAP;
-    done.push(q);
-  }
+  // in a slot, its parts sit on its spots in the order they came into it
+  // (a part's `n`; parts placed before it had one, by height, then across):
+  // kept where they were dropped, one hung off the bottom of its box while
+  // the check counted it in, a drop low in a column made the column taller
+  // and moved the zone under it
+  for (const r of rs)
+    placed
+      .filter((p) => p.slot === r.slot)
+      .sort((a, b) => (a.n ?? 0) - (b.n ?? 0) || a.y - b.y || a.x - b.x)
+      .forEach((p, k) => {
+        out[p.id] = spotOf(frame, r, k);
+      });
   return out;
+}
+
+// the k-th spot of a slot: along a lane, row by row; down a column; across
+// a box, two to a row. In a lane a part sits on its row's middle line: one
+// a little off it drew its links slanted.
+function spotOf(frame: Frame, r: Region, k: number): At {
+  if (across(frame)) {
+    const per = r.per ?? 3;
+    return {
+      x: 16 + (k % per) * ALONG_X,
+      y: r.y + (LANE_H - 8 - NODE_H) / 2 + Math.floor(k / per) * ALONG_Y,
+    };
+  }
+  return down(frame) ? colSpot(r, k) : boxSpot(r, k);
 }
 
 // the k-th spot down a column
@@ -262,11 +278,7 @@ const clear = (taken: At[], p: At) =>
 // The next free spot in a slot: along a lane, down a column, across a box.
 export function spotIn(frame: Frame, r: Region, taken: At[]): At {
   for (let k = 0; k < 40; k++) {
-    const p = across(frame)
-      ? { x: 16 + k * ALONG_X, y: r.y + (r.h - NODE_H) / 2 }
-      : down(frame)
-        ? colSpot(r, k)
-        : boxSpot(r, k);
+    const p = spotOf(frame, r, k);
     if (clear(taken, p)) return p;
   }
   return { x: r.x + 14, y: r.y + 36 };
@@ -356,15 +368,14 @@ export function tidy(
       y: Math.round(n.y - NODE_H / 2),
     };
   }
-  // a box is as tall as the most parts one box holds, a column as deep
+  // a box is as tall as the most parts one box holds, a column as deep, a
+  // lane as many rows
   const rs = regions(
     frame,
-    across(frame)
-      ? 0
-      : spanOf(
-          frame,
-          parts.map((p) => ({ x: 0, y: 0, slot: p.slot })),
-        ),
+    spanOf(
+      frame,
+      parts.map((p) => ({ x: 0, y: 0, slot: p.slot })),
+    ),
     parts.length,
   );
   if (!rs.length) return fold(free);
@@ -402,12 +413,17 @@ export function tidy(
 // ---------------------------------------------------------------- links
 
 export type Side = "top" | "right" | "bottom" | "left";
-// how a link is drawn: straight between two sides, or as an arc that
-// leaves and enters on one side, that far out; `at`: where along its line
-// (or the arc's outer run) its label sits, half way when not said
+// how a link is drawn: straight between two sides; as an arc that leaves
+// and enters on one side, that far out; or as an elbow from one side to the
+// side facing it, turning between them (through the gap between rows or
+// columns: between diagonal neighbours every straight line and arc ran
+// through a part), half way or `mid` of the way, so two in one gap run side
+// by side; `at`: where along its line (or the arc's outer run, the elbow's
+// middle run) its label sits, half way when not said
 export type Route = (
   | { type: "straight"; source: Side; target: Side }
   | { type: "arc"; side: Side; offset: number }
+  | { type: "elbow"; source: Side; target: Side; mid?: number }
 ) & { at?: number };
 
 const LABEL_H = 18;
@@ -446,6 +462,24 @@ export function pathOf(a: At, b: At, r: Route): { pts: At[]; label: At } {
     const s = handleAt(a, r.source);
     const t = handleAt(b, r.target);
     return { pts: [s, t], label: on(s, t) };
+  }
+  if (r.type === "elbow") {
+    const s = handleAt(a, r.source);
+    const t = handleAt(b, r.target);
+    const k = r.mid ?? 0.5;
+    const my = s.y + (t.y - s.y) * k;
+    const mx = s.x + (t.x - s.x) * k;
+    const [p, q] =
+      r.source === "top" || r.source === "bottom"
+        ? [
+            { x: s.x, y: my },
+            { x: t.x, y: my },
+          ]
+        : [
+            { x: mx, y: s.y },
+            { x: mx, y: t.y },
+          ];
+    return { pts: [s, p, q, t], label: on(p, q) };
   }
   const s = handleAt(a, r.side);
   const t = handleAt(b, r.side);
@@ -504,6 +538,22 @@ export type Box = { x: number; y: number; w: number; h: number };
 const overlap = (a: Box, b: Box) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const card = (p: At): Box => ({ x: p.x, y: p.y, w: NODE_W, h: NODE_H });
+const grow = (b: Box, d: number): Box => ({
+  x: b.x - d,
+  y: b.y - d,
+  w: b.w + 2 * d,
+  h: b.h + 2 * d,
+});
+// whether a straight piece of line runs through a box
+function crosses(p: At, q: At, b: Box): boolean {
+  const n = Math.max(1, Math.ceil(Math.hypot(q.x - p.x, q.y - p.y) / 4));
+  for (let k = 0; k <= n; k++) {
+    const x = p.x + ((q.x - p.x) * k) / n;
+    const y = p.y + ((q.y - p.y) * k) / n;
+    if (x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h) return true;
+  }
+  return false;
+}
 const labelBox = (c: At, label: string): Box => {
   const w = labelWidth(label);
   return { x: c.x - w / 2, y: c.y - LABEL_H / 2, w, h: LABEL_H };
@@ -591,7 +641,12 @@ export function cost(
     len += d;
   }
   let total = through.size * 100 + run * 0.4 + out + len * 0.02;
+  // a line over another link's label hides it
+  for (let i = 1; i < pts.length; i++)
+    for (const l of seen.labels)
+      if (crosses(pts[i - 1], pts[i], l)) total += 30;
   if (r.type === "arc") total += 3;
+  else if (r.type === "elbow") total += r.mid === undefined ? 2 : 3;
   else if (
     // the facing sides read best; another pair of sides only to get clear
     JSON.stringify(facing(at[from], at[to])) !==
@@ -602,8 +657,12 @@ export function cost(
     const box = labelBox(c, label);
     for (const [, o] of parts) if (overlap(box, card(o))) total += 40;
     // two labels on one spot read as neither ("causes ·s", with
-    // "activates" under it): worse than any detour short of a part
-    for (const l of seen.labels) if (overlap(box, l)) total += 90;
+    // "activates" under it): worse than any detour short of a part; two a
+    // few pixels apart at a crossing could not be told apart either
+    for (const l of seen.labels) if (overlap(grow(box, 8), l)) total += 90;
+    // a label on another link's line reads as that link's ("causes" on the
+    // run of the link beside it, by its own "causes")
+    for (const [u, v] of seen.segs) if (crosses(u, v, box)) total += 30;
     for (const m of seen.marks) if (overlap(box, m)) total += 15;
     // the line must show beside its label: between parts stacked close,
     // the label covered all of it and the link read as a stub
@@ -651,6 +710,13 @@ export function blocked(
 }
 
 const SIDES: Side[] = ["top", "right", "bottom", "left"];
+// an elbow leaves by one side and enters by the side facing it
+const ELBOWS: [Side, Side][] = [
+  ["bottom", "top"],
+  ["top", "bottom"],
+  ["right", "left"],
+  ["left", "right"],
+];
 
 // How to draw a link so it reads as linking its own two parts: the
 // cheapest of straight lines between any two sides and arcs out of one
@@ -678,9 +744,23 @@ export function route(
   const tries: Route[] = [
     ...(nth
       ? []
-      : SIDES.flatMap((source) =>
-          SIDES.map((target): Route => ({ type: "straight", source, target })),
-        )),
+      : [
+          ...SIDES.flatMap((source) =>
+            SIDES.map((target): Route => ({
+              type: "straight",
+              source,
+              target,
+            })),
+          ),
+          ...ELBOWS.flatMap(([source, target]) =>
+            [undefined, 0.25, 0.75].map((mid): Route => ({
+              type: "elbow",
+              source,
+              target,
+              ...(mid ? { mid } : {}),
+            })),
+          ),
+        ]),
     ...[30, 54, 84, 120, 170].flatMap((o) =>
       arcs.map((side): Route => ({ type: "arc", side, offset: o + 24 * nth })),
     ),
