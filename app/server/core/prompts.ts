@@ -33,18 +33,40 @@ const THREADS =
 export type Section =
   "diagram" | "scene" | "explain" | "threads" | (string & {});
 
-// a mode's sections go in the order the move lists them
-export function systemPrompt(
+// What a move is told, in two parts. The system prompt is the mode's job and
+// the map ops, the same on every move of a mode, so the provider can start
+// the next call before it is asked (see ModelProvider.warm); the sections
+// this move needs go with its message (`move`). A mode's sections go in the
+// order the move lists them.
+export function promptParts(
   _purpose: Purpose,
   sections: readonly Section[],
   plugin: { prompt: string; sections?: Record<string, string> },
-): string {
-  const parts = [plugin.prompt, OPS];
+): { system: string; move: string } {
+  const extra: string[] = [];
   for (const s of sections)
-    if (plugin.sections?.[s]) parts.push(plugin.sections[s]);
-  if (sections.includes("explain")) parts.push(EXPLAIN);
-  if (sections.includes("threads")) parts.push(THREADS);
-  return parts.join("\n\n");
+    if (plugin.sections?.[s]) extra.push(plugin.sections[s]);
+  if (sections.includes("explain")) extra.push(EXPLAIN);
+  if (sections.includes("threads")) extra.push(THREADS);
+  return {
+    system: [plugin.prompt, OPS].join("\n\n"),
+    move: extra.join("\n\n"),
+  };
+}
+
+// everything a move is told, as one text: the two parts together
+export function systemPrompt(
+  purpose: Purpose,
+  sections: readonly Section[],
+  plugin: { prompt: string; sections?: Record<string, string> },
+): string {
+  const { system, move } = promptParts(purpose, sections, plugin);
+  return move ? `${system}\n\n${move}` : system;
 }
 
 export const viewLine = (view: View): string => VIEW[view] ?? VIEW.visual;
+
+// a move whose words are neither shown nor kept (TurnOptions.quiet): words
+// written outside the map block would be paid for and thrown away
+export const QUIET_VIEW =
+  "VIEW FOR THIS REPLY: the map block only. Write no words before or after it: none of them are shown.";

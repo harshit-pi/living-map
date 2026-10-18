@@ -41,10 +41,10 @@ export async function act(
   const settings = cleanSettings(engine, req.settings);
   switch (req.type) {
     case "stop":
-      await engine.stop();
+      await engine.stop({ release: true });
       return {};
     case "open":
-      return maps.open(engine, req.mapId);
+      return maps.open(engine, req.mapId, settings);
     case "new":
       return maps.start(engine, settings, req.text, req.purpose);
   }

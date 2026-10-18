@@ -12,6 +12,10 @@ export type ModelRequest = {
   effort?: string; // an id from `efforts`, or empty for the provider's default
 };
 
+// what a move is known by before its message is written: a provider may
+// start the next call ahead on these (see warm)
+export type WarmRequest = Omit<ModelRequest, "message">;
+
 export type ModelUsage = {
   input: number;
   output: number;
@@ -28,6 +32,8 @@ export type ModelReply = {
   error?: string;
   // tokens and cost, which some providers report after the reply itself
   usage: Promise<ModelUsage | null>;
+  // the call ran on a process started before it was asked (see warm)
+  warm?: boolean;
 };
 
 export type ModelCall = {
@@ -41,4 +47,10 @@ export interface ModelProvider {
   readonly efforts: Choice[];
   // Streams the reply: `onText` gets everything written so far, every time it grows.
   run(request: ModelRequest, onText: (soFar: string) => void): ModelCall;
+  // Optional: get ready for a call that will likely come next with these
+  // settings (Claude Code starts its process ahead), so it answers sooner.
+  // Costs nothing if it never comes; a call with other settings ignores it.
+  warm?(request: WarmRequest): void;
+  // let go of whatever warm holds (on Stop)
+  release?(): void;
 }

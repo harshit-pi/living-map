@@ -215,6 +215,29 @@ test("bad ids, unknown marks or weights, and over-long text are dropped or cut",
   );
 });
 
+test("a cell op in the short keys the prompt asks for lands as the long ones do", () => {
+  const { map, s } = withWants(boardNodes());
+  const op = (o: Raw) => applyExploreOp(s, map.nodes, o);
+  assert.equal(
+    op({ op: "cell", o: "pg", w: "w-cost", m: "better", n: "cheap to run" }),
+    1,
+  );
+  const short = s.boards.q.cells["pg|w-cost"].claude!;
+  assert.equal(short.mark, "better");
+  assert.equal(short.note, "cheap to run");
+  assert.equal(short.sure, "low", "no fact cited: a guess");
+  op({ op: "cell", o: "pg", w: "w-cost", m: "worse", f: ["f-pg"], s: "high" });
+  const cited = s.boards.q.cells["pg|w-cost"].claude!;
+  assert.deepEqual(
+    [cited.mark, cited.facts, cited.sure],
+    ["worse", ["f-pg"], "high"],
+  );
+  // a long key wins over a short one, and a bad short value is still refused
+  op({ op: "cell", option: "pg", o: "nope", want: "w-cost", m: "same" });
+  assert.equal(s.boards.q.cells["pg|w-cost"].claude!.mark, "same");
+  assert.equal(op({ op: "cell", o: "pg", w: "w-cost", m: "great" }), 0);
+});
+
 test("a cell on a suggestion, on a set-aside option or from another board writes nothing", () => {
   const { map, s } = withWants(boardNodes());
   map.nodes.dyn.dropped = true;
