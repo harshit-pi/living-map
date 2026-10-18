@@ -17,10 +17,12 @@ import {
   caseEdges,
   caseShape,
   cleanModel,
+  cleanText,
   coord,
   COORD,
   HIDDEN,
   hiddenEnd,
+  ideaCards,
   creditOf,
   DAY,
   dueOf,
@@ -88,6 +90,7 @@ import {
   ARGUABLE,
   offersCase,
   placingIsAnswer,
+  showsCase,
   verbsFor,
   type Verb,
 } from "./shared.ts";
@@ -650,6 +653,7 @@ test("pass: on an axis the order is the model; a scrambled one or a part off it 
     parts: PARTS.map((p) => ({ ...p, slot: "Blood" })),
   });
   const lb = linksOf(startBuild(lanes, 1), ALL_RIGHT);
+  for (const p of lb.placed) p.slot = "Blood";
   lb.placed[0].slot = "Lymph node";
   assert.equal(grade(lanes, lb).pass, true);
 });
@@ -1036,18 +1040,33 @@ test("fade: what each help level gives", () => {
     m.parts.map((p) => p.id),
     "in a shuffled order, not the worked layout",
   );
-  // on a frame, L1 puts each part in its slot: Link it tests the links
-  const lanes = model({
-    frame: { kind: "lanes", lanes: ["Blood", "Lymph node"] },
-    parts: PARTS.map((p, i) => ({
-      ...p,
-      slot: i < 2 ? "Blood" : "Lymph node",
-    })),
-  });
-  const l1lanes = startBuild(lanes, 1);
-  assert.ok(l1lanes.placed.every((p) => p.slot));
-  assert.ok(grade(lanes, l1lanes).slots.every((x) => x.ok));
-  // but not on an axis: its ticks are the order, which is the answer
+  // on a frame, L1 places every part beside it, in no slot: which lane or
+  // box a part is in is the answer too (every part started in its own)
+  for (const frame of [
+    { kind: "lanes", lanes: ["Blood", "Lymph node"] },
+    {
+      kind: "boxes",
+      boxes: [
+        { id: "Blood", label: "Blood" },
+        { id: "Lymph node", label: "Lymph node" },
+      ],
+    },
+  ]) {
+    const framed = model({
+      frame,
+      parts: PARTS.map((p, i) => ({
+        ...p,
+        slot: i < 2 ? "Blood" : "Lymph node",
+      })),
+    });
+    const l1framed = startBuild(framed, 1);
+    assert.equal(l1framed.placed.length, 7, frame.kind);
+    assert.ok(
+      l1framed.placed.every((p) => !p.slot),
+      `${frame.kind}: beside it`,
+    );
+  }
+  // nor on an axis: its ticks are the order, which is the answer
   const ticks = ["day 0", "day 3", "day 7", "day 14"];
   const axis = model({
     mode: "play",
@@ -1407,8 +1426,20 @@ test("view: no accept list, rubric, unasked hint, affected list, predict answer 
   assert.equal(from.hidden, HIDDEN);
   assert.ok(!from.parts.some((p) => p.id === "helpert"));
   assert.equal(from.parts.find((p) => p.id === "bcell")?.label, "B cell");
-  // the links that touch it point at the hidden name
-  assert.ok(from.links.some((l) => l.to === HIDDEN || l.from === HIDDEN));
+  // none of its links is drawn, not just the one asked about: "Dendritic
+  // cell shows to ?" beside a question about who activates the B cell, or
+  // "? activates B cell" beside "who does it show the virus to?", answered
+  // it with what the step before taught
+  assert.equal(from.links.length, 4);
+  assert.ok(
+    !from.links.some(
+      (l) =>
+        l.to === HIDDEN ||
+        l.from === HIDDEN ||
+        l.from === "helpert" ||
+        l.to === "helpert",
+    ),
+  );
   // a case line that names the answer is held back while the question is open
   mo.case = "the Helper T cell gives its signal on day 5, and a cell lasts";
   assert.equal(at("see").steps[0].case, "");
@@ -2045,6 +2076,8 @@ test("old maps: a classic map is served as before, and Practise keeps its diagra
   );
   assert.equal(s.steps.s1.help, 1);
   assert.equal(s.steps.s2, undefined, "the rest start at the level chooser");
+  // worked out on the diagram is not built: none is, until it is rebuilt
+  assert.equal(learn.summary!(m), "0 of 3 built");
   const v = learn.view!(m) as ReturnType<typeof viewOf>;
   assert.equal(v.level, null);
   assert.equal(v.topic, true);
@@ -2568,7 +2601,7 @@ test("pass: a part left outside the frame stops it on every frame; the wrong col
     parts: PARTS.map((p, i) => (i ? { ...p, slot: "Blood" } : p)),
   });
   const hb = linksOf(startBuild(half, 1), ALL_RIGHT);
-  assert.equal(hb.placed.find((x) => x.part === "virus")?.slot, undefined);
+  for (const p of hb.placed) if (p.part !== "virus") p.slot = "Blood";
   assert.equal(grade(half, hb).pass, true);
 });
 
@@ -2689,6 +2722,45 @@ test("giveaway: a play step's summary that lists its subgoals in order is cut", 
   );
 });
 
+test("explain while you build a play step: its subgoals listed in order are put out of it", () => {
+  const ticks = ["1", "2", "3", "4", "5"];
+  const m = model({
+    mode: "play",
+    frame: { kind: "axis", ticks },
+    parts: [
+      { id: "pick", label: "Pick smallest town", role: "", slot: "1" },
+      { id: "settle", label: "Mark it settled", role: "", slot: "2" },
+      { id: "scan", label: "Scan its roads", role: "", slot: "3" },
+      { id: "add", label: "Add road cost", role: "", slot: "4" },
+      { id: "keep", label: "Keep if shorter", role: "", slot: "5" },
+    ],
+    links: [],
+  });
+  // Dijkstra's round, as an Explain wrote it: an opening line that names
+  // the second subgoal, then all five in order, and no link named
+  const text = [
+    "One round settles exactly one town and uses its roads to improve the guesses.",
+    "1. **Pick smallest town**: the unsettled town with the lowest guess.",
+    "   Here that's York, at 40.",
+    "2. **Mark it settled**: its distance is final.",
+    "3. **Scan its roads**: each road out of it.",
+    "4. **Add road cost**: its distance plus the road.",
+    "5. **Keep if shorter**: the guess only ever goes down.",
+    "The algorithm repeats rounds like this until every town is settled.",
+  ].join("\n");
+  assert.equal(tellsOrder(m, text), true, "most of them in order is the order");
+  const out = redactLinks(m, text);
+  assert.equal(tellsOrder(m, out), false, out);
+  // every part is still said what it is, without its number, and the line
+  // under one moves with it
+  for (const p of m.parts) assert.ok(out.includes(`**${p.label}**`), p.label);
+  assert.ok(!/^\s*\d+\./m.test(out), out);
+  assert.match(out, /Pick smallest town\*\*: [^\n]+\n {3}Here that's York/);
+  assert.match(out, /not in their order/);
+  // a text that tells no order is left as it came
+  assert.equal(redactLinks(m, "York is at 40."), "York is at 40.");
+});
+
 test("view: a frame label that says the predict's answer, or a part's name at L3, goes out by its number", () => {
   const lanes = ["Right heart side", "Lungs", "Left heart side", "Body"];
   const parts = [
@@ -2768,6 +2840,16 @@ test("canvas: lanes start compact; a box holds every part it is given; the waiti
   for (const p of Object.values(at))
     assert.ok(p.y + NODE_H <= box.y + box.h && p.y >= box.y, JSON.stringify(p));
   assert.equal(new Set(Object.values(at).map((p) => `${p.x},${p.y}`)).size, 6);
+  // a box is sized for its share of the step's parts, not 300 tall
+  // whatever it held: three boxes of eight parts opened a review at 0.57
+  const three = {
+    kind: "boxes" as const,
+    boxes: ["a", "b", "c"].map((id) => ({ id, label: id })),
+  };
+  const rs = regions(three, 0, 8);
+  assert.ok(Math.max(...rs.map((r) => r.y + r.h)) <= 480, JSON.stringify(rs));
+  // and a drop up to its share neither grows nor moves it
+  assert.deepEqual(regions(three, 3, 8), rs);
   // the zone for parts outside the frame keeps its size as they arrive
   const z1 = looseZone(frame, 0, undefined, 8)!;
   const z8 = looseZone(frame, 0, undefined, 8)!;
@@ -3140,6 +3222,66 @@ test("canvas: between diagonal neighbours a link turns through the gap rather th
   }
 });
 
+test("canvas: a link boxed in on every simple route detours along the gaps, never down through the part under its start", () => {
+  // the immune step's boxes: Helper T cell above Antibody, its Memory T
+  // cell far down on the left. Every straight line, elbow and arc ran
+  // through Antibody, Plasma cell or a part on the way, and the link read
+  // as Antibody's.
+  const at: Record<string, At> = {
+    virus: { x: 14, y: 36 },
+    dc: { x: 246, y: 36 },
+    bcell: { x: 494, y: 36 },
+    helpert: { x: 726, y: 36 },
+    plasma: { x: 494, y: 138 },
+    antibody: { x: 726, y: 138 },
+    memt: { x: 14, y: 376 },
+    memb: { x: 246, y: 376 },
+  };
+  const r = route("helpert", "memt", at, "becomes");
+  assert.equal(r.type, "detour");
+  assert.equal(blocked("helpert", "memt", at, r, "becomes"), false);
+  // and a label is kept off the line of a link drawn before it: B cell's
+  // "becomes" lay on "Helper T cell activates ✓ B cell" in a row of boxes
+  const row: Record<string, At> = {
+    virus: { x: 16, y: 30 },
+    dc: { x: 284, y: 30 },
+    helpert: { x: 16, y: 160 },
+    killert: { x: 284, y: 160 },
+    bcell: { x: 552, y: 160 },
+    plasma: { x: 16, y: 290 },
+    antibody: { x: 284, y: 290 },
+  };
+  const seen = nothingDrawn();
+  const drawnHere = [
+    ["virus", "dc", "picked up by"],
+    ["helpert", "killert", "activates"],
+    ["bcell", "plasma", "becomes"],
+    ["plasma", "antibody", "makes"],
+    ["antibody", "virus", "prevents"],
+    ["dc", "helpert", "shows to ✓"],
+    ["helpert", "bcell", "activates ✓"],
+  ].map(([a, b, l]) => ({
+    l,
+    ...pathOf(row[a], row[b], route(a, b, row, l, 0, seen)),
+  }));
+  for (const x of drawnHere)
+    for (const y of drawnHere) {
+      if (x === y) continue;
+      const w = labelWidth(x.l);
+      const on = y.pts.slice(1).some((q, i) => {
+        const p = y.pts[i];
+        for (let k = 0; k <= 40; k++) {
+          const px = p.x + ((q.x - p.x) * k) / 40;
+          const py = p.y + ((q.y - p.y) * k) / 40;
+          if (Math.abs(px - x.label.x) < w / 2 && Math.abs(py - x.label.y) < 9)
+            return true;
+        }
+        return false;
+      });
+      assert.equal(on, false, `"${x.l}" on the line of "${y.l}"`);
+    }
+});
+
 test("canvas: a label keeps off another link's line and off labels a few pixels away", () => {
   const at: Record<string, At> = {
     a: { x: 0, y: 0 },
@@ -3238,6 +3380,17 @@ test("a play step: no new case is offered, and its scene stays shut while it is 
   );
   assert.equal(calls.length, 0);
   assert.equal(offersCase(viewOf(s, m.nodes, 0).steps[1]), false);
+  assert.equal(showsCase(viewOf(s, m.nodes, 0).steps[1]), false);
+  // nor on a step about the parts: the same cast under new names
+  s.models["m-s2"].mode = "build";
+  s.models["m-s2"].layer = "parts";
+  assert.match(
+    (await act(engine, learnAct("newCase", { step: "s2" }))).error ?? "",
+    /no new case/,
+  );
+  assert.equal(calls.length, 0);
+  assert.equal(showsCase(viewOf(s, m.nodes, 0).steps[1]), false);
+  s.models["m-s2"].mode = "play";
   s.steps.s2 = { ...s.steps.s2, stage: "build", reviewing: true };
   assert.match(
     (await act(engine, { type: "replay", nodeId: "s2" })).error ?? "",
@@ -3322,6 +3475,30 @@ test("a misconception drawn with another verb on its two parts is still the mix-
     misconOf(m, { from: "bcell", to: "plasma", rel: "makes" }),
     "its own verb still is",
   );
+});
+
+test("a verb that moves the effect the same way as a misconception is the mix-up, even on a pair Claude's model links", () => {
+  // Claude: Glasnost lowers Party legitimacy; the mix-up: it raises it
+  const m = model({
+    links: [
+      ...LINKS.filter((l) => l.id !== "l5"),
+      KEY("l5", "bcell", "plasma", "lowers"),
+    ],
+  });
+  m.miscon[0].link = { from: "bcell", to: "plasma", rel: "raises" };
+  for (const rel of ["enables", "activates"] as const) {
+    const b = linksOf(startBuild(m, 2), [["bcell", "plasma", rel]]);
+    b.checks = 1;
+    const c = grade(m, b, { keyOnly: true });
+    assert.equal(c.marks[0].mark, "miscon", rel);
+    assert.equal(c.marks[0].refute, MISCON[0].refute);
+  }
+  // the same way as Claude's own link is a near verb, never the mix-up
+  const near = linksOf(startBuild(m, 2), [["bcell", "plasma", "prevents"]]);
+  assert.equal(grade(m, near, { keyOnly: true }).marks[0].mark, "family");
+  // "causes" says no way, and stays a near verb
+  const says = linksOf(startBuild(m, 2), [["bcell", "plasma", "causes"]]);
+  assert.equal(grade(m, says, { keyOnly: true }).marks[0].mark, "family");
 });
 
 test("raises and lowers are cause verbs; another verb on Claude's pair may be argued, and an accepted one counts for that link, key or not", () => {
@@ -3508,6 +3685,28 @@ test("which idea is this: a wrong pick names the step it was", () => {
   assert.equal(viewOf(s, map.nodes, now).review!.cards[0].correct, null);
 });
 
+test("Which idea is this: a step gone deeper into is never a choice on its parent's card, nor the parent on its", () => {
+  const s = newState("build");
+  const steps = ["s1", "s2", "s2.1", "s3"];
+  for (const step of steps) {
+    const m = model();
+    m.id = `m-${step}`;
+    m.step = step;
+    m.whatif = { ...m.whatif!, ask: `What if, on ${step}?` };
+    s.models[m.id] = m;
+    s.stepModel[step] = m.id;
+  }
+  const parents = { s1: null, s2: null, "s2.1": "s2", s3: null };
+  for (let seed = 0; seed < 20; seed++) {
+    const cards = ideaCards(s, steps, steps, seed, parents);
+    assert.equal(cards.length, 4);
+    for (const c of cards) {
+      if (c.answer === "s2.1") assert.ok(!c.choices.includes("s2"), `${seed}`);
+      if (c.answer === "s2") assert.ok(!c.choices.includes("s2.1"), `${seed}`);
+    }
+  }
+});
+
 test("Skip: show me shows the reason, and a new case after Show the model keeps its own help", async () => {
   const { m, s } = buildMap("new");
   s.steps.s1 = {
@@ -3532,4 +3731,51 @@ test("Skip: show me shows the reason, and a new case after Show the model keeps 
   assert.equal(onCase.onCase, true);
   assert.equal(onCase.help, 1);
   assert.equal(s.steps.s1.help, 0);
+});
+
+// ---------------------------------------------------------------- QA round 7
+
+test("a fact-check mark never reaches what the learner reads: roles, the case, refutations", () => {
+  const m = model({
+    case: "two juniors at $95k each (example figures ⚠️verify)",
+    parts: PARTS.map((p, i) =>
+      i
+        ? p
+        : { ...p, role: "Defence budget, a large share of output ⚠️ verify" },
+    ),
+  });
+  addMiscon(m, [
+    { ...MISCON[0], id: "x2", refute: "It did the economic damage ⚠️ verify." },
+  ]);
+  assert.equal(m.case, "two juniors at $95k each (example figures)");
+  assert.equal(m.parts[0].role, "Defence budget, a large share of output");
+  assert.equal(
+    m.miscon.find((x) => x.id === "x2")?.refute,
+    "It did the economic damage.",
+  );
+  // and an Argue's or a Why's verdict
+  assert.equal(
+    cleanText("foreign debt roughly doubled by 1989 ⚠️verify.", 200),
+    "foreign debt roughly doubled by 1989.",
+  );
+  // the word on its own is a word
+  assert.equal(
+    cleanModel({ ...MODEL_OPS("s1")[0], case: "verify the signature" })!.case,
+    "verify the signature",
+  );
+});
+
+test("a name typed below L3 is refused with a reason, not an empty no", async () => {
+  const { m, s } = buildMap("cold");
+  s.steps.s1 = {
+    stage: "build",
+    help: 2,
+    rungs: { built: null, why: null, whatif: null, case: null, kept: null },
+  };
+  const { engine } = setup(m);
+  const r = await act(
+    engine,
+    learnAct("type", { step: "s1", text: "A".repeat(5000) }),
+  );
+  assert.equal(r.error, "Not at this point of the step.");
 });

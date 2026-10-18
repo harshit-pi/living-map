@@ -3,7 +3,13 @@ import { useState } from "react";
 import { SmallBtn } from "./BuildCanvas.tsx";
 import { HowSure } from "./CheckCard.tsx";
 import { CREDIT, helpLine, type Here } from "./view.ts";
-import type { Credit, Level, StepView, Sure } from "../shared.ts";
+import {
+  showsCase,
+  type Credit,
+  type Level,
+  type StepView,
+  type Sure,
+} from "../shared.ts";
 
 const LEVELS: [Level, string, string][] = [
   ["new", "I'm new", "see a worked case first"],
@@ -87,13 +93,15 @@ export function StageStrip({
       : skippedSee && !st.rungs.built
         ? "skip"
         : "done";
-  const items: [string, Dot, string][] = [
+  const all: [string, Dot, string][] = [
     ["See it", st.onCase || st.recall || st.reviewing ? "skip" : seen, ""],
     ["Build", ...creditDot(st.rungs.built, st.stage === "build" && !st.onCase)],
     ["Why", ...creditDot(st.rungs.why, st.stage === "why")],
     ["What if", ...creditDot(st.rungs.whatif, false)],
     ["New case", ...creditDot(st.rungs.case, st.onCase)],
   ];
+  // a step that offers no new case has no rung for one (showsCase)
+  const items = all.filter(([label]) => label !== "New case" || showsCase(st));
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px]">
       {items.map(([label, dot, word], i) => (

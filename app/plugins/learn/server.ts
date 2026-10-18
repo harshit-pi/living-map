@@ -32,6 +32,7 @@ import {
   stepOf,
   viewOf,
 } from "./core.ts";
+import { countsBuilt } from "./shared.ts";
 import * as canvas from "../../server/actions/canvas.ts";
 import type { Ctx } from "../../server/actions/context.ts";
 import { hint as coreHint } from "../../server/actions/steps.ts";
@@ -166,9 +167,12 @@ function buildScene(
   if (!found) return { error: "No such step." };
   if (rebuilding(ctx.map, nodeId)) return { error: REBUILDING };
   // on a build map the scene is played on the step's own case, which its
-  // model, its Why and its feedback are about (it was played on another)
+  // model, its Why and its feedback are about (it was played on another);
+  // and a move is answered from what is on screen: "Click the town York's
+  // road reaches" was asked over a row of distances with no road in it, and
+  // the road was said only after the pick
   return ctx.engine.turn(
-    `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), ${isBuildMap(ctx.map) ? "on the step's own case (the CURRENT STEP's case and parts above): the same list, numbers and target, move for move as its parts say" : "on the same tiny example as the diagram where it fits"}.`,
+    `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), ${isBuildMap(ctx.map) ? "on the step's own case (the CURRENT STEP's case and parts above): the same list, numbers and target, move for move as its parts say. Every move can be worked out from the picture and its note as they stand when it is asked: a road, an edge or a number a move asks about is in an item, a pointer or the note before that move, never only in its why" : "on the same tiny example as the diagram where it fits"}.`,
     ctx.settings,
     { label: "Building a playable scene", nodeId, sections: ["scene"] },
   );
@@ -389,10 +393,12 @@ export const learn: ServerPlugin = {
   summary(map) {
     const steps = stepsOf(map);
     if (isBuildMap(map)) {
-      const built = steps.filter((n) => n.status === "answered").length;
+      const s = peek(map.data);
+      const built = steps.filter((n) =>
+        countsBuilt(n.status, s?.steps[n.id]?.rungs),
+      ).length;
       const due = learn.due!(map, clock()).now;
       // the headline of the last review: today, unaided
-      const s = peek(map.data);
       const last = s ? lastVisit(s) : null;
       return `${built} of ${steps.length} built${due ? ` · ${due} ${due === 1 ? "step" : "steps"} due` : ""}${last ? ` · last review ${last.unaided} of ${last.of} unaided` : ""}`;
     }

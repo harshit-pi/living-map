@@ -3,6 +3,7 @@ import {
   BaseEdge,
   Controls,
   EdgeLabelRenderer,
+  getViewportForBounds,
   Handle,
   MarkerType,
   Position,
@@ -64,8 +65,9 @@ export const PART_DRAG = "application/x-living-map-part";
 // than shrunk when it opens. The worked case is seen once, whole, so it may
 // shrink further; and the fit button always fits the whole frame (at 0.6 a
 // six-tick axis was cut off at both ends at 1440 wide, and fit could not help).
+const TOP_PAD = 40;
 const FIT = {
-  padding: { top: "40px", bottom: "140px", x: "6%" },
+  padding: { top: `${TOP_PAD}px`, bottom: "140px", x: "6%" },
   maxZoom: 1,
   minZoom: 0.5,
 } as const;
@@ -290,6 +292,10 @@ const DASH: Partial<Record<keyof typeof TONE, string>> = {
 // 3"). `nth`: the how-many-th link on the same two parts. `aria`: what a
 // screen reader says, in the cards' own labels (by default it read out the
 // ids). `within`: the slot both ends sit in, which the link stays inside.
+// `room`: the label the link is routed for, its check mark's room included
+// before it is checked, so a check moves no link (a link out past the frame
+// was routed afresh for "becomes ✓", reached further, and the whole canvas
+// refitted as the marks came in).
 function edgeOf(
   id: string,
   from: string,
@@ -301,11 +307,12 @@ function edgeOf(
   aria: string,
   seen: Drawn,
   within?: Box,
+  room = label,
 ): Edge<RoutedData> {
-  const r = route(from, to, at, label, nth, seen, within);
+  const r = route(from, to, at, room, nth, seen, within);
   const { pts, label: c } = pathOf(at[from], at[to], r);
   const color = TONE[tone];
-  const lw = label ? labelWidth(label) / 2 : 0;
+  const lw = label ? labelWidth(room) / 2 : 0;
   const xs = [...pts.map((p) => p.x), c.x - lw, c.x + lw];
   const ys = [
     ...pts.map((p) => p.y),
@@ -511,7 +518,10 @@ export function BuildCanvas({
       data: {
         label: r.label,
         loose: !r.slot,
-        wide: frame.kind === "lanes",
+        // a lane's name wraps in the room left of its parts; the strip
+        // under the frame has its parts below its title, which wrapped onto
+        // the first one ("NOT IN A LANE / YET")
+        wide: frame.kind === "lanes" && !!r.slot,
       },
       draggable: false,
       selectable: false,
@@ -602,6 +612,7 @@ export function BuildCanvas({
     label: string,
     tone: keyof typeof TONE,
     rel: string,
+    room = label,
   ) =>
     edges.push(
       edgeOf(
@@ -615,6 +626,7 @@ export function BuildCanvas({
         `${named(from)} ${rel} ${named(to)}`,
         seen,
         withinOf(from, to),
+        room,
       ),
     );
   if (worked)
@@ -632,6 +644,8 @@ export function BuildCanvas({
           m ? `${l.rel} ${MARK[m.mark].sym}` : l.rel,
           m ? m.mark : "plain",
           l.rel,
+          // every mark is one sign wide
+          `${l.rel} ${MARK.right.sym}`,
         );
     }
     // a ghost from the hint ladder: the link drawn dashed, its verb for you
@@ -709,10 +723,28 @@ export function BuildCanvas({
     sized.current = size;
     const fresh = opened.current !== `${canvas}:${mode}`;
     opened.current = `${canvas}:${mode}`;
+    // A frame opened fits whole, or, too tall to fit at a readable size,
+    // from its top: centred, a sort step at 1024x700 opened with its column
+    // names and the parts in them above the canvas, and only the empty
+    // strip under them in view.
+    const fitFrame = () => {
+      const ns = rf.getNodes();
+      const b = rf.getNodesBounds(ns);
+      const v = getViewportForBounds(
+        b,
+        el.clientWidth,
+        el.clientHeight,
+        fit.minZoom,
+        fit.maxZoom,
+        fit.padding,
+      );
+      const y = b.y * v.zoom + v.y < TOP_PAD ? TOP_PAD - b.y * v.zoom : v.y;
+      void rf.setViewport({ x: v.x, y, zoom: v.zoom }, { duration: 200 });
+    };
     // a window made smaller or larger leaves the parts where they were
     // drawn, off the edge or in a corner
     if (resized) {
-      void rf.fitView({ ...fit, duration: 200 });
+      fitFrame();
       return;
     }
     const refit = () => {
@@ -730,7 +762,8 @@ export function BuildCanvas({
           sy + h > el.clientHeight - (n.type === "part" ? 100 : 40)
         );
       });
-      if (out) void rf.fitView({ ...fit, duration: 200 });
+      if (out && fresh) fitFrame();
+      else if (out) void rf.fitView({ ...fit, duration: 200 });
     };
     refit();
   }, [canvas, mode, count, shape, reach, ready, rf, fit, flowW, flowH]);

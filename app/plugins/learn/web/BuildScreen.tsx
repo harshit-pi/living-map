@@ -27,7 +27,9 @@ import { NodePanel } from "../../../web/components/NodePanel.tsx";
 import { act as send } from "../../../web/lib/api.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
+  countsBuilt,
   RUNGS,
+  showsCase,
   type LearnView,
   type Rung,
   type StepView,
@@ -60,7 +62,7 @@ const dueWord = (n: number) =>
   `due for review · ${n} key ${n === 1 ? "link" : "links"}`;
 
 function railMark(st: StepView): RailMark {
-  const meter = RUNGS.map((r) => {
+  const meter = RUNGS.filter((r) => r !== "case" || showsCase(st)).map((r) => {
     const c = st.rungs[r];
     return {
       sym: c ? CREDIT[c].sym : "·",
@@ -263,9 +265,9 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
 
   const marks: Record<string, RailMark> = {};
   for (const st of view.steps) marks[st.step] = railMark(st);
-  // built as the server counts it: the build passed and the why was done
-  const built = tops.filter(
-    (s) => map.nodes[s.step]?.status === "answered",
+  // built as the server counts it (countsBuilt)
+  const built = tops.filter((s) =>
+    countsBuilt(map.nodes[s.step]?.status, s.rungs),
   ).length;
 
   const footer = (
@@ -599,6 +601,9 @@ function StepArea({
   else if (centre === "play")
     body = scene ? (
       <ScenePlay
+        // the case's own line: the scene is played on it, and a move asked
+        // about York's road while only the distances were drawn
+        caseLine={[st.caseTitle, st.case].filter(Boolean).join(" — ")}
         scene={scene}
         stepTitle={st.title}
         busy={live.busy}

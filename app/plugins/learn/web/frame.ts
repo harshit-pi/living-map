@@ -22,7 +22,6 @@ const BOX_W = 440;
 // a box's spots, across and down (boxSpot)
 const BOX_DX = NODE_W + 60;
 const BOX_DY = NODE_H + 40;
-const BOX_H = 300;
 // boxes two to a row: three made the frame so wide the canvas opened at half size
 const BOX_ROW = 2;
 const TOP = 44;
@@ -44,12 +43,13 @@ export type Region = {
 const across = (f: Frame) => f.kind === "lanes";
 const down = (f: Frame) => f.kind === "axis" || f.kind === "sort";
 
-// the rows of two a box needs for `n` parts, and its height then: a fixed
-// box held three rows, and a fourth part was drawn under it while the check
-// counted it in
-const boxRows = (n: number) => Math.max(1, Math.ceil(n / 2));
-const boxHeight = (n: number) =>
-  Math.max(BOX_H, 36 + boxRows(n) * BOX_DY - 40 + 16);
+// the rows of two a box needs for `n` parts, two at least, and its height
+// then: a fixed box held three rows, and a fourth part was drawn under it
+// while the check counted it in; a box 300 tall whatever it held made three
+// boxes of eight parts so tall that a review, with the tray beside it,
+// opened at 0.57 and the names were 7px
+const boxRows = (n: number) => Math.max(2, Math.ceil(n / 2));
+const boxHeight = (n: number) => 36 + boxRows(n) * BOX_DY - 40 + 16;
 
 // a column's height for parts stacked `rows` deep, from its top spot
 const colHeight = (rows: number) =>
@@ -103,7 +103,10 @@ export function regions(frame: Frame, span = 0, n = 0): Region[] {
       }));
     }
     case "boxes": {
-      const h = boxHeight(span);
+      // sized for its share of the parts, as a lane is, so a drop into it
+      // grows it only past that
+      const share = Math.ceil(n / Math.max(1, frame.boxes.length));
+      const h = boxHeight(Math.max(span, share));
       return frame.boxes.map((b, i) => ({
         slot: b.id,
         label: b.label,
@@ -419,11 +422,17 @@ export type Side = "top" | "right" | "bottom" | "left";
 // columns: between diagonal neighbours every straight line and arc ran
 // through a part), half way or `mid` of the way, so two in one gap run side
 // by side; `at`: where along its line (or the arc's outer run, the elbow's
-// middle run) its label sits, half way when not said
+// middle run) its label sits, half way when not said. A detour, when
+// every one of those runs through a part: out of one side a little way, to
+// a run along the gap between rows (`axis` "y", at `via`) or columns ("x"),
+// and in by a side of the other; between two boxes stacked in a box, every
+// line out of the upper one ran down through the lower one and read as
+// starting from it.
 export type Route = (
   | { type: "straight"; source: Side; target: Side }
   | { type: "arc"; side: Side; offset: number }
   | { type: "elbow"; source: Side; target: Side; mid?: number }
+  | { type: "detour"; source: Side; target: Side; axis: "x" | "y"; via: number }
 ) & { at?: number };
 
 const LABEL_H = 18;
@@ -438,6 +447,17 @@ const handleAt = (p: At, side: Side): At =>
       : side === "left"
         ? { x: p.x, y: p.y + NODE_H / 2 }
         : { x: p.x + NODE_W, y: p.y + NODE_H / 2 };
+
+// how far a detour runs out of a side before it turns
+const OUT = 16;
+const outOf = (p: At, side: Side): At =>
+  side === "top"
+    ? { x: p.x, y: p.y - OUT }
+    : side === "bottom"
+      ? { x: p.x, y: p.y + OUT }
+      : side === "left"
+        ? { x: p.x - OUT, y: p.y }
+        : { x: p.x + OUT, y: p.y };
 
 // the sides a straight link leaves and enters by: across when the parts sit
 // side by side, down when one is above the other
@@ -480,6 +500,23 @@ export function pathOf(a: At, b: At, r: Route): { pts: At[]; label: At } {
             { x: mx, y: t.y },
           ];
     return { pts: [s, p, q, t], label: on(p, q) };
+  }
+  if (r.type === "detour") {
+    const s = handleAt(a, r.source);
+    const t = handleAt(b, r.target);
+    const s1 = outOf(s, r.source);
+    const t1 = outOf(t, r.target);
+    const [p, q] =
+      r.axis === "y"
+        ? [
+            { x: s1.x, y: r.via },
+            { x: t1.x, y: r.via },
+          ]
+        : [
+            { x: r.via, y: s1.y },
+            { x: r.via, y: t1.y },
+          ];
+    return { pts: [s, s1, p, q, t1, t], label: on(p, q) };
   }
   const s = handleAt(a, r.side);
   const t = handleAt(b, r.side);
@@ -647,6 +684,7 @@ export function cost(
       if (crosses(pts[i - 1], pts[i], l)) total += 30;
   if (r.type === "arc") total += 3;
   else if (r.type === "elbow") total += r.mid === undefined ? 2 : 3;
+  else if (r.type === "detour") total += 6;
   else if (
     // the facing sides read best; another pair of sides only to get clear
     JSON.stringify(facing(at[from], at[to])) !==
@@ -707,6 +745,35 @@ export function blocked(
   if (!label) return false;
   const box = labelBox(c, label);
   return Object.values(at).some((o) => overlap(box, card(o)));
+}
+
+// Whether a line of runs straight across or down keeps off every card:
+// off its own two too, but where it leaves and enters them
+function clearRuns(
+  pts: At[],
+  at: Record<string, At>,
+  from: string,
+  to: string,
+): boolean {
+  for (let i = 1; i < pts.length; i++) {
+    const [p, q] = [pts[i - 1], pts[i]];
+    const x0 = Math.min(p.x, q.x);
+    const x1 = Math.max(p.x, q.x);
+    const y0 = Math.min(p.y, q.y);
+    const y1 = Math.max(p.y, q.y);
+    const ends = i === 1 || i === pts.length - 1;
+    for (const [id, o] of Object.entries(at)) {
+      if (ends && (id === from || id === to)) continue;
+      if (
+        x1 > o.x - 2 &&
+        x0 < o.x + NODE_W + 2 &&
+        y1 > o.y - 2 &&
+        y0 < o.y + NODE_H + 2
+      )
+        return false;
+    }
+  }
+  return true;
 }
 
 const SIDES: Side[] = ["top", "right", "bottom", "left"];
@@ -771,16 +838,53 @@ export function route(
   // the label half way, or to one side when that clears it: a little way
   // first, so a label on a crossing moves just off it (with 0.3 on a card
   // edge, "enables" stayed on the line it crossed and read as that link's)
-  for (const base of tries)
-    for (const f of label ? [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8] : [0.5]) {
-      const r = f === 0.5 ? base : { ...base, at: f };
-      const c =
-        cost(from, to, at, r, label, seen, within) + (f === 0.5 ? 0 : 1);
-      if (c < low - 1e-6) {
-        low = c;
-        best = r;
+  const tryAll = (list: Route[], fs: number[]) => {
+    for (const base of list)
+      for (const f of label ? fs : [0.5]) {
+        const r = f === 0.5 ? base : { ...base, at: f };
+        const c =
+          cost(from, to, at, r, label, seen, within) + (f === 0.5 ? 0 : 1);
+        if (c < low - 1e-6) {
+          low = c;
+          best = r;
+        }
       }
-    }
+  };
+  tryAll(tries, [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]);
+  // Only when every route so far runs through a part or sits on another
+  // link (its cost says so), a detour along the gaps beside the cards: they
+  // are many, and tried on every link they slowed each drag.
+  if (low >= 30) {
+    const gaps = (vs: number[]) => [...new Set(vs.map(Math.round))];
+    const cards = Object.values(at);
+    const ys = gaps(cards.flatMap((o) => [o.y - 20, o.y + NODE_H + 20]));
+    const xs = gaps(cards.flatMap((o) => [o.x - 20, o.x + NODE_W + 20]));
+    const detours = SIDES.flatMap((source) =>
+      SIDES.flatMap((target) => [
+        ...ys.map((via): Route => ({
+          type: "detour",
+          source,
+          target,
+          axis: "y",
+          via: via + 12 * nth,
+        })),
+        ...xs.map((via): Route => ({
+          type: "detour",
+          source,
+          target,
+          axis: "x",
+          via: via + 12 * nth,
+        })),
+      ]),
+    );
+    // costed only once clear of every card: its runs are straight across
+    // or down, so that is quick to tell, and costing them all took 16ms a
+    // drag step
+    tryAll(
+      detours.filter((r) => clearRuns(pathOf(a, b, r).pts, at, from, to)),
+      [0.5, 0.3, 0.7],
+    );
+  }
   if (seen) {
     const { pts, label: c } = pathOf(a, b, best);
     for (let i = 1; i < pts.length; i++) seen.segs.push([pts[i - 1], pts[i]]);

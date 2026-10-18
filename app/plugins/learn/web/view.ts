@@ -138,12 +138,12 @@ const placeNeed = (frame: StepView["frame"]): string =>
       : `, with every part in a ${slotWord(frame)}`;
 
 export const helpLine = (st: StepView): string => {
-  // where a part sits is the answer (an axis's order, a sort's columns): at
-  // L1 its parts wait under the frame
+  // where a part sits is the answer (an axis's order, a sort's columns, a
+  // lane or a box): at L1 its parts wait under the frame
   const loose = placingIsAnswer(st.frame) && st.help === 1;
   const put = orderStops(st.frame)
     ? "put the parts in order along the axis"
-    : "put each part in its column";
+    : `put each part in its ${slotWord(st.frame)}`;
   const keys = `only the key links are checked${placeNeed(st.frame)}`;
   if (st.recall)
     return `Quick rebuild · L1 · ${HELP[1].name}: ${loose ? `${put}; ` : ""}${keys}`;

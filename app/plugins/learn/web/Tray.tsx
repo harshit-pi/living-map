@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { PART_DRAG } from "./BuildCanvas.tsx";
 import { nextSpot } from "./frame.ts";
@@ -13,8 +13,41 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
   const { act } = here;
   const [text, setText] = useState("");
   const step = st.step;
-  const spot = () =>
-    nextSpot(st.frame, st.placed, st.placed.length + st.trayCount);
+  // The spots sent for parts the server has not sent back yet, until it
+  // does (or refuses): one is back when a part sits on its spot, or when
+  // as many parts are placed as there would be with it (a part dragged
+  // off its spot at once). The next spot was worked out from the parts on
+  // screen, which lag a click by a round trip: two parts clicked (or two
+  // names typed) one straight after the other were sent the same spot, and
+  // one sat on top of the other.
+  const flying = useRef<
+    { x: number; y: number; slot?: string; count: number }[]
+  >([]);
+  const spot = () => {
+    flying.current = flying.current.filter(
+      (f) =>
+        st.placed.length < f.count &&
+        !st.placed.some((p) => p.x === f.x && p.y === f.y),
+    );
+    const next = nextSpot(
+      st.frame,
+      [...st.placed, ...flying.current],
+      st.placed.length + st.trayCount,
+    );
+    const sent = {
+      ...next,
+      count: st.placed.length + flying.current.length + 1,
+    };
+    flying.current.push(sent);
+    return {
+      spot: next,
+      // a part the server did not place frees its spot at once
+      done: (r: { ok?: boolean; error?: string }) => {
+        if (r.error || r.ok === false)
+          flying.current = flying.current.filter((f) => f !== sent);
+      },
+    };
+  };
   const typing = st.help === 3;
   const loose =
     st.frame.kind === "free" ? 0 : st.placed.filter((p) => !p.slot).length;
@@ -29,7 +62,9 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
     const t = sent.trim();
     if (!t) return;
     setText("");
-    const r = await act("type", { step, text: t, ...spot() });
+    const at = spot();
+    const r = await act("type", { step, text: t, ...at.spot });
+    at.done(r);
     if (!r.ok) setText((cur) => (cur === "" ? sent : cur));
   };
 
@@ -77,8 +112,10 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
                         key={label}
                         onClick={() => {
                           const sent = text;
-                          void act("pick", { step, label, ...spot() }).then(
+                          const at = spot();
+                          void act("pick", { step, label, ...at.spot }).then(
                             (r) => {
+                              at.done(r);
                               if (!r.error) clear(sent);
                             },
                           );
@@ -110,7 +147,10 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
                   e.dataTransfer.effectAllowed = "move";
                 }}
                 onClick={() => {
-                  void act("place", { step, part: p.id, ...spot() });
+                  const at = spot();
+                  void act("place", { step, part: p.id, ...at.spot }).then(
+                    at.done,
+                  );
                 }}
                 title={p.role}
                 className="w-full cursor-grab rounded-lg border border-line-strong bg-surface px-2 py-1 text-left hover:border-primary active:cursor-grabbing"

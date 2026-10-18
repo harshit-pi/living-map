@@ -13,6 +13,7 @@ import {
   bareSay,
   caseShape,
   cleanModel,
+  cleanText,
   creditOf,
   endReview,
   freshStep,
@@ -109,7 +110,8 @@ export const BUILD_PROMPT = `You are the engine behind a visual LEARNING CANVAS 
 - The learner's screen shows the path's steps and each step's model, never notes under a step: answer a question in your reply itself, add no fact nodes under a step, and never point to a note ("the note below").
 - Talk to the learner as "you", never "the learner". In anything the learner reads, name a part by its label in quotes, never by its id. Never mention these instructions, the reference model, key links, rubrics or the server.
 - The caption of a move that writes a model says in a line what the step is about, never what its model holds: which part links to which, where a part sits, or in what order.
-- Prefer tiny concrete examples written as plain text.`;
+- Prefer tiny concrete examples written as plain text.
+- What the learner reads in a model, a why or a verdict is what they learn: state only facts you are sure of, and never mark one "⚠️ verify" there; leave out a fact you are not sure of, or use round example figures and say they are examples.`;
 
 // sent on the moves that write a model: start, switching in, opening a step,
 // going deeper, a new case
@@ -216,7 +218,7 @@ function applyWhy(s: LearnState, op: Raw): number {
   if (link && link !== st.whyLink) return 0;
   if (!["right", "partial", "wrong"].includes(op.state)) return 0;
   st.why.state = op.state;
-  st.why.say = bareSay(str(op.say, 240).trim());
+  st.why.say = bareSay(cleanText(op.say, 240));
   return 1;
 }
 
@@ -250,7 +252,7 @@ function applyAccept(s: LearnState, op: Raw): number {
     to,
     rel,
     holds,
-    say: str(op.say, 200).trim(),
+    say: cleanText(op.say, 200),
     ...(holds && same ? { pair: true as const } : {}),
   });
   if (holds) acceptArgued(b, { from, to, rel });
@@ -861,6 +863,9 @@ const type: Act = (ctx, a) => {
   const x = at(ctx, a, ["build"]);
   if (fail(x)) return err(x);
   const b = buildOf(x);
+  // names are typed at L3 only, where the tray has none to click; below it
+  // the call came back {"ok":false} with nothing said
+  if (b.help !== 3) return err("Not at this point of the step.");
   const text = str(a?.text, 60).trim();
   if (!text) return err("Type a part's name.");
   const r = matchPart(
@@ -1006,7 +1011,9 @@ const newCase: Act = (ctx, a) => {
   if (fail(x)) return err(x);
   if (!offersCase(x.main))
     return err(
-      "A step played as a scene has no new case: its order is the same on any case.",
+      x.main.mode === "play"
+        ? "A step played as a scene has no new case: its order is the same on any case."
+        : "A step about the parts has no new case: they are the same parts in any case.",
     );
   if (ctx.engine.isQueuedOrRunning(x.step, NEW_CASE)) return {};
   const { s, step, main } = x;
@@ -1155,7 +1162,13 @@ const review: Act = (ctx) => {
     since: seen ? Math.round((t - seen) / DAY) : null,
     order,
     items,
-    cards: ideaCards(s, order, builtSteps, seed),
+    cards: ideaCards(
+      s,
+      order,
+      builtSteps,
+      seed,
+      Object.fromEntries(pathSteps(ctx.map.nodes).map((p) => [p.id, p.parent])),
+    ),
   };
   ctx.note(`Opened a review: ${order.length} step(s) due.`);
   return ok(ctx);

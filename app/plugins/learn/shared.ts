@@ -121,19 +121,43 @@ export function slotsOf(frame: Frame): string[] {
 // sort column it sits in is marked and does not.
 export const orderStops = (f: Frame): boolean => f.kind === "axis";
 
-// Where a part sits is what the step asks: on an axis its place in the
-// order, in sort columns the claim it is weighed as (a sort step at L1 put
-// every picking rule in its own traffic column, the answer before a link was
-// drawn). At L1 these parts wait outside the frame for you to put in.
-export const placingIsAnswer = (f: Frame): boolean =>
-  f.kind === "axis" || f.kind === "sort";
+// Where a part sits is what the step asks, on every frame: on an axis its
+// place in the order, in sort columns the claim it is weighed as, in lanes
+// and boxes which one it belongs in (a sort step at L1 put every picking
+// rule in its own traffic column, the answer before a link was drawn, and a
+// lanes or boxes step put each part in its own lane or box). At L1 these
+// parts wait outside the frame for you to put in.
+export const placingIsAnswer = (f: Frame): boolean => f.kind !== "free";
 
-// A play step's model is the method's subgoal order, the same on any input:
-// a new case of it can only be the original renamed, which the shape check
-// refuses, so it is not offered (two paid moves ended "did not hold
-// together").
-export const offersCase = (m: { mode: "build" | "play" }): boolean =>
-  m.mode !== "play";
+// A play step's model is the method's subgoal order, the same on any input,
+// and a parts step's is the system's cast, the same in any case: a new case
+// of either can only be the original renamed, which the shape check refuses,
+// so it is not offered (two paid moves ended "did not hold together"; on
+// "What does Dijkstra keep track of?" four did, each try the same lists and
+// queue under new names).
+export const offersCase = (m: {
+  mode: "build" | "play";
+  layer: Layer;
+}): boolean => m.mode !== "play" && m.layer !== "parts";
+
+// Whether a step counts as built on a build map: answered (its build passed
+// and its Why was done) and built here. A step answered on the topic diagram
+// before Practise this as builds is answered too, and the path read "1 of 4
+// built" over four steps that all said "to do".
+export const countsBuilt = (
+  status: string | undefined,
+  rungs: { built: unknown } | undefined,
+): boolean => status === "answered" && !!rungs?.built;
+
+// Whether a step has a New case rung to show: one it offers, or one written
+// or built before it stopped being offered. The pills read "New case ○" on a
+// play step that never offered one.
+export const showsCase = (st: {
+  mode: "build" | "play";
+  layer: Layer;
+  newCase: string;
+  rungs: { case: unknown };
+}): boolean => offersCase(st) || !!st.rungs.case || st.newCase === "ready";
 
 export type Layer = "parts" | "behaviour" | "function" | "failure";
 export const LAYERS: readonly Layer[] = [

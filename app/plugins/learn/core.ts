@@ -318,7 +318,16 @@ export function pathSteps(nodes: Record<string, MapNode>): PathStep[] {
 
 // ---------------------------------------------------------------- cleaning
 
-const clean = (v: unknown, n: number): string => str(v, n).trim();
+// A field of the model's, as the learner reads it. The map's own rule
+// marks an unsure fact "⚠️ verify", which is for a map you decide on: on a
+// part's role you learn by heart, a case line, a refutation or a verdict it
+// read as part of the fact ("Defence budget, a large share of output ⚠️
+// verify").
+export const cleanText = (v: unknown, n: number): string =>
+  str(v, n)
+    .replace(/\s*\u26a0\ufe0f?\s*verify\b/gi, "")
+    .trim();
+const clean = cleanText;
 const safe = (v: unknown): string => {
   const s = clean(v, 60);
   return safeId(s) ? s : "";
@@ -500,6 +509,20 @@ export function sameLink(
   );
 }
 
+// Which way a verb of the cause family moves what it acts on: up (it
+// enables, activates or raises it) or down (it prevents or lowers it).
+// "causes" says only that it happens, so it has no sense.
+const SENSE: Partial<Record<Verb, 1 | -1>> = {
+  enables: 1,
+  activates: 1,
+  raises: 1,
+  prevents: -1,
+  lowers: -1,
+};
+// two verbs that say the effect goes the same way
+export const sameSense = (a: Verb, b: Verb): boolean =>
+  !!SENSE[a] && SENSE[a] === SENSE[b];
+
 // the same two parts the same way round, whatever the verb
 export function samePair(a: Triple, b: Triple): boolean {
   const x = canon(a);
@@ -513,9 +536,22 @@ export function samePair(a: Triple, b: Triple): boolean {
 // a learner had just picked with "sure" in the predict ("inflation takes
 // money out of your account") was "not in Claude's model, and not wrong"
 // drawn with "prevents" rather than "makes".
+//
+// Nor only the exact verb when the two say the same way the effect goes
+// (sameSense): "Glasnost enables Party legitimacy" is the mix-up "Glasnost
+// raises Party legitimacy", where Claude's link on that pair lowers it, and
+// it was marked "~ the right pair with another verb", with no refutation.
 export function misconOf(m: RefModel, l: Triple): Miscon | undefined {
   const exact = m.miscon.find((y) => y.link && sameLink(y.link, l));
   if (exact) return exact;
+  const says = m.miscon.find(
+    (y) =>
+      y.link &&
+      samePair(y.link, l) &&
+      sameSense(y.link.rel, l.rel) &&
+      !m.links.some((r) => samePair(r, l) && sameSense(r.rel, l.rel)),
+  );
+  if (says) return says;
   const flip = { from: l.to, to: l.from, rel: l.rel };
   if (m.links.some((r) => samePair(r, l) || samePair(r, flip)))
     return undefined;
@@ -748,9 +784,11 @@ export const keysIn = (m: RefModel, text: string): string[] => [
 // one of the links you were rebuilding, and it stayed in the panel.
 // A line about one part ("Merge: …", "- **Merge** — …") keeps its part's
 // name and says why the rest is out: an Explain of one line per part
-// lost "Merge" with no word, and read as broken.
+// lost "Merge" with no word, and read as broken. On an axis the order is
+// what you build, so a text that lists its parts in order has them put out
+// of it (unorder).
 export function redactLinks(m: RefModel, text: string): string {
-  if (!keysIn(m, text).length) return text;
+  if (!keysIn(m, text).length) return unorder(m, text);
   const byLength = [...m.parts].sort((a, b) => b.label.length - a.label.length);
   const leftOut = (line: string): string => {
     const lead = /^(\s*(?:[-*•]|\d+[.)])?\s*)/.exec(line)![1];
@@ -778,11 +816,62 @@ export function redactLinks(m: RefModel, text: string): string {
         ? leftOut(line)
         : line,
   );
-  const kept = lines
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const kept = unorder(
+    m,
+    lines
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  );
   return `${kept}${kept ? "\n\n" : ""}_What links to what is left out while you build this step._`;
+}
+
+// A text that tells an axis's order (tellsOrder), put out of it: an Explain
+// during a play step listed its five subgoals as bullets in exactly the
+// order of the ticks, and no line of it named a link. A line that tells the
+// order on its own is left out; the list's items (each with the lines
+// indented under it) lose their numbers and are sorted by their words, or
+// turned from there until the text no longer tells it; failing that, every
+// line that names a part is left out. Any other text comes back as it was.
+export function unorder(m: RefModel, text: string): string {
+  if (!tellsOrder(m, text)) return text;
+  const LEAD = /^\s*(?:[-*•]|\d+[.)])\s+/;
+  const names = (t: string) => m.parts.some((p) => mentions(t, p.label, m));
+  // the text as blocks: a list item with what is indented under it, or a line
+  const blocks: { item: boolean; lines: string[] }[] = [];
+  for (const line of text.split("\n")) {
+    const indented = /^\s{2,}\S/.test(line);
+    if (LEAD.test(line) && !indented)
+      blocks.push({ item: true, lines: [line] });
+    else if (indented && blocks.at(-1)?.item) blocks.at(-1)!.lines.push(line);
+    else blocks.push({ item: false, lines: [line] });
+  }
+  const kept = blocks.filter((b) => !tellsOrder(m, b.lines.join("\n")));
+  const items = kept.filter((b) => b.item && names(b.lines.join(" ")));
+  const sorted = [...items].sort((a, b) =>
+    a.lines[0].replace(LEAD, "").localeCompare(b.lines[0].replace(LEAD, "")),
+  );
+  const joined = (xs: string[]) =>
+    xs
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  const laid = (order: typeof items) => {
+    let k = 0;
+    return kept.flatMap((b) => {
+      const at = b.item && items.includes(b) ? order[k++] : b;
+      return at.item
+        ? [at.lines[0].replace(LEAD, "- "), ...at.lines.slice(1)]
+        : at.lines;
+    });
+  };
+  let out = laid(sorted);
+  for (let r = 1; r < sorted.length && tellsOrder(m, joined(out)); r++)
+    out = laid([...sorted.slice(r), ...sorted.slice(0, r)]);
+  const said = joined(
+    tellsOrder(m, joined(out)) ? out.filter((line) => !names(line)) : out,
+  );
+  return `${said}${said ? "\n\n" : ""}_The parts are not in their order here: that order is what you build._`;
 }
 
 // Everything a model must be before it is shown. Each problem is said in
@@ -958,7 +1047,16 @@ export function tellsOrder(m: RefModel, text: string): boolean {
       if (!seen.includes(r) && mentions(clause, p.label, m)) seen.push(r);
     });
   }
-  return seen.length >= 2 && seen.every((r, i) => i === 0 || r > seen[i - 1]);
+  // most of them in order is the order: an opening line that named the
+  // second subgoal, then the five in order, read as out of order
+  const run = seen.map(() => 1);
+  for (let i = 0; i < seen.length; i++)
+    for (let j = 0; j < i; j++)
+      if (seen[j] < seen[i]) run[i] = Math.max(run[i], run[j] + 1);
+  return (
+    seen.length >= 2 &&
+    Math.max(...run) >= Math.max(2, Math.ceil(seen.length * 0.75))
+  );
 }
 
 // ---------------------------------------------------------------- grading
@@ -1626,11 +1724,10 @@ function acyclic(m: RefModel): RefLink[] {
 
 // What each help level gives before you start: L0 every part where the
 // worked case had it and every link but the key ones; L1 every part on a
-// plain grid in a shuffled order, each in its slot of the frame (Link it
-// tests the links: a part left outside its lane was marked wrong under a
-// line saying all parts were placed), no links; L2 and L3 nothing placed.
-// Where the slot is the answer (placingIsAnswer: an axis's order, a sort's
-// columns), at L1 its parts wait beside the frame for you to put in.
+// plain grid in a shuffled order, no links; L2 and L3 nothing placed. On a
+// frame the slot is the answer too (placingIsAnswer: an axis's order, a
+// sort's columns, which lane or box), so at L1 its parts wait beside the
+// frame for you to put in (the tray says how many are still to go in).
 export function startBuild(m: RefModel, help: Help): Build {
   const b: Build = {
     help,
@@ -2421,8 +2518,17 @@ export function ideaCards(
   due: readonly string[],
   built: readonly string[],
   seed: number,
+  parents: Record<string, string | null> = {},
 ): Card[] {
   if (built.length < 3) return [];
+  // A step and one gone deeper inside it (or out of it) are one idea: on the
+  // card for "Inside: Keep if shorter", "How does one round run?" was as fair
+  // an answer, and marked ✗. Neither is offered on the other's card.
+  const above = (a: string, b: string) => {
+    for (let x = parents[a]; x; x = parents[x]) if (x === b) return true;
+    return false;
+  };
+  const kin = (a: string, b: string) => above(a, b) || above(b, a);
   const cards: Card[] = [];
   for (const step of due) {
     const m = own(s.models, own(s.stepModel, step) ?? "");
@@ -2432,9 +2538,10 @@ export function ideaCards(
     const ask = m?.whatif?.ask || (c?.status === "ready" ? c.title : "");
     if (!ask) continue;
     const others = shuffled(
-      built.filter((x) => x !== step),
+      built.filter((x) => x !== step && !kin(x, step)),
       seed + cards.length,
     ).slice(0, 3);
+    if (!others.length) continue;
     cards.push({
       id: `c${cards.length + 1}`,
       ask,
@@ -2710,7 +2817,10 @@ function stepView(
     // The hidden part goes out under a name of no meaning: its own id
     // ("house") was in the canvas's labels, read out by a screen reader.
     // The parts linked to it keep their labels but not their roles until
-    // you answer ("Second chamber votes again" said which voted first).
+    // you answer ("Second chamber votes again" said which voted first), and
+    // none of its links is drawn: "? activates B cell" and "? activates
+    // Killer T cell" were the Helper T cell the step before had taught,
+    // with the question "which cell does the dendritic cell show it to?".
     const near = new Set(
       hidden
         ? m.links.flatMap((l) =>
@@ -2718,7 +2828,6 @@ function stepView(
           )
         : [],
     );
-    const as = (id: string) => (id === hidden ? HIDDEN : id);
     base.worked = {
       parts: m.parts.map((x) =>
         x.id === hidden
@@ -2730,8 +2839,10 @@ function stepView(
             },
       ),
       links: m.links
-        .filter((l) => l.id !== hideLink)
-        .map((l) => linkView({ ...l, from: as(l.from), to: as(l.to) })),
+        .filter(
+          (l) => l.id !== hideLink && l.from !== hidden && l.to !== hidden,
+        )
+        .map((l) => linkView(l)),
       hidden: hidden ? HIDDEN : null,
     };
     // the case line can say the answer outright ("passed Senate June 15,

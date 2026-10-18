@@ -4,8 +4,8 @@ import { SmallBtn, WaitNote } from "./BuildCanvas.tsx";
 import { HowSure } from "./CheckCard.tsx";
 import { CREDIT, WAIT_TITLE, type Here } from "./view.ts";
 import {
-  offersCase,
   orderStops,
+  showsCase,
   type StepView,
   type Sure,
   type WhyState,
@@ -250,8 +250,9 @@ export function BuiltCard({
         </div>
       )}
 
-      {/* a play step's order is the same on any case (offersCase) */}
-      {offersCase(st) && (
+      {/* a play step's order and a parts step's cast are the same on any
+          case (offersCase) */}
+      {showsCase(st) && (
         <div className="space-y-1.5 border-t border-line pt-2">
           <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
             New case · optional
