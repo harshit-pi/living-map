@@ -134,6 +134,9 @@ export type StepState = {
   // visit's help by one
   recall?: boolean;
   recallWrong?: boolean;
+  // how the quick rebuild came out, once it passed (the card said nothing,
+  // and the step went back to its old Why as if nothing had happened)
+  recalled?: { credit: Credit; tries: number };
   // a review rebuild under way
   reviewing?: boolean;
   // Show the model is open: the worked case stays on screen
@@ -170,7 +173,8 @@ export type Build = {
   // how each key link stood at the first check, and how sure you were then
   first?: Record<string, boolean>;
   firstSure?: Sure;
-  // parts you placed through "did you mean": they count as hinted
+  // parts whose names a "did you mean" showed you: they count as hinted,
+  // however you then place them (typing an offered name exactly was "by you")
   hinted?: string[];
   // key links a reply of Claude's named while you built: hinted too
   told?: string[];
@@ -1037,10 +1041,23 @@ const namesOf = (p: Part) =>
 // and costing it a hint on both its key links was a lot for a typo)
 const slips = (n: string) => (n.length >= 12 ? 2 : n.length >= 5 ? 1 : 0);
 
+// Whether a typed name is close enough to a name to offer it as "did you
+// mean": two letters in five off the whole name, or a slip or two off its
+// start ("memry b" for "Memory B cell"). "qqq" offered "Antibody? B cell?
+// Helper T cell?", three of the names L3 is there to test, for nothing.
+function near(n: string, t: string): boolean {
+  if (distance(n, t) <= Math.max(2, Math.floor(n.length * 0.4))) return true;
+  if (t.length < 3) return false;
+  const off = Math.floor(t.length * 0.3);
+  return [t.length - 1, t.length, t.length + 1].some(
+    (k) => distance(n.slice(0, k), t) <= off,
+  );
+}
+
 // A part name typed at L3: Claude's accept list and the names you confirmed,
 // then a slip or two of spelling (the nearest part, when only one is that
-// near); otherwise the 3 closest labels as "did you mean". Parts already on
-// the canvas are never offered again.
+// near); otherwise up to 3 close labels as "did you mean", and none when
+// nothing is close. Parts already on the canvas are never offered again.
 export function matchPart(
   m: RefModel,
   typed: string,
@@ -1050,18 +1067,31 @@ export function matchPart(
   if (!t) return { suggest: [] };
   for (const p of m.parts) if (namesOf(p).includes(t)) return { part: p.id };
   const open = m.parts.filter((p) => !placed.includes(p.id));
-  const near = open
+  const close = open
     .map((p) => ({
       id: p.id,
       label: p.label,
       d: Math.min(...namesOf(p).map((n) => distance(n, t))),
       fits: namesOf(p).some((n) => distance(n, t) <= slips(n)),
+      near: namesOf(p).some((n) => near(n, t)),
     }))
     .sort((a, b) => a.d - b.d || a.label.localeCompare(b.label));
-  const fit = near.filter((x) => x.fits);
+  const fit = close.filter((x) => x.fits);
   if (fit.length && (fit.length === 1 || fit[0].d < fit[1].d))
     return { part: fit[0].id };
-  return { suggest: near.slice(0, 3).map((x) => x.label) };
+  return {
+    suggest: close
+      .filter((x) => x.near)
+      .slice(0, 3)
+      .map((x) => x.label),
+  };
+}
+
+// The parts a "did you mean" names are shown to you: each counts as hinted
+// from then on, picked from the list or typed after it.
+export function revealNames(m: RefModel, b: Build, labels: string[]): void {
+  const ids = m.parts.filter((p) => labels.includes(p.label)).map((p) => p.id);
+  if (ids.length) b.hinted = [...new Set([...(b.hinted ?? []), ...ids])];
 }
 
 // ---------------------------------------------------------------- what if, why, new case
@@ -1230,6 +1260,71 @@ export function sameModel(a: RefModel, b: RefModel): boolean {
   return fits(0);
 }
 
+// How much of model `a` model `b` keeps under new names: the best way to
+// match a's parts to b's that keeps every key link of a (its ends, its
+// direction, its verb, onto a key link of b), and how many of a's other
+// links that match keeps too; null when no match keeps the key links. The
+// parts are few (8 at most), so trying the matches is quick.
+export function renamedLinks(a: RefModel, b: RefModel): number | null {
+  const ls = (m: RefModel) =>
+    m.links.filter((l) => !l.argued).map((l) => ({ ...canon(l), key: l.key }));
+  const la = ls(a);
+  const lb = ls(b);
+  const has = new Set(lb.map((l) => `${l.from}|${l.to}|${l.rel}`));
+  const hasKey = new Set(
+    lb.filter((l) => l.key).map((l) => `${l.from}|${l.to}|${l.rel}`),
+  );
+  const keys = la.filter((l) => l.key);
+  const rest = la.filter((l) => !l.key);
+  const order = [
+    ...new Set([
+      ...keys.flatMap((l) => [l.from, l.to]),
+      ...a.parts.map((p) => p.id),
+    ]),
+  ];
+  const map = new Map<string, string>();
+  const used = new Set<string>();
+  // a link with both ends matched: kept or not
+  const holds = (l: (typeof la)[number], set: Set<string>) =>
+    !map.has(l.from) ||
+    !map.has(l.to) ||
+    set.has(`${map.get(l.from)}|${map.get(l.to)}|${l.rel}`);
+  let best: number | null = null;
+  const kept = () =>
+    rest.filter(
+      (l) =>
+        map.has(l.from) &&
+        map.has(l.to) &&
+        has.has(`${map.get(l.from)}|${map.get(l.to)}|${l.rel}`),
+    ).length;
+  const go = (i: number) => {
+    if (best === rest.length) return;
+    if (i === order.length) {
+      best = Math.max(best ?? 0, kept());
+      return;
+    }
+    const x = order[i];
+    // a part of a key link must be matched; another may have no twin
+    const tries: (string | null)[] = [
+      ...b.parts.map((p) => p.id).filter((y) => !used.has(y)),
+      ...(keys.some((l) => l.from === x || l.to === x) ? [] : [null]),
+    ];
+    for (const y of tries) {
+      if (y) {
+        map.set(x, y);
+        used.add(y);
+      }
+      if (keys.every((l) => holds(l, hasKey))) go(i + 1);
+      if (y) {
+        map.delete(x);
+        used.delete(y);
+      }
+    }
+  };
+  if (keys.length) go(0);
+  return best;
+}
+
 // A new case must look different: not the same parts with new numbers, not
 // the same case, not the same graph with its names and numbers changed (in
 // its case text, or its own parts and links: "Grades by student ID" was the
@@ -1251,14 +1346,63 @@ export function caseShape(orig: RefModel, next: RefModel): string[] {
     p.push(
       "its case is the original's graph with new names and numbers: use a different number of nodes and different connections",
     );
+  const rest = orig.links.filter((l) => !l.key && !l.argued).length;
+  const kept = renamedLinks(orig, next);
   if (sameModel(orig, next))
     p.push(
       "its parts and links are the original's, one for one, under new labels: change the shape of the problem (a different number of parts, or different links between them)",
+    );
+  // the original renamed, with a part dropped and a leaf or two added: the
+  // key links on the same parts and most of the other links kept too ("A
+  // photo arriving out of order" was TCP's four core links renamed)
+  else if (kept !== null && rest > 0 && kept * 2 >= rest)
+    p.push(
+      `its links are the original's under new names (the key links and ${kept} of the original's ${rest} other links, on the same parts): keep the key links' kinds of verb, but build a different case around them, with other parts and other links between them`,
     );
   if (keyFamilies(orig) !== keyFamilies(next))
     p.push(
       `its key links must use the same kinds of verb as the original's (${keyFamilies(orig) || "none"})`,
     );
+  return p;
+}
+
+const keyWords = (m: RefModel) =>
+  m.links.filter((l) => l.key && !l.argued).map((l) => linkWords(m, l));
+// a link by its parts' names and its verb, so two steps on one cast compare
+const named = (m: RefModel, l: Triple) => {
+  const c = canon(l);
+  return `${normAnswer(labelOf(m, c.from))}|${c.rel}|${normAnswer(labelOf(m, c.to))}`;
+};
+
+// A step must teach something new, or add to the step before: refused when
+// every key link of its model is a key link of another step's (by the
+// parts' names), or its what-if breaks the same part to the same effect.
+// Step 2 came back as step 1 with its antigen renamed, and the review then
+// listed each key link twice.
+export function repeats(m: RefModel, others: readonly RefModel[]): string[] {
+  const p: string[] = [];
+  const keys = m.links.filter((l) => l.key && !l.argued);
+  const wi = (x: RefModel) =>
+    x.whatif
+      ? `${normAnswer(labelOf(x, x.whatif.fails))}>${x.whatif.affected
+          .map((id) => normAnswer(labelOf(x, id)))
+          .sort()
+          .join(",")}`
+      : "";
+  for (const o of others) {
+    if (o.id === m.id || o.step === m.step || o.of) continue;
+    const theirs = new Set(
+      o.links.filter((l) => l.key && !l.argued).map((l) => named(o, l)),
+    );
+    if (keys.length && keys.every((l) => theirs.has(named(m, l))))
+      p.push(
+        `its key links (${keyWords(m).join("; ")}) are the key links of step "${o.step}" already: a step teaches a new idea or adds to the one before, so its key links are the links this step is about`,
+      );
+    if (wi(m) && wi(m) === wi(o))
+      p.push(
+        `its what-if breaks the same part to the same effect as step "${o.step}"'s: ask what breaks in this step's own idea`,
+      );
+  }
   return p;
 }
 
@@ -2102,7 +2246,18 @@ export function ideaCards(
 export function outlineOf(
   s: LearnState,
   nodes: Record<string, MapNode>,
-  { full = true, at: about }: { full?: boolean; at?: string | null } = {},
+  {
+    full = true,
+    at: about,
+    others = false,
+  }: {
+    full?: boolean;
+    at?: string | null;
+    // a move that writes a model: the other steps' key links and what-ifs,
+    // so a new step teaches something new (step 2 came back as step 1 with
+    // its antigen renamed: the same key links, the same what-if)
+    others?: boolean;
+  } = {},
 ): string {
   const path = pathSteps(nodes);
   const title = (id: string) => own(nodes, id)?.title ?? id;
@@ -2120,6 +2275,10 @@ export function outlineOf(
           : "no model yet"
       }${st ? ` · ${st.stage} · help L${st.help}` : ""}`,
     );
+    if (others && m?.status === "ready" && p.id !== about)
+      lines.push(
+        `${"  ".repeat(p.depth)}    its key links: ${keyWords(m).join("; ")}${m.whatif ? ` · its what-if breaks "${labelOf(m, m.whatif.fails)}"` : ""}`,
+      );
   }
   const at = [about, s.at].find((x) => !!x && own(s.steps, x)) ?? undefined;
   const st = at ? s.steps[at] : undefined;
@@ -2313,6 +2472,7 @@ function stepView(
     },
     recallDue: !!st.recallDue,
     recall: !!st.recall,
+    recalled: st.recall ? null : (st.recalled ?? null),
     reviewing: !!st.reviewing,
     itemsDue: items.filter((i) => rebuilt(i) && i.due <= now).length,
   };
@@ -2476,9 +2636,15 @@ function stepView(
     base.changed =
       !!b.last && b.checked !== undefined && b.checked !== buildKey(b);
     base.told = (b.told ?? []).length;
-    // at L3 you type the names: a lane named for a part spells it
-    if (st.stage === "build" && b.help === 3)
+    // at L3 you type the names: a lane named for a part spells it, and so
+    // does a case line ("Sequence number and ACK number on one request"),
+    // now on screen while you build
+    if (st.stage === "build" && b.help === 3) {
       hide = { names: m.parts.map((x) => x.label), answer: "" };
+      const names = (t: string) => m.parts.some((x) => mentions(t, x.label, m));
+      if (names(base.case)) base.case = "";
+      if (names(base.caseTitle)) base.caseTitle = "";
+    }
     // a quick rebuild waiting: the build it rebuilds stays out of view until
     // it is done (it opened beside the quick rebuild card, every link on it)
     if (st.stage === "built" && st.recallDue) {

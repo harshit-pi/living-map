@@ -45,8 +45,9 @@ export type ServerPlugin = {
   ) => number | null;
   // a node op (add, update) from the model's reply, before core applies it:
   // the plugin may clean its text in place (Learn leaves out what would say
-  // the links of a step you are building)
-  cleanOp?: (map: StoredMap, op: Raw) => void;
+  // the links of a step you are building), or return false to drop it (a
+  // note Learn's screen never shows)
+  cleanOp?: (map: StoredMap, op: Raw) => void | false;
   // the model may not change or remove a node you made, chose or settled
   // (by: "you"), whatever its reply says
   keepUserNodes?: boolean;

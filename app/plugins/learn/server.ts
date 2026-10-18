@@ -267,6 +267,7 @@ export const learn: ServerPlugin = {
     const text = outlineOf(s, map.nodes, {
       full,
       at: stepOf(map.nodes, move?.nodeId),
+      others: !!move?.sections.includes("model"),
     });
     // a map practised as builds after the topic diagram keeps it in view
     return map.diagram ? `${text}\n\n${classicOutline(map)}` : text;

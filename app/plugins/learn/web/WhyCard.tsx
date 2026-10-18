@@ -172,7 +172,7 @@ export function BuiltCard({
           </div>
           <div className="mt-0.5 text-[12px] text-body">
             {orderStops(st.frame)
-              ? "About a minute: the parts wait beside the axis; you put them in order and draw the key links again."
+              ? "About a minute: the parts wait under the axis; you put them in order and draw the key links again."
               : "About a minute: the parts are placed, you draw the key links again."}
           </div>
           <div className="mt-1.5">

@@ -15,7 +15,9 @@ const ALONG_X = NODE_W + 96;
 const ALONG_Y = NODE_H + 46;
 const LANE_H = 130;
 const LANE_LABEL = 120;
-const COL_W = 200;
+// a column holds a card with a few pixels each side: at 200 a six-tick axis
+// and its waiting zone opened at half size, the words about 6px
+const COL_W = 190;
 const BOX_W = 440;
 // a box's spots, across and down (boxSpot)
 const BOX_DX = NODE_W + 60;
@@ -36,7 +38,7 @@ export type Region = {
 };
 
 // lanes run across, so a lane is a band of height; the axis and sort columns
-// run down; boxes are rectangles, three to a row
+// run down; boxes are rectangles, two to a row
 const across = (f: Frame) => f.kind === "lanes";
 const down = (f: Frame) => f.kind === "axis" || f.kind === "sort";
 
@@ -47,10 +49,17 @@ const boxRows = (n: number) => Math.max(1, Math.ceil(n / 2));
 const boxHeight = (n: number) =>
   Math.max(BOX_H, 36 + boxRows(n) * BOX_DY - 40 + 16);
 
+// a column's height for parts stacked `rows` deep, from its top spot
+const colHeight = (rows: number) =>
+  8 + (Math.max(1, rows) - 1) * ALONG_Y + NODE_H + 24;
+
 // The frame's slots on the canvas, sized to hold what is on it (`span`: how
 // far the parts reach, across for lanes and down for columns; for boxes, the
-// most parts in one box).
-export function regions(frame: Frame, span = 0): Region[] {
+// most parts in one box). `n`: every part of the step: a column starts deep
+// enough for its share of them, so it does not grow (and move the waiting
+// zone under it) as they arrive; at 420 deep, five mostly empty ticks made
+// the frame twice the height it needed.
+export function regions(frame: Frame, span = 0, n = 0): Region[] {
   switch (frame.kind) {
     case "lanes": {
       const w = Math.max(640, span + NODE_W + 80);
@@ -66,7 +75,8 @@ export function regions(frame: Frame, span = 0): Region[] {
     case "axis":
     case "sort": {
       const cols = frame.kind === "axis" ? frame.ticks : frame.columns;
-      const h = Math.max(420, span + NODE_H + 60);
+      const rows = Math.max(2, Math.ceil(n / Math.max(1, cols.length)));
+      const h = Math.max(colHeight(rows), span + NODE_H + 24);
       return cols.map((c, i) => ({
         slot: c,
         label: c,
@@ -92,68 +102,66 @@ export function regions(frame: Frame, span = 0): Region[] {
   }
 }
 
-// how far the parts reach, so the frame grows to hold them (for boxes, the
-// most parts in one box)
+// how far the parts reach, so the frame grows to hold them: along a lane,
+// how far across; down a column, its lowest spot (parts stack on spots); for
+// boxes, the most parts in one box
 export function spanOf(frame: Frame, at: (At & { slot?: string })[]): number {
   if (across(frame)) return Math.max(0, ...at.map((p) => p.x));
-  if (down(frame)) return Math.max(0, ...at.map((p) => p.y));
-  if (frame.kind === "boxes") {
-    const n = new Map<string, number>();
-    for (const p of at) if (p.slot) n.set(p.slot, (n.get(p.slot) ?? 0) + 1);
-    return Math.max(0, ...n.values());
-  }
+  const n = new Map<string, number>();
+  for (const p of at) if (p.slot) n.set(p.slot, (n.get(p.slot) ?? 0) + 1);
+  const most = Math.max(0, ...n.values());
+  if (down(frame)) return most ? 8 + (most - 1) * ALONG_Y : 0;
+  if (frame.kind === "boxes") return most;
   return 0;
 }
 
 const centre = (p: At): At => ({ x: p.x + NODE_W / 2, y: p.y + NODE_H / 2 });
 
+// a column ends at its bottom: the waiting zone is under it
 const inside = (r: Region, frame: Frame, p: At) => {
   const c = centre(p);
   if (across(frame)) return c.y >= r.y && c.y < r.y + r.h + 8;
-  if (down(frame)) return c.x >= r.x && c.x < r.x + r.w + 12;
+  if (down(frame))
+    return c.x >= r.x && c.x < r.x + r.w + 12 && c.y < r.y + r.h + 12;
   return c.x >= r.x && c.x < r.x + r.w && c.y >= r.y && c.y < r.y + r.h;
 };
 
 // The slot a part dropped at `p` lands in, or null outside every slot.
-export function slotAt(frame: Frame, p: At, span = 0): string | null {
-  return regions(frame, span).find((r) => inside(r, frame, p))?.slot ?? null;
+export function slotAt(frame: Frame, p: At, span = 0, n = 0): string | null {
+  return regions(frame, span, n).find((r) => inside(r, frame, p))?.slot ?? null;
 }
 
-// Where the parts outside the frame wait: under the lanes and the boxes,
-// right of the columns. A framed canvas draws a part with no slot there, never
-// inside a slot it is not in, so the picture reads as the check does.
-// `label`: the worked case keeps its hidden part here, where its slot would
-// point at the answer. `n`: the most parts that can wait there (every part
-// of the step): the zone is sized for them all from the start, in rows that
-// wrap inside the frame, so placing one never grows the canvas (it grew a
-// card wider each time, the view refit, and the next drop target moved).
+// Where the parts outside the frame wait: under the frame, every kind (right
+// of six ticks, the zone made the axis too wide to read at 1440). A framed
+// canvas draws a part with no slot there, never inside a slot it is not in,
+// so the picture reads as the check does. `label`: the worked case keeps its
+// hidden part here, where its slot would point at the answer. `n`: every
+// part of the step, which the frame is sized for; `hold`: the most parts
+// that can wait here (all of them, while you build): the zone is sized for
+// them from the start, in rows that wrap inside the frame, so placing one
+// never grows the canvas (it grew a card wider each time, the view refit,
+// and the next drop target moved).
 export function looseZone(
   frame: Frame,
   span = 0,
   label?: string,
   n = 1,
+  hold = n,
 ): Region | null {
-  const rs = regions(frame, span);
+  const rs = regions(frame, span, n);
   if (!rs.length) return null;
-  if (down(frame)) {
-    const right = Math.max(...rs.map((r) => r.x + r.w)) + 40;
-    const h = rs[0].h;
-    const cols = Math.ceil(Math.max(1, n) / perLine(h - 32, NODE_H));
-    return {
-      slot: "",
-      label: label ?? "Not in a column yet",
-      x: right,
-      y: -TOP,
-      w: cols * (NODE_W + GAP) - GAP + 28,
-      h,
-    };
-  }
   const bottom = Math.max(...rs.map((r) => r.y + r.h)) + 30;
   const w = Math.max(...rs.map((r) => r.x + r.w)) - rs[0].x;
-  const rows = Math.ceil(Math.max(1, n) / perLine(w - 14, NODE_W));
+  const rows = Math.ceil(Math.max(1, hold) / perLine(w - 14, NODE_W));
   return {
     slot: "",
-    label: label ?? (across(frame) ? "Not in a lane yet" : "Not in a box yet"),
+    label:
+      label ??
+      (across(frame)
+        ? "Not in a lane yet"
+        : down(frame)
+          ? "Not in a column yet"
+          : "Not in a box yet"),
     x: rs[0].x,
     y: bottom,
     w,
@@ -165,16 +173,8 @@ export function looseZone(
 const perLine = (len: number, card: number) =>
   Math.max(1, Math.floor((len + GAP) / (card + GAP)));
 
-// The i-th spot in the waiting zone: down then across beside the columns,
-// across then down under the lanes and boxes.
-const looseSpot = (frame: Frame, z: Region, i: number): At => {
-  if (down(frame)) {
-    const per = perLine(z.h - 32, NODE_H);
-    return {
-      x: z.x + 14 + Math.floor(i / per) * (NODE_W + GAP),
-      y: z.y + 32 + (i % per) * (NODE_H + GAP),
-    };
-  }
+// The i-th spot in the waiting zone: across, then down.
+const looseSpot = (z: Region, i: number): At => {
   const per = perLine(z.w - 14, NODE_W);
   return {
     x: z.x + 14 + (i % per) * (NODE_W + GAP),
@@ -191,10 +191,12 @@ const boxSpot = (r: Region, k: number): At => ({
 });
 
 // Where each placed part is drawn. On a free map, where it is. On a frame,
-// along its slot (a lane's middle line, a column's middle), and in the
-// waiting zone when it has no slot. In a box, on one of its spots, under its
-// label (a part at the box's corner sat on "CONGRESS"). `n`: every part of
-// the step, which the waiting zone is sized for.
+// along its slot (a lane's middle line), on a column's or a box's spots, in
+// the order they sit (a part at the box's corner sat on "CONGRESS"), and in
+// the waiting zone when it has no slot, on a spot of its own: its place
+// among the parts placed, so taking one out of the zone moves no other (they
+// moved up a spot after each drop, under the pointer). `n`: every part of
+// the step, which the frame and the waiting zone are sized for.
 export function drawn(
   frame: Frame,
   placed: (At & { id: string; slot?: string })[],
@@ -204,50 +206,51 @@ export function drawn(
     frame,
     placed.filter((p) => p.slot),
   );
-  const rs = regions(frame, span);
+  const rs = regions(frame, span, n);
   const out: Record<string, At> = {};
   if (!rs.length) {
     for (const p of placed) out[p.id] = { x: p.x, y: p.y };
     return out;
   }
   const z = looseZone(frame, span, undefined, n)!;
-  let loose = 0;
-  for (const p of placed) {
+  placed.forEach((p, i) => {
     const r = p.slot ? rs.find((x) => x.slot === p.slot) : undefined;
-    // in a lane a part sits on the lane's middle line, in a column down its
-    // middle: one a little off it drew its links slanted, and one at a
-    // lane's top edge sat higher than the rest of its row
-    if (!r) out[p.id] = looseSpot(frame, z, loose++);
+    // in a lane a part sits on the lane's middle line: one a little off it
+    // drew its links slanted, and one at a lane's top edge sat higher than
+    // the rest of its row
+    if (!r) out[p.id] = looseSpot(z, i);
     else if (across(frame))
       out[p.id] = { x: Math.max(p.x, 8), y: r.y + (r.h - NODE_H) / 2 };
-    else if (down(frame))
-      out[p.id] = { x: r.x + (r.w - NODE_W) / 2, y: Math.max(p.y, 8) };
-  }
-  // in a box, its parts sit on its spots, two to a row, in the order they
-  // are placed in it (by height, then across): kept where they were
-  // dropped, one hung off the bottom of its box while the check counted it
-  // in, and two dropped close pushed each other out of line
-  if (frame.kind === "boxes")
+  });
+  // in a column or a box, its parts sit on its spots in the order they are
+  // placed in it (by height, then across): kept where they were dropped,
+  // one hung off the bottom of its box while the check counted it in, a
+  // drop low in a column made the column taller and moved the zone under it
+  if (!across(frame))
     for (const r of rs)
       placed
         .filter((p) => p.slot === r.slot)
         .sort((a, b) => a.y - b.y || a.x - b.x)
         .forEach((p, k) => {
-          out[p.id] = boxSpot(r, k);
+          out[p.id] = down(frame) ? colSpot(r, k) : boxSpot(r, k);
         });
-  // two parts pulled to one spot would hide each other: a later one moves
-  // on along its lane or down its column until it is clear
+  // two parts pulled to one spot along a lane would hide each other: a
+  // later one moves on along it until it is clear
   const done: At[] = [];
   for (const p of placed) {
     const q = out[p.id];
-    if (frame.kind !== "boxes" || !p.slot)
-      for (let k = 0; k < 40 && !clear(done, q); k++)
-        if (across(frame)) q.x += NODE_W + GAP;
-        else q.y += NODE_H + GAP;
+    if (across(frame) && p.slot)
+      for (let k = 0; k < 40 && !clear(done, q); k++) q.x += NODE_W + GAP;
     done.push(q);
   }
   return out;
 }
+
+// the k-th spot down a column
+const colSpot = (r: Region, k: number): At => ({
+  x: r.x + (r.w - NODE_W) / 2,
+  y: 8 + k * ALONG_Y,
+});
 
 const clear = (taken: At[], p: At) =>
   taken.every(
@@ -262,7 +265,7 @@ export function spotIn(frame: Frame, r: Region, taken: At[]): At {
     const p = across(frame)
       ? { x: 16 + k * ALONG_X, y: r.y + (r.h - NODE_H) / 2 }
       : down(frame)
-        ? { x: r.x + (r.w - NODE_W) / 2, y: 8 + k * ALONG_Y }
+        ? colSpot(r, k)
         : boxSpot(r, k);
     if (clear(taken, p)) return p;
   }
@@ -284,15 +287,14 @@ export function nextSpot(
     frame,
     placed.filter((p) => p.slot),
   );
-  const rs = regions(frame, span);
+  const rs = regions(frame, span, n);
   if (frame.kind === "axis") {
     const r = rs.find((x) => !placed.some((p) => p.slot === x.slot));
     if (r) return { ...spotIn(frame, r, placed), slot: r.slot };
   }
-  if (rs.length) {
-    const z = looseZone(frame, span, undefined, n)!;
-    return looseSpot(frame, z, placed.filter((p) => !p.slot).length);
-  }
+  // the zone's spot drawn holds it: its place among the parts placed
+  if (rs.length)
+    return looseSpot(looseZone(frame, span, undefined, n)!, placed.length);
   for (let k = 0; k < 60; k++) {
     const p = { x: (k % 3) * (NODE_W + 48), y: Math.floor(k / 3) * 110 };
     if (clear(placed, p)) return p;
@@ -354,15 +356,16 @@ export function tidy(
       y: Math.round(n.y - NODE_H / 2),
     };
   }
-  // a box is as tall as the most parts one box holds
+  // a box is as tall as the most parts one box holds, a column as deep
   const rs = regions(
     frame,
-    frame.kind === "boxes"
-      ? spanOf(
+    across(frame)
+      ? 0
+      : spanOf(
           frame,
           parts.map((p) => ({ x: 0, y: 0, slot: p.slot })),
-        )
-      : 0,
+        ),
+    parts.length,
   );
   if (!rs.length) return fold(free);
   const out: Record<string, At> = {};
@@ -381,11 +384,17 @@ export function tidy(
     }
   }
   for (const p of parts) if (!(p.id in out)) loose.push(p);
-  const z = looseZone(frame, 0, undefined, loose.length)!;
+  const span = spanOf(
+    frame,
+    parts
+      .filter((p) => p.id in out)
+      .map((p) => ({ ...out[p.id], slot: p.slot })),
+  );
+  const z = looseZone(frame, span, undefined, parts.length, loose.length)!;
   loose
     .sort((a, b) => free[a.id].x - free[b.id].x)
     .forEach((p, i) => {
-      out[p.id] = looseSpot(frame, z, i);
+      out[p.id] = looseSpot(z, i);
     });
   return out;
 }
@@ -530,7 +539,7 @@ function along(p: At, q: At, u: At, v: At): number {
 
 // What a route costs to read: a part it runs through (its own two included:
 // an arc could leave a part and come back down through it) costs most, then
-// a label on a card or on another label, a straight link too short to show
+// a label on another label, a label on a card, a straight link too short to show
 // its line beside its label, a run along a link already drawn, leaving the
 // box both ends sit in, and last its length. The cheapest is drawn: a route
 // with nothing clear was drawn as the first arc tried, through a part.
@@ -592,7 +601,9 @@ export function cost(
   if (label) {
     const box = labelBox(c, label);
     for (const [, o] of parts) if (overlap(box, card(o))) total += 40;
-    for (const l of seen.labels) if (overlap(box, l)) total += 40;
+    // two labels on one spot read as neither ("causes ·s", with
+    // "activates" under it): worse than any detour short of a part
+    for (const l of seen.labels) if (overlap(box, l)) total += 90;
     for (const m of seen.marks) if (overlap(box, m)) total += 15;
     // the line must show beside its label: between parts stacked close,
     // the label covered all of it and the link read as a stub
@@ -676,9 +687,9 @@ export function route(
   ];
   let best = tries[0];
   let low = Infinity;
-  // the label half way, or a little to one side when that clears it
+  // the label half way, or to one side when that clears it
   for (const base of tries)
-    for (const f of label ? [0.5, 0.3, 0.7] : [0.5]) {
+    for (const f of label ? [0.5, 0.3, 0.7, 0.2, 0.8] : [0.5]) {
       const r = f === 0.5 ? base : { ...base, at: f };
       const c =
         cost(from, to, at, r, label, seen, within) + (f === 0.5 ? 0 : 1);

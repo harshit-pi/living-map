@@ -336,6 +336,8 @@ export type StepView = {
   // a quick rebuild waiting (in-session spacing), or one under way
   recallDue: boolean;
   recall: boolean;
+  // how the quick rebuild came out, once it passed
+  recalled: { credit: Credit; tries: number } | null;
   reviewing: boolean;
   itemsDue: number;
 };

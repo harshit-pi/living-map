@@ -54,6 +54,11 @@ const RUNG_WORD: Record<Rung, string> = {
   kept: "Kept",
 };
 
+// what is due on a step is its key links: "3 due for review" under one
+// step read as three steps, beside "1 step is due"
+const dueWord = (n: number) =>
+  `due for review · ${n} key ${n === 1 ? "link" : "links"}`;
+
 function railMark(st: StepView): RailMark {
   const meter = RUNGS.map((r) => {
     const c = st.rungs[r];
@@ -91,7 +96,7 @@ function railMark(st: StepView): RailMark {
     return {
       mark: "↻",
       cls: "border-primary bg-surface text-primary-strong",
-      word: `${st.itemsDue} due for review · new case open`,
+      word: `${dueWord(st.itemsDue)} · new case open`,
       meter,
     };
   if (st.stage === "built")
@@ -99,9 +104,7 @@ function railMark(st: StepView): RailMark {
       ? {
           mark: "↻",
           cls: "border-primary bg-surface text-primary-strong",
-          word: st.recallDue
-            ? "quick rebuild waiting"
-            : `${st.itemsDue} due for review`,
+          word: st.recallDue ? "quick rebuild waiting" : dueWord(st.itemsDue),
           meter,
         }
       : {
@@ -177,13 +180,21 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
       tops[0]);
   if (current && !selStep && pinned !== current.step) setPinned(current.step);
 
-  // a different step starts on its own canvas, with nothing half-done
-  const key = current?.step ?? "";
-  const [shownFor, setShownFor] = useState(key);
+  // a different step starts on its own canvas, with nothing half-done. A
+  // play step not yet built opens on its scene, which comes first (spec §1):
+  // "I know some" skipped See, and the step opened on Build the order. Its
+  // mode is known once its model is in, so that counts as a new key too.
+  const key = current ? `${current.step}:${current.mode}` : "";
+  // empty at first, so the step the map opens on starts the same way
+  const [shownFor, setShownFor] = useState("");
   if (shownFor !== key) {
     setShownFor(key);
     setCentre(
-      current?.mode === "play" && current.stage === "see" ? "play" : "step",
+      current?.mode === "play" &&
+        (current.stage === "see" ||
+          (current.stage === "build" && current.checks === 0))
+        ? "play"
+        : "step",
     );
     setThread(false);
   }
@@ -428,7 +439,7 @@ function StepArea({
   const { map, live } = ws;
   const mode = canvasMode(st);
   // Draw this step at once looks under way: the move takes a moment to start
-  const drawing = writing || pending("open");
+  const drawing = writing || pending("open", { step: st.step });
   // what the centre shows: the topic diagram only where there is one and you
   // are not building (it may draw the links), the scene only on a play step
   const centre =
@@ -490,6 +501,14 @@ function StepArea({
         {review && reviewDone && (
           <div className="border-b border-line pb-3">
             <ReviewPanel here={here} review={review} />
+          </div>
+        )}
+        {/* a quick rebuild that passed says so first: the card went
+            straight back to the step's old Why, as if nothing had happened */}
+        {ready && st.stage === "built" && st.recalled && (
+          <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] font-medium text-success-strong">
+            ↻ Quick rebuild ✓ · {CREDIT[st.recalled.credit].word}
+            {st.recalled.tries > 1 ? ` · on try ${st.recalled.tries}` : ""}
           </div>
         )}
         {ready && st.stage === "see" && (
@@ -562,6 +581,9 @@ function StepArea({
         onShow={() => void ws.run({ type: "playshow", nodeId: st.step })}
         onReplay={() => void ws.run({ type: "replay", nodeId: st.step })}
         onNext={() => setCentre("step")}
+        nextLabel={
+          st.stage === "built" ? "Back to the order ▸" : "Build the order ▸"
+        }
       />
     ) : (
       <div className="flex h-full items-center justify-center">
@@ -656,7 +678,10 @@ function StepArea({
 
   return (
     <>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
+      {/* stacked (under 1024 wide), this keeps its own height and the side
+          card scrolls in under it: let shrink to fit, the canvas ran past
+          its end and the message box sat on the check card's heading */}
+      <div className="flex min-w-0 flex-none flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
         {ready && mode === "build" && centre === "step" && (
           <Tray here={here} st={st} />
         )}
@@ -737,7 +762,33 @@ function StepArea({
                   <span className="font-semibold tracking-wide text-faint uppercase">
                     Worked case
                   </span>{" "}
-                  · {[st.caseTitle, st.case].filter(Boolean).join(", ")}
+                  ·{" "}
+                  {/* the case's name, then what happens in it: joined by a
+                  comma they read as one run-on line */}
+                  {st.caseTitle && (
+                    <span className="font-medium text-body">
+                      {st.caseTitle}
+                    </span>
+                  )}
+                  {st.caseTitle && st.case && " — "}
+                  {st.case}
+                </div>
+              )}
+            {/* while you build, the case's name stays in view: a sort
+                step's columns weigh evidence for a claim, and the claim was
+                said only on the See you skipped ("The case against Germany,
+                1914"). The server leaves it out where it names a part you
+                are to recall. */}
+            {ready &&
+              mode === "build" &&
+              centre === "step" &&
+              !st.onCase &&
+              st.caseTitle && (
+                <div className="text-[11.5px] text-muted">
+                  <span className="font-semibold tracking-wide text-faint uppercase">
+                    Case
+                  </span>{" "}
+                  · <span className="text-body">{st.caseTitle}</span>
                 </div>
               )}
             {ready &&

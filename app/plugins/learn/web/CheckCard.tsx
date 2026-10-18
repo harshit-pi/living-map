@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { ArgueBox, SmallBtn } from "./BuildCanvas.tsx";
-import { MARK, WAIT_TITLE, type Here } from "./view.ts";
+import { MARK, slotWord, WAIT_TITLE, type Here } from "./view.ts";
 import {
   orderStops,
   SURES,
@@ -65,76 +65,10 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
         )}
       </div>
 
-      {!c ? (
-        <p className="text-[12.5px] leading-snug text-muted">
-          Build it from memory, then check. The check marks each link at once;
-          hints open after your first check.
-        </p>
-      ) : (
-        <>
-          {/* the counts and marks are of the build as it was checked */}
-          {st.changed && (
-            <div className="text-[11.5px] text-muted">
-              Your build changed since this check: check again to mark it.
-            </div>
-          )}
-          <Counts st={st} />
-        </>
-      )}
-
-      <CheckFindings here={here} st={st} />
-
-      {st.hints.length > 0 && (
-        <div className="space-y-1 border-t border-line pt-2">
-          {st.hints.map((h, i) => (
-            <div key={i} className="text-[12px] leading-snug text-body">
-              <span className="font-medium text-hint-strong">
-                Hint · {h.rung === 1 ? "where" : h.rung === 2 ? "ask" : "ghost"}
-                :
-              </span>{" "}
-              {h.text}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {c && (
-        <div className="flex flex-wrap gap-1.5 border-t border-line pt-2">
-          <SmallBtn
-            disabled={!st.canHint}
-            title="Where, then a question, then the link drawn dashed. Instant."
-            onClick={() => void act("hint", { step })}
-          >
-            Hint
-          </SmallBtn>
-          <SmallBtn
-            disabled={!st.canHint}
-            title={
-              st.hintOn === "place"
-                ? "Puts one part where it goes; it counts as shown"
-                : "Draws one link for you; it counts as shown"
-            }
-            onClick={() => void act("showLink", { step })}
-          >
-            {st.hintOn === "place" ? "Show one place" : "Show one link"}
-          </SmallBtn>
-          {!st.reviewing && !st.recall && (
-            <SmallBtn
-              title="Shows the whole model as long as you want, then you rebuild it at L1. It counts as shown."
-              onClick={() => void act("showModel", { step })}
-            >
-              Show the model
-            </SmallBtn>
-          )}
-        </div>
-      )}
-      {shownKeys > 0 && st.help > 0 && (
-        <div className="text-[11px] text-muted">
-          Dashed links were drawn for you.
-        </div>
-      )}
-
-      <div className="space-y-2 border-t border-line pt-2">
+      {/* the buttons come first and stay put: under the counts, an
+          argued link's verdict or a deleted link's row moved them, and a
+          click meant for Hint landed on Check again */}
+      <div className="space-y-2">
         <HowSure
           value={st.sure}
           onPick={(sure) => void act("sure", { step, sure })}
@@ -149,6 +83,36 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
         >
           {c ? "Check again" : "Check"}
         </button>
+        {c && (
+          <div className="flex flex-wrap gap-1.5">
+            <SmallBtn
+              disabled={!st.canHint}
+              title="Where, then a question, then the link drawn dashed. Instant."
+              onClick={() => void act("hint", { step })}
+            >
+              Hint
+            </SmallBtn>
+            <SmallBtn
+              disabled={!st.canHint}
+              title={
+                st.hintOn === "place"
+                  ? "Puts one part where it goes; it counts as shown"
+                  : "Draws one link for you; it counts as shown"
+              }
+              onClick={() => void act("showLink", { step })}
+            >
+              {st.hintOn === "place" ? "Show one place" : "Show one link"}
+            </SmallBtn>
+            {!st.reviewing && !st.recall && (
+              <SmallBtn
+                title="Shows the whole model as long as you want, then you rebuild it at L1. It counts as shown."
+                onClick={() => void act("showModel", { step })}
+              >
+                Show the model
+              </SmallBtn>
+            )}
+          </div>
+        )}
         {!c && !st.reviewing && !st.recall && (
           <button
             onClick={() => setAsking((v) => !v)}
@@ -171,6 +135,46 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           </div>
         )}
       </div>
+
+      <div className="space-y-3 border-t border-line pt-2">
+        {!c ? (
+          <p className="text-[12.5px] leading-snug text-muted">
+            Build it from memory, then check. The check marks each link at once;
+            hints open after your first check.
+          </p>
+        ) : (
+          <>
+            {/* the counts and marks are of the build as it was checked */}
+            {st.changed && (
+              <div className="text-[11.5px] text-muted">
+                Your build changed since this check: check again to mark it.
+              </div>
+            )}
+            <Counts st={st} />
+          </>
+        )}
+
+        {st.hints.length > 0 && (
+          <div className="space-y-1">
+            {st.hints.map((h, i) => (
+              <div key={i} className="text-[12px] leading-snug text-body">
+                <span className="font-medium text-hint-strong">
+                  Hint ·{" "}
+                  {h.rung === 1 ? "where" : h.rung === 2 ? "ask" : "ghost"}:
+                </span>{" "}
+                {h.text}
+              </div>
+            ))}
+          </div>
+        )}
+        {shownKeys > 0 && st.help > 0 && (
+          <div className="text-[11px] text-muted">
+            Dashed links were drawn for you.
+          </div>
+        )}
+
+        <CheckFindings here={here} st={st} />
+      </div>
       {busy && (
         <div className="text-[11px] text-faint" title={WAIT_TITLE}>
           Checking and hints never wait on Claude.
@@ -180,22 +184,12 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
   );
 }
 
-// the frame's word for a slot
-const slotWord = (st: StepView) =>
-  st.frame.kind === "lanes"
-    ? "lane"
-    : st.frame.kind === "boxes"
-      ? "box"
-      : st.frame.kind === "axis"
-        ? "tick"
-        : "column";
-
 // What the last check counted: links right, key links, what is missing or
 // the wrong way, where the parts sit, and what a pass still needs.
 function Counts({ st }: { st: StepView }) {
   const c = st.check!;
   const argued = c.argued ?? 0;
-  const word = slotWord(st);
+  const word = slotWord(st.frame);
   const wrongSlots = c.slots.filter((s) => !s.ok).length;
   const loose = c.loose ?? 0;
   const order = orderStops(st.frame);

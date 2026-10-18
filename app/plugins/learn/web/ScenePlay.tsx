@@ -237,6 +237,7 @@ export function ScenePlay({
   onReplay,
   onHint,
   onNext,
+  nextLabel = "Next step ▸",
 }: {
   scene: Scene;
   stepTitle: string;
@@ -248,6 +249,9 @@ export function ScenePlay({
   // a build map has no hint ladder on a scene: its hints are on the build
   onHint?: () => void;
   onNext: () => void;
+  // what the finish card's main button says (a build map's play step goes
+  // on to rebuild the order, not to the next step)
+  nextLabel?: string;
 }) {
   const [flash, setFlash] = useState<Flash>(null);
   const [text, setText] = useState("");
@@ -403,7 +407,7 @@ export function ScenePlay({
                 onClick={onNext}
                 className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong"
               >
-                Next step ▸
+                {nextLabel}
               </button>
               <button
                 onClick={onReplay}

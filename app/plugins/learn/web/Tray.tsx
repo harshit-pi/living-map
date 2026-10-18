@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { PART_DRAG } from "./BuildCanvas.tsx";
 import { nextSpot } from "./frame.ts";
-import type { Here } from "./view.ts";
+import { slotWord, type Here } from "./view.ts";
 import { FAMILIES, familyOf, type Family, type StepView } from "../shared.ts";
 
 // The parts not yet placed and the verbs this frame takes. Click a part to
@@ -16,6 +16,8 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
   const spot = () =>
     nextSpot(st.frame, st.placed, st.placed.length + st.trayCount);
   const typing = st.help === 3;
+  const loose =
+    st.frame.kind === "free" ? 0 : st.placed.filter((p) => !p.slot).length;
 
   const send = async () => {
     const t = text.trim();
@@ -30,7 +32,13 @@ export function Tray({ here, st }: { here: Here; st: StepView }) {
         Parts
       </div>
       {st.trayCount === 0 ? (
-        <div className="mt-1 text-[12px] text-muted">all placed</div>
+        // all on the canvas is not all placed: "all placed" sat beside
+        // seven parts still in "Not in a column yet"
+        <div className="mt-1 text-[12px] text-muted">
+          {loose > 0
+            ? `all on the canvas · ${loose} still to put in a ${slotWord(st.frame)}`
+            : "all placed"}
+        </div>
       ) : typing ? (
         <div className="mt-1">
           <div className="text-[12px] text-muted">

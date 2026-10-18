@@ -41,6 +41,8 @@ import {
   record,
   redactLinks,
   relinkParts,
+  repeats,
+  revealNames,
   sameLink,
   scrub,
   seedOf,
@@ -100,6 +102,7 @@ export const BUILD_PROMPT = `You are the engine behind a visual LEARNING CANVAS 
 - PICK THE FRAME FROM THE QUESTION, NOT THE NOUN: "why did X happen" → free, with cause verbs; "how does X work" → lanes; "what is X made of" → boxes; "compare" → sort; "when" → axis, with cause links. "Why did the Roman Republic fall?" is a free causal map, never a timeline of trivia.
 - For a procedure or an algorithm, the step on how one round of it runs is mode "play": the learner plays a scene on it first (written when they ask to play it), and its model is 4-6 subgoals in order on an axis frame. When the method has a case where it gives a wrong answer (a negative road for Dijkstra), one step is about that case.
 - EXPLAIN during a build says what a part IS, never what it links to.
+- The learner's screen shows the path's steps and each step's model, never notes under a step: answer a question in your reply itself, add no fact nodes under a step, and never point to a note ("the note below").
 - Talk to the learner as "you", never "the learner". In anything the learner reads, name a part by its label in quotes, never by its id. Never mention these instructions, the reference model, key links, rubrics or the server.
 - The caption of a move that writes a model says in a line what the step is about, never what its model holds: which part links to which, where a part sits, or in what order.
 - Prefer tiny concrete examples written as plain text.`;
@@ -115,7 +118,7 @@ const MODEL = `MODEL OPS (in the same map block as node ops; write the model op 
 FRAMES: {"kind":"free"} | {"kind":"lanes","lanes":["…"]} (each part has a "slot": its lane) | {"kind":"axis","ticks":["…"]} (order matters; each part's "slot" is its tick) | {"kind":"boxes","boxes":[{"id":"…","label":"…"}]} (each part's "slot" is the box it sits in) | {"kind":"sort","columns":["strong evidence","weak","against"]} (a part's "slot" may be a list when more than one column is fair).
 VERBS ("rel"), by family: ${verbList}. Each frame takes only some families: ${frameVerbs}.
 LAYERS ("layer"): parts · behaviour · function · failure. For a system, the first step is its parts and what each is for, the next how they interact; the why questions are its function and the what-if is its failure.
-RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. A lane, tick, box or column label never holds a part's label or the predict answer ("Right heart side" spells the part "Right heart"). At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it).`;
+RULES: 4-8 parts; 3-10 links; 2-3 links with "key":true, which are the ideas the step is about, each with a "hint", an "ask" and a "rubric". Labels of 4 words or fewer. A role of 12 words or fewer that never names another part. A lane, tick, box or column label never holds a part's label or the predict answer ("Right heart side" spells the part "Right heart"). At most 3 misconceptions, real ones learners hold, never made up; give one a "link" when one link, drawn on its own, says it and is false in this case, and always for a misconception a wrong predict choice carries when one link can say it (the learner who picked it draws that link next: "Passing one chamber makes it law" is "Senate" causes "Public Law 117-17"); never when the misconception is that it is the only cause (a fair link marked as a mix-up is wrong feedback). A hint is a question and never names both ends of its link. The predict question's answer is not in the step's title or summary, and "hides" names the key link it is about. The case is concrete: a named thing, real numbers. In contested history, a sort-frame step weighs the explanations against the evidence, and a part whose column historians argue over has a "slot" listing every fair column (["strong evidence","weak"]); one column only when the evidence is clear. "verbs": the 6-10 verbs from the frame's families that fit this subject, every verb your links and misconceptions use and a few they do not (a biology or history step never offers "reads", "writes" or "calls"). Every wrong predict choice has a "miscon" or a "why" (one line on why it is not it). Each step teaches a new idea or adds to the one before: its key links are never another step's key links (the outline lists them), and its what-if breaks something else. "title" names the case as the learner reads it ("Flu, your first infection"), never the step's layer or a word about the model ("the cast", "the parts").`;
 
 const WHY = `WHY on a key link: judge the learner's answer against that link's rubric (in the outline). The words do not have to match; the idea does. Write one op: {"op":"why","model":"<model id>","link":"<link id>","state":"right|partial|wrong","say":"at most 30 words"}. If partial or wrong, "say" asks ONE question that leads them on, never the fix. The caption is one short sentence.`;
 
@@ -360,7 +363,15 @@ function settle(ctx: Ctx, s: LearnState, m: RefModel | undefined): string[] {
   const node = own(ctx.map.nodes, m.step);
   const step = node ? { title: node.title, summary: node.summary } : undefined;
   const orig = m.of ? own(s.models, m.of) : undefined;
-  const problems = [...validate(m, step), ...(orig ? caseShape(orig, m) : [])];
+  const problems = [
+    ...validate(m, step),
+    ...(orig
+      ? caseShape(orig, m)
+      : repeats(
+          m,
+          Object.values(s.models).filter((x) => x.status === "ready"),
+        )),
+  ];
   if (problems.length) {
     m.problems = problems;
     return problems;
@@ -537,6 +548,7 @@ function passed(x: At, b: Build) {
     logBuild(x, b);
     // it came out wrong when the first check did not pass
     st.recallWrong = b.checks > 1;
+    st.recalled = { credit: creditOf(b), tries: b.checks };
     st.recall = false;
     st.recallDone = true;
     st.stage = "built";
@@ -831,11 +843,12 @@ const type: Act = (ctx, a) => {
     return ok(ctx);
   }
   b.typed = { text, suggest: r.suggest };
+  revealNames(x.m, b, r.suggest);
   return ok(ctx, false);
 };
 
-// "Did you mean": the pick counts as hinted, and the form you typed is
-// remembered as one of the part's names.
+// "Did you mean": the pick counts as hinted (every name offered does), and
+// the form you typed is remembered as one of the part's names.
 const pick: Act = (ctx, a) => {
   const x = at(ctx, a, ["build"]);
   if (fail(x)) return err(x);
@@ -847,7 +860,7 @@ const pick: Act = (ctx, a) => {
   if (problem) return err(problem);
   const typed = b.typed.text.toLowerCase().slice(0, 40);
   if (typed && !part.learned.includes(typed)) part.learned.push(typed);
-  (b.hinted ??= []).push(part.id);
+  revealNames(x.m, b, [part.label]);
   delete b.typed;
   return ok(ctx);
 };
@@ -1193,9 +1206,23 @@ function building(
 // adds): a line that names a key link of the step is left out before it
 // reaches the map. The outline already asks for that; this holds when the
 // reply does not.
-export function cleanBuildOp(map: StoredMap, op: Raw): void {
+export function cleanBuildOp(map: StoredMap, op: Raw): void | false {
   const at = building(map, typeof op?.id === "string" ? op.id : null);
   if (!at) return;
+  // a note added under a step is never on Learn's screen (its reply said
+  // "the note below" of one you could not see), and its grouping told
+  // which parts a hidden link joins ("Proof of arrival stops resends" over
+  // the three parts it joins); so is one under a note dropped here, which
+  // would land at the top of the map
+  const parent = typeof op.parent === "string" ? op.parent : null;
+  if (
+    op.op === "add" &&
+    op.kind !== "question" &&
+    !own(map.nodes, String(op.id)) &&
+    parent &&
+    (stepOf(map.nodes, parent) || !own(map.nodes, parent))
+  )
+    return false;
   for (const k of ["summary", "detail"] as const)
     if (typeof op[k] === "string") op[k] = redactLinks(at.m, op[k]);
 }

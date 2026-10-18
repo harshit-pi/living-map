@@ -114,8 +114,9 @@ export function applyOps(
     judge = false,
     // a plugin's handler for ops core does not know (null: not its op either)
     extra = undefined as ((op: Raw) => number | null) | undefined,
-    // a plugin's cleaning of a node op's text, before it is applied
-    clean = undefined as ((op: Raw) => void) | undefined,
+    // a plugin's cleaning of a node op's text, before it is applied; false
+    // drops the op
+    clean = undefined as ((op: Raw) => void | false) | undefined,
     // nothing on the map may be removed or reworded (a mode switch: what you
     // explored stays, and reads the same when you switch back)
     keep = false,
@@ -204,7 +205,8 @@ export function applyOps(
     }
     const id = String(op?.id ?? "").trim();
     if (!safeId(id)) continue;
-    if (clean && (op.op === "add" || op.op === "update")) clean(op);
+    if (clean && (op.op === "add" || op.op === "update") && clean(op) === false)
+      continue;
     const allowed = inScope();
     const cur = own(nodes, id);
     if (keepYours && cur?.by === "you") {

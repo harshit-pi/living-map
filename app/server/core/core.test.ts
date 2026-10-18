@@ -320,6 +320,34 @@ test("a scene is played move by move; answers never reach the browser", () => {
   assert.equal(cleanScene({ kind: "pie", moves: [] }), null);
 });
 
+test("an open move's answer carries no pointer or mark: the scene does not point at it", () => {
+  const sc = scene(
+    cleanScene({
+      kind: "array",
+      title: "Bytes held",
+      start: {
+        items: ["1-1000", "1001-2000", "2001-3000"],
+        pointers: [
+          { name: "next", at: 1 },
+          { name: "base", at: 0 },
+        ],
+        marks: [
+          { at: 1, tone: "focus" },
+          { at: 2, tone: "dim" },
+        ],
+      },
+      moves: [
+        { ask: "Which must the laptop keep?", answer: { index: 1 }, why: "" },
+      ],
+    }),
+  );
+  const v = sceneView(sc).state as ArrayState;
+  assert.deepEqual(v.pointers, [{ name: "base", at: 0 }]);
+  assert.deepEqual(v.marks, [{ at: 2, tone: "dim" }]);
+  // the scene's own data keeps them: only the view leaves them out
+  assert.equal((sc.start as ArrayState).pointers.length, 2);
+});
+
 test("a scene streamed move by move is playable before it is complete", () => {
   const m: Canvas = {
     nodes: {

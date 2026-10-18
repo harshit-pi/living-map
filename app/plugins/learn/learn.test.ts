@@ -43,9 +43,12 @@ import {
   outcomes,
   outlineOf,
   paraphrases,
+  placePart,
   record,
   redactLinks,
   relinkParts,
+  repeats,
+  revealNames,
   sameGraph,
   sameModel,
   scrub,
@@ -74,6 +77,7 @@ import { verbsFor, type Verb } from "./shared.ts";
 import {
   blocked,
   drawn,
+  labelWidth,
   looseZone,
   NODE_H,
   NODE_W,
@@ -81,6 +85,8 @@ import {
   pathOf,
   regions,
   route,
+  slotAt,
+  spanOf,
   type At,
 } from "./web/frame.ts";
 import { act } from "../../server/actions/index.ts";
@@ -167,6 +173,12 @@ const LINKS = [
   { id: "l5", from: "bcell", to: "plasma", rel: "becomes" },
   KEY("l6", "plasma", "antibody", "makes"),
 ];
+// a new case's links: the same key links, other links around them
+const CASE_LINKS = [
+  ...LINKS.filter((l) => "key" in l),
+  { id: "l7", from: "virus", to: "helpert", rel: "activates" },
+  { id: "l8", from: "dendritic", to: "plasma", rel: "sends to" },
+];
 const MISCON = [
   {
     id: "x1",
@@ -209,6 +221,25 @@ const MODEL_OPS = (step: string, id = "m1") => [
   { op: "predict", model: id, ...PREDICT },
   { op: "whatif", model: id, ...WHATIF },
 ];
+
+// a later step on the same cast: other key links and another what-if (the
+// same ones would be refused as a repeat of step 1)
+const NEXT_OPS = (step: string, id = "m1") => {
+  const ops: Raw[] = MODEL_OPS(step, id);
+  ops[1] = {
+    op: "links",
+    model: id,
+    links: LINKS.map((l) =>
+      l.id === "l1" || l.id === "l2"
+        ? KEY(l.id, l.from, l.to, l.rel as Verb)
+        : l.id === "l3" || l.id === "l6"
+          ? { id: l.id, from: l.from, to: l.to, rel: l.rel }
+          : l,
+    ),
+  };
+  ops[4] = { ...ops[4], fails: "dendritic", affected: ["helpert", "bcell"] };
+  return ops;
+};
 
 function model(over: Raw = {}): RefModel {
   const m = cleanModel({ ...MODEL_OPS("s1")[0], ...over })!;
@@ -795,7 +826,7 @@ test("new-case shape: the original's graph under new names and numbers is refuse
   const other = model({
     case: "start P; roads P–Q 2, Q–R 2, R–S 2, P–S 9, Q–S 1, P–T 3",
     parts: renamed.parts,
-    links: LINKS.filter((l) => l.id !== "l1"),
+    links: CASE_LINKS,
   });
   assert.deepEqual(caseShape(orig, other), []);
   assert.equal(
@@ -1014,6 +1045,11 @@ test("fade: what each help level gives", () => {
   assert.equal(v.trayCount, 7);
   const text = JSON.stringify(v);
   for (const p of PARTS) assert.ok(!text.includes(p.label), p.label);
+  // nor does a case line that names one
+  s.models["m-s1"].title = "One Memory B cell, ten years on";
+  const named = viewOf(s, map.nodes, 0).steps[0];
+  assert.equal(named.caseTitle, "");
+  assert.ok(!JSON.stringify(named).includes("Memory B cell"));
   // L2: the tray has them, with their roles
   s.steps.s1.help = 2;
   assert.equal(viewOf(s, map.nodes, 0).steps[0].tray.length, 7);
@@ -1035,8 +1071,39 @@ test("typed match: accept list, a learned name, one slip, nothing fuzzy under 5 
   assert.ok("suggest" in r && r.suggest[0] === "Gene", JSON.stringify(r));
   const near = matchPart(m, "plazmo cel");
   assert.ok("suggest" in near);
-  assert.equal(near.suggest.length, 3);
-  assert.equal(near.suggest[0], "Plasma cell", "the closest first");
+  assert.deepEqual(near.suggest, ["Plasma cell"], "only names that are close");
+  // nonsense names nothing: L3 tests recall of the names
+  assert.deepEqual(matchPart(m, "qqq"), { suggest: [] });
+  const typo = matchPart(m, "dendrtc sel");
+  assert.ok("suggest" in typo);
+  assert.deepEqual(typo.suggest, ["Dendritic cell"]);
+  // a start of a name is offered
+  const start = matchPart(m, "helper");
+  assert.ok("suggest" in start && start.suggest.includes("Helper T cell"));
+});
+
+test("did you mean: every name it shows counts as hinted, typed afterwards too", () => {
+  const m = model();
+  const b = startBuild(m, 3);
+  revealNames(m, b, ["Helper T cell", "B cell"]);
+  assert.deepEqual(b.hinted, ["helpert", "bcell"]);
+  revealNames(m, b, ["B cell"]);
+  assert.deepEqual(b.hinted, ["helpert", "bcell"], "once each");
+  // a key link on a part whose name was shown is not "by you"
+  for (const p of m.parts) placePart(m, b, p.id, { x: 0, y: 0 });
+  for (const l of m.links.filter((x) => x.key))
+    linkParts(m, b, l.from, l.to, l.rel);
+  b.checks = 1;
+  b.first = Object.fromEntries(
+    m.links.filter((l) => l.key).map((l) => [l.id, true]),
+  );
+  const out = outcomes(m, b);
+  const touched = m.links.filter(
+    (l) =>
+      l.key && [l.from, l.to].some((p) => ["helpert", "bcell"].includes(p)),
+  );
+  assert.ok(touched.length > 0);
+  for (const l of touched) assert.equal(out[l.id].how, "hinted", l.id);
 });
 
 test("what-if: found, missed (named) and extra", () => {
@@ -1073,10 +1140,18 @@ test("new-case shape: the same labels with new numbers are refused; new labels w
     parts: PARTS.map((p) => ({ ...p, label: `New ${p.label.split(" ")[0]}x` })),
   });
   assert.match(caseShape(orig, relabelled).join(), /one for one/);
-  const fresh = model({
+  // renamed with one link dropped: still the original's links on its parts
+  const trimmed = model({
     case: "a measles vaccine, then an outbreak ten years on",
     parts: relabelled.parts,
     links: LINKS.filter((l) => l.id !== "l2"),
+  });
+  assert.match(caseShape(orig, trimmed).join(), /under new names/);
+  // the same key links, with other links around them
+  const fresh = model({
+    case: "a measles vaccine, then an outbreak ten years on",
+    parts: relabelled.parts,
+    links: CASE_LINKS,
   });
   assert.deepEqual(caseShape(orig, fresh), []);
   const otherVerbs = model({
@@ -1085,6 +1160,37 @@ test("new-case shape: the same labels with new numbers are refused; new labels w
     links: LINKS.map((l) => (l.id === "l4" ? { ...l, rel: "sends to" } : l)),
   });
   assert.match(caseShape(orig, otherVerbs).join(), /same kinds of verb/);
+});
+
+test("a step that repeats another's key links or what-if is refused; the outline lists them when a model is written", () => {
+  const one = model();
+  const same = model({ step: "s2", id: "m-s2" });
+  same.id = "m-s2";
+  // the antigen renamed changes nothing: the key links are on other parts
+  same.parts[0].label = "Toxoid";
+  const p = repeats(same, [one]);
+  assert.ok(
+    p.some((x) => /key links .* are the key links of step "s1"/.test(x)),
+  );
+  assert.ok(p.some((x) => /what-if breaks the same part/.test(x)));
+  const ops = NEXT_OPS("s2", "m-s2");
+  const next = cleanModel(ops[0])!;
+  addLinks(next, ops[1].links);
+  setWhatIf(next, ops[4]);
+  assert.deepEqual(repeats(next, [one]), []);
+  // a new case is compared with its original elsewhere, never as a repeat
+  assert.deepEqual(repeats(same, [{ ...one, of: "m0" }]), []);
+  const { m, s } = buildMap("new");
+  s.steps.s1 = { stage: "built", help: 0, rungs: freshRungs() };
+  delete s.models["m-s2"];
+  delete s.stepModel.s2;
+  const text = outlineOf(s, m.nodes, { at: "s2", others: true });
+  assert.match(text, /its key links: "Helper T cell" activates "B cell"/);
+  assert.doesNotMatch(
+    outlineOf(s, m.nodes, { at: "s2" }),
+    /its key links/,
+    "only a move that writes a model",
+  );
 });
 
 // ---------------------------------------------------------------- schedule
@@ -1428,7 +1534,7 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
   await settled(calls, 2);
   assert.equal(calls.length, 2);
   assert.match(calls[1].req.message, /MODEL for step \[s2\]/);
-  calls[1].release(reply(MODEL_OPS("s2", "m1")));
+  calls[1].release(reply(NEXT_OPS("s2", "m1")));
   await tick();
   assert.equal(s.models[s.stepModel.s2].status, "ready");
   assert.notEqual(
@@ -1637,7 +1743,7 @@ test("a new case that only swaps the numbers is retried; one that holds is built
   const fresh = structuredClone(sameShape) as Raw[];
   fresh[0].case = "a measles vaccine, then an outbreak years on";
   // a different shape: one link fewer
-  fresh[1].links = LINKS.filter((l) => l.id !== "l2");
+  fresh[1].links = CASE_LINKS;
   fresh[0].parts = PARTS.map((p) => ({
     ...p,
     label: `New ${p.label.split(" ")[0]}x`,
@@ -1721,7 +1827,7 @@ test("a later step's model is written quietly: its caption is neither streamed n
   const opened = act(engine, learnAct("open", { step: "s2" }));
   await settled(calls, 1);
   calls[0].release(
-    reply(MODEL_OPS("s2", "m9"), "The B cell becomes a Memory B cell here."),
+    reply(NEXT_OPS("s2", "m9"), "The B cell becomes a Memory B cell here."),
   );
   await opened;
   assert.equal(s.models[s.stepModel.s2].status, "ready");
@@ -1856,6 +1962,11 @@ test("building step 2 asks step 1 for a quick rebuild at L1, graded on the key l
   });
   assert.equal(s.steps.s1.recallDone, true);
   assert.equal(s.steps.s1.recallWrong, false);
+  // and the step says how it came out
+  assert.deepEqual(viewOf(s, m.nodes, Date.now()).steps[0].recalled, {
+    credit: "you",
+    tries: 1,
+  });
   assert.match(
     (await act(engine, learnAct("recall", { step: "s1" }))).error ?? "",
     /No quick rebuild/,
@@ -2246,6 +2357,31 @@ test("while you build, what Claude writes: a line naming a key link is left out 
   assert.equal(creditOf(b), "hints");
 });
 
+test("while you build, a note Claude adds under the step is dropped: Learn never shows it, and it grouped the parts a key link joins", async () => {
+  const { m, s } = buildMap("some");
+  s.steps.s1 = { stage: "build", help: 1, rungs: freshRungs() };
+  s.at = "s1";
+  const { engine, calls } = setup(m);
+  const msg = act(engine, {
+    type: "message",
+    text: "what makes the memory last?",
+    selection: [],
+  });
+  await settled(calls, 1);
+  calls[0].release(
+    reply([
+      { op: "add", id: "f-mem", parent: "s1", kind: "fact", title: "Memory" },
+      { op: "add", id: "f-b", parent: "f-mem", kind: "fact", title: "B cell" },
+      { op: "add", id: "f-top", parent: "root", kind: "fact", title: "Aside" },
+    ]),
+  );
+  await msg;
+  assert.equal(m.nodes["f-mem"], undefined);
+  assert.equal(m.nodes["f-b"], undefined);
+  // one at the top of the map is in the rail's "You looked into"
+  assert.ok(m.nodes["f-top"]);
+});
+
 test("the first move's caption is the server's: what Claude streamed about step 1 is not kept", async () => {
   const { engine, calls, events } = setup();
   const started = act(engine, {
@@ -2610,6 +2746,74 @@ test("canvas: lanes start compact; a box holds every part it is given; the waiti
   const lat = drawn(frame, loose, 8);
   for (const p of Object.values(lat))
     assert.ok(p.x + NODE_W <= z8.x + z8.w && p.y + NODE_H <= z8.y + z8.h);
+});
+
+test("canvas: an axis waits under its ticks, and a part taken out of the zone moves nothing else", () => {
+  const ticks = ["t1", "t2", "t3", "t4", "t5", "t6"];
+  const frame = { kind: "axis" as const, ticks };
+  const parts = Array.from({ length: 7 }, (_, i) => ({
+    id: `p${i}`,
+    x: 0,
+    y: 0,
+  }));
+  const zone = looseZone(frame, 0, undefined, 7)!;
+  const cols = regions(frame, 0, 7);
+  const right = Math.max(...cols.map((r) => r.x + r.w));
+  // under the ticks, no wider than them: beside them, six ticks opened at 0.5
+  assert.ok(zone.y >= Math.max(...cols.map((r) => r.y + r.h)));
+  assert.ok(zone.x + zone.w <= right + 1, `${zone.x + zone.w} > ${right}`);
+  assert.ok(right <= 6 * 190);
+  const before = drawn(frame, parts, 7);
+  // one dropped low in tick 3: the column does not grow, nothing else moves
+  const after = drawn(
+    frame,
+    parts.map((p) => (p.id === "p2" ? { ...p, slot: "t3", y: 900 } : p)),
+    7,
+  );
+  for (const p of parts)
+    if (p.id !== "p2") assert.deepEqual(after[p.id], before[p.id], p.id);
+  assert.deepEqual(
+    looseZone(
+      frame,
+      spanOf(frame, [{ x: 0, y: 900, slot: "t3" }]),
+      undefined,
+      7,
+    ),
+    zone,
+  );
+  // and it sits in its column, at the top spot
+  assert.ok(after.p2.y < cols[2].y + cols[2].h);
+  assert.equal(slotAt(frame, after.p2, 0, 7), "t3");
+  // a drop on the zone is not a drop in the column above it
+  assert.equal(slotAt(frame, before.p2, 0, 7), null);
+});
+
+test("canvas: two links in a chain never put their labels on one spot", () => {
+  // eight parts on the default grid, every chain of two links through them
+  // ("causes ·s", with "activates" under it, on one channel)
+  const at: Record<string, At> = {};
+  for (let k = 0; k < 8; k++)
+    at[`p${k}`] = { x: (k % 3) * (NODE_W + 48), y: Math.floor(k / 3) * 110 };
+  const ids = Object.keys(at);
+  for (const a of ids)
+    for (const b of ids)
+      for (const c of ids) {
+        if (a === b || b === c || a === c) continue;
+        const seen = nothingDrawn();
+        const box = (x: string, y: string, l: string) => {
+          const p = pathOf(at[x], at[y], route(x, y, at, l, 0, seen)).label;
+          const w = labelWidth(l);
+          return { x: p.x - w / 2, y: p.y - 9, w, h: 18 };
+        };
+        const p = box(a, b, "activates");
+        const q = box(b, c, "causes");
+        const hit =
+          p.x < q.x + q.w &&
+          p.x + p.w > q.x &&
+          p.y < q.y + q.h &&
+          p.y + p.h > q.y;
+        assert.ok(!hit, `${a} → ${b} → ${c}`);
+      }
 });
 
 test("canvas: a link keeps off the links drawn before it and never runs through a part, its own two included", () => {

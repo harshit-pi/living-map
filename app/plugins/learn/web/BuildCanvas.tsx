@@ -2,12 +2,14 @@ import {
   Background,
   BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
   useNodesInitialized,
   useReactFlow,
+  useStore,
   type Edge,
   type EdgeProps,
   type Node,
@@ -19,6 +21,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 
@@ -170,33 +173,45 @@ const nodeTypes = { part: PartNode, region: RegionNode };
 
 // A link drawn on the line route (frame.ts) chose, with its label where the
 // route put it: React Flow's own step edges bend their own way, and a route
-// costed clear could be drawn through a part.
-type RoutedData = { path: string; lx: number; ly: number };
+// costed clear could be drawn through a part. The label is drawn over every
+// link's line, and a click on it opens its own link: inside the links'
+// layer, a neighbour's line ran over it and took the click ("becomes ✗"
+// opened "Memory B cell becomes Plasma cell").
+type RoutedData = {
+  path: string;
+  lx: number;
+  ly: number;
+  onLabel?: (e: ReactMouseEvent) => void;
+};
 function RoutedEdge({
   id,
   data,
   label,
   style,
   markerEnd,
-  labelStyle,
-  labelBgStyle,
-  labelBgPadding,
 }: EdgeProps<Edge<RoutedData>>) {
   if (!data) return null;
   return (
-    <BaseEdge
-      id={id}
-      path={data.path}
-      labelX={data.lx}
-      labelY={data.ly}
-      label={label}
-      style={style}
-      markerEnd={markerEnd}
-      labelStyle={labelStyle}
-      labelShowBg
-      labelBgStyle={labelBgStyle}
-      labelBgPadding={labelBgPadding}
-    />
+    <>
+      <BaseEdge id={id} path={data.path} style={style} markerEnd={markerEnd} />
+      {label && (
+        <EdgeLabelRenderer>
+          <div
+            className={`nodrag nopan absolute rounded-sm bg-surface px-1 text-[11px] leading-[14px] whitespace-nowrap text-body ${data.onLabel ? "cursor-pointer" : ""}`}
+            style={{
+              transform: `translate(-50%, -50%) translate(${data.lx}px, ${data.ly}px)`,
+              pointerEvents: data.onLabel ? "all" : "none",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onLabel?.(e);
+            }}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
   );
 }
 
@@ -256,9 +271,6 @@ function edgeOf(
       ...(DASH[tone] ? { strokeDasharray: DASH[tone] } : {}),
     },
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
-    labelStyle: { fontSize: 11, fill: "var(--color-body)" },
-    labelBgStyle: { fill: "var(--color-surface)" },
-    labelBgPadding: [4, 2],
   };
 }
 
@@ -346,8 +358,9 @@ export function BuildCanvas({
   const fit = worked ? FIT_WHOLE : FIT;
   const step = st.step;
 
-  // every part of the step, placed or not: the waiting zone holds them all
-  const all = st.placed.length + st.trayCount;
+  // every part of the step, placed or not: the frame is sized for them and
+  // the waiting zone holds them all
+  const all = worked ? worked.parts.length : st.placed.length + st.trayCount;
   // the parts on the canvas and where they are drawn
   const parts = useMemo(() => {
     if (worked) {
@@ -377,11 +390,11 @@ export function BuildCanvas({
   // answer) and is drawn under the frame: the zone says why it is out there
   const hiddenOut = !!worked?.hidden;
   const zones: Region[] = useMemo(() => {
-    const rs = regions(frame, span);
+    const rs = regions(frame, span, all);
     const z = waiting
       ? looseZone(frame, span, undefined, all)
       : hiddenOut
-        ? looseZone(frame, span, "The hidden part")
+        ? looseZone(frame, span, "The hidden part", all, 1)
         : null;
     return z ? [...rs, z] : rs;
   }, [frame, span, waiting, hiddenOut, all]);
@@ -394,16 +407,36 @@ export function BuildCanvas({
   // card). Nothing moves while all is in view: a refit on every placement
   // moved the next drop target. It waits until the cards are measured:
   // fitView skips a card with no size, so a fit run on fresh cards (the
-  // build opening from See) frames nothing.
+  // build opening from See) frames nothing. It also waits for React Flow's
+  // own idea of the canvas's size, which lags a change of layout: the tray
+  // opening beside a quick rebuild narrowed the canvas, the fit framed the
+  // old width, and a box sat under the side card. A new size fits again.
   const count = parts.length;
   const shape = parts.map((p) => `${p.id}@${p.x},${p.y}`).join(";");
   const ready = useNodesInitialized();
+  const flowW = useStore((s) => s.width);
+  const flowH = useStore((s) => s.height);
   const opened = useRef("");
+  const sized = useRef("");
   useEffect(() => {
     const el = box.current;
     if (!el || !count || !ready) return;
+    if (
+      Math.abs(flowW - el.clientWidth) > 2 ||
+      Math.abs(flowH - el.clientHeight) > 2
+    )
+      return;
+    const size = `${flowW}x${flowH}`;
+    const resized = !!sized.current && sized.current !== size;
+    sized.current = size;
     const fresh = opened.current !== `${canvas}:${mode}`;
     opened.current = `${canvas}:${mode}`;
+    // a window made smaller or larger leaves the parts where they were
+    // drawn, off the edge or in a corner
+    if (resized) {
+      void rf.fitView({ ...fit, duration: 200 });
+      return;
+    }
     const refit = () => {
       const { x, y, zoom } = rf.getViewport();
       const out = rf.getNodes().some((n) => {
@@ -422,18 +455,7 @@ export function BuildCanvas({
       if (out) void rf.fitView({ ...fit, duration: 200 });
     };
     refit();
-    // a window made smaller or larger leaves the parts where they were
-    // drawn, off the edge or in a corner: the same check runs again
-    let last = `${el.clientWidth}x${el.clientHeight}`;
-    const seen = new ResizeObserver(() => {
-      const now = `${el.clientWidth}x${el.clientHeight}`;
-      if (now === last) return;
-      last = now;
-      void rf.fitView({ ...fit, duration: 200 });
-    });
-    seen.observe(el);
-    return () => seen.disconnect();
-  }, [canvas, mode, count, shape, ready, rf, fit]);
+  }, [canvas, mode, count, shape, ready, rf, fit, flowW, flowH]);
 
   const rawKey = (p: { x: number; y: number; slot?: string }) =>
     `${p.x},${p.y},${p.slot ?? ""}`;
@@ -631,7 +653,7 @@ export function BuildCanvas({
     e.preventDefault();
     const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
     const spot = { x: p.x - NODE_W / 2, y: p.y - NODE_H / 2 };
-    const slot = slotAt(frame, spot, span);
+    const slot = slotAt(frame, spot, span, all);
     void act("place", {
       step,
       part,
@@ -640,6 +662,36 @@ export function BuildCanvas({
       ...(slot ? { slot } : {}),
     });
   };
+
+  const edgeClick = (e: { clientX: number; clientY: number }, id: string) => {
+    // once it passed, a link the check marked "?" or ✗ can still be
+    // argued for; nothing else on it changes
+    if (mode === "done") {
+      const mk = marks.get(id);
+      if (mk && ARGUABLE.includes(mk.mark) && !whatif)
+        setPop({ kind: "link", id, at: where(e) });
+      return;
+    }
+    if (mode !== "build") return;
+    setPick(null);
+    if (id.startsWith("ghost:")) {
+      const [, from, to] = id.split(":");
+      return setPop({ kind: "verb", from, to, at: where(e) });
+    }
+    const l = st.links.find((x) => x.id === id);
+    if (l && !l.given) setPop({ kind: "link", id: l.id, at: where(e) });
+  };
+  // a label opens its link wherever the link itself would
+  for (const ed of edges) {
+    const mk = marks.get(ed.id);
+    const opens =
+      mode === "build"
+        ? !st.links.find((l) => l.id === ed.id)?.given
+        : mode === "done" && !!mk && ARGUABLE.includes(mk.mark) && !whatif;
+    if (opens && ed.data)
+      (ed.data as RoutedData).onLabel = (e: ReactMouseEvent) =>
+        edgeClick(e, ed.id);
+  }
 
   const doTidy = () => {
     const to = tidy(
@@ -716,7 +768,7 @@ export function BuildCanvas({
             x: Math.round(n.position.x),
             y: Math.round(n.position.y),
           };
-          const slot = slotAt(frame, p, span);
+          const slot = slotAt(frame, p, span, all);
           void act("move", { step, part: n.id, ...p, slot: slot ?? null });
         }}
         onNodeClick={(e, n) => {
@@ -729,24 +781,7 @@ export function BuildCanvas({
           if (!pick || pick === n.id) return setPick(pick ? null : n.id);
           setPop({ kind: "verb", from: pick, to: n.id, at: where(e) });
         }}
-        onEdgeClick={(e, ed) => {
-          // once it passed, a link the check marked "?" or ✗ can still be
-          // argued for; nothing else on it changes
-          if (mode === "done") {
-            const mk = marks.get(ed.id);
-            if (mk && ARGUABLE.includes(mk.mark) && !whatif)
-              setPop({ kind: "link", id: ed.id, at: where(e) });
-            return;
-          }
-          if (mode !== "build") return;
-          setPick(null);
-          if (ed.id.startsWith("ghost:")) {
-            const [, from, to] = ed.id.split(":");
-            return setPop({ kind: "verb", from, to, at: where(e) });
-          }
-          const l = st.links.find((x) => x.id === ed.id);
-          if (l && !l.given) setPop({ kind: "link", id: l.id, at: where(e) });
-        }}
+        onEdgeClick={(e, ed) => edgeClick(e, ed.id)}
         onPaneClick={() => {
           setPick(null);
           setPop(null);

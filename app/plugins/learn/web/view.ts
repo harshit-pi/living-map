@@ -59,7 +59,11 @@ export type LearnAct = (
 export function useLearnAct(
   run: (a: Action) => Promise<ActionResult>,
   moving: boolean,
-): { act: LearnAct; busy: boolean; pending: (name: string) => boolean } {
+): {
+  act: LearnAct;
+  busy: boolean;
+  pending: (name: string, args?: Record<string, unknown>) => boolean;
+} {
   const out = useRef(new Set<string>());
   const [sent, setSent] = useState<string[]>([]);
   const paidOut = (keys: Iterable<string>) =>
@@ -84,7 +88,14 @@ export function useLearnAct(
   return {
     act,
     busy,
-    pending: (name) => sent.some((k) => k.startsWith(`${name}:`)),
+    // with `args`, that very action: "open" on step 1 is not step 2 being
+    // drawn (Next step while step 1 was drawn said step 2 was)
+    pending: (name, args) =>
+      sent.some((k) =>
+        args
+          ? k === `${name}:${JSON.stringify(args)}`
+          : k.startsWith(`${name}:`),
+      ),
   };
 }
 
@@ -99,22 +110,43 @@ export type Here = {
   // buttons that start one are off
   busy: boolean;
   act: LearnAct;
-  // an action you sent that the server has not answered yet
-  pending: (name: string) => boolean;
+  // an action you sent that the server has not answered yet (with `args`,
+  // that very one)
+  pending: (name: string, args?: Record<string, unknown>) => boolean;
 };
 
 // ---------------------------------------------------------------- words
 
+// a frame's word for one of its slots
+export const slotWord = (frame: StepView["frame"]): string =>
+  frame.kind === "lanes"
+    ? "lane"
+    : frame.kind === "boxes"
+      ? "box"
+      : frame.kind === "axis"
+        ? "tick"
+        : "column";
+
+// what a pass needs of where the parts sit, on any frame: said with "only
+// the key links are checked", which an axis review then failed on its order
+const placeNeed = (frame: StepView["frame"]): string =>
+  frame.kind === "free"
+    ? ""
+    : orderStops(frame)
+      ? ", with every part on a tick, in order"
+      : `, with every part in a ${slotWord(frame)}`;
+
 export const helpLine = (st: StepView): string => {
-  // on an axis the order is what you build: at L1 its parts wait beside it
+  // on an axis the order is what you build: at L1 its parts wait under it
   const order = orderStops(st.frame) && st.help === 1;
+  const keys = `only the key links are checked${placeNeed(st.frame)}`;
   if (st.recall)
-    return `Quick rebuild · L1 · ${HELP[1].name}: ${order ? "put the parts in order; " : ""}only the key links are checked`;
+    return `Quick rebuild · L1 · ${HELP[1].name}: ${order ? "put the parts in order; " : ""}${keys}`;
   // a new case is always built at L2 (build.ts), whatever the step's help
   if (st.onCase) return `New case · L2 · ${HELP[2].name}: ${st.caseTitle}`;
   // a review checks only the key links, as a quick rebuild does
   if (st.reviewing)
-    return `Review · L${st.help} · ${HELP[st.help].name}: ${order ? "put the parts in order along the axis" : HELP[st.help].says.toLowerCase()}; only the key links are checked`;
+    return `Review · L${st.help} · ${HELP[st.help].name}: ${order ? "put the parts in order along the axis" : HELP[st.help].says.toLowerCase()}; ${keys}`;
   if (st.help === 0)
     return `L0 · ${HELP[0].name}: draw the key links that are missing`;
   if (order)
