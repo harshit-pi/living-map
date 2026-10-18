@@ -27,7 +27,14 @@ export async function act(
 
 // Saved maps, newest first; fetched again whenever `when` changes.
 export function useMaps(when: unknown): MapSummary[] {
-  const [maps, setMaps] = useState<MapSummary[]>([]);
+  return useMapList(when) ?? [];
+}
+
+// The same, null until the first answer: the start screen tells a first
+// visit (no maps) from a list still on its way, so its examples do not
+// flash up and go
+export function useMapList(when: unknown): MapSummary[] | null {
+  const [maps, setMaps] = useState<MapSummary[] | null>(null);
   useEffect(() => {
     let live = true;
     fetch("/api/maps")

@@ -49,7 +49,6 @@ import {
   ARGUABLE,
   FAMILIES,
   familyOf,
-  placingIsAnswer,
   type Family,
   type LinkView,
   type Mark,
@@ -467,15 +466,12 @@ export function BuildCanvas({
     frame,
     parts.filter((p) => "slot" in p && p.slot),
   );
-  // the zone for parts outside the frame, while any wait there, and for the
-  // whole build where parts start outside it (it went with the last part
-  // taken out of it, and the frame was fitted afresh)
+  // the zone for parts outside the frame, while any wait there or in the
+  // tray: with every part placed, an empty "Not in a box yet" took a third
+  // of the canvas. It goes without a refit (nothing is out of view), and a
+  // part dragged back out of the frame brings it back.
   const waiting =
-    mode === "build" &&
-    (st.trayCount > 0 ||
-      st.help >= 2 ||
-      (st.help === 1 && placingIsAnswer(frame)) ||
-      st.placed.some((p) => !p.slot));
+    mode === "build" && (st.trayCount > 0 || st.placed.some((p) => !p.slot));
   // the worked case's hidden part has no slot (its slot would point at the
   // answer) and is drawn under the frame: the zone says why it is out there
   const hiddenOut = !!worked?.hidden;
@@ -1276,8 +1272,15 @@ export function SmallBtn({
 
 // Under a button that starts a paid move and is off while Claude works:
 // why a press does nothing yet (a Why sent while the next step was being
-// drawn looked lost), and that what you typed stays.
-export function WaitNote({ here }: { here: Here }) {
+// drawn looked lost), and, under a box, that what you typed stays.
+export function WaitNote({
+  here,
+  typed = true,
+}: {
+  here: Here;
+  // under a box you type in: what you typed is kept
+  typed?: boolean;
+}) {
   if (!here.busy) return null;
   const w = here.ws.live.working;
   return (
@@ -1285,7 +1288,7 @@ export function WaitNote({ here }: { here: Here }) {
       className="text-[11.5px] leading-snug text-muted"
       title={w ? `${w.label}…` : undefined}
     >
-      Claude is busy; what you typed stays.
+      {typed ? "Claude is busy; what you typed stays." : "Claude is busy."}
     </div>
   );
 }

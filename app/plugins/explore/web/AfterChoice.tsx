@@ -24,7 +24,8 @@ export function AfterChoice({ here, board }: { here: Here; board: BoardView }) {
   const writing =
     !!working &&
     working.nodeId === c.option &&
-    /pre-mortem/i.test(working.label);
+    // the move's label (wrapLabel), from the Choose or from Next
+    /^(Next: )?How could .* fail\?$/.test(working.label);
   const empty =
     !c.premortem.claude.length &&
     !board.assumptions.length &&

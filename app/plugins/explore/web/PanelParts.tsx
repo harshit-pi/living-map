@@ -6,7 +6,7 @@
 import { useState, type MouseEvent as ClickEvent, type ReactNode } from "react";
 
 import { Btn, MarkText, NameLeft, WAIT_TITLE } from "./ui.tsx";
-import { anchorOf, PAID, type Here } from "./view.ts";
+import { anchorOf, PAID, useDecide, type Here } from "./view.ts";
 import type { MapNode, NodeAction } from "../../../shared/model.ts";
 import { More, type MoreSection } from "../../../web/components/More.tsx";
 import {
@@ -309,6 +309,8 @@ function OptionActions({
 }) {
   const { view, ws, act, busy } = here;
   const [renaming, setRenaming] = useState(false);
+  // the Decide sheet, once open, owns the screen's one filled button
+  const [deciding] = useDecide(ws.map);
   const core = (type: NodeAction) => {
     if (busy && PAID.has(type)) return;
     void ws.run({ type, nodeId: node.id });
@@ -376,7 +378,7 @@ function OptionActions({
             (shape === "choose"
               ? {
                   label: chosenOver ? "Choose this instead…" : "Choose…",
-                  primary: true,
+                  primary: !deciding,
                   onClick: (e) =>
                     e && here.choose(node.id, anchorOf(e.currentTarget)),
                 }
@@ -526,7 +528,9 @@ function AgainstLines({ col }: { col: ColumnView }) {
   return (
     <div className={box}>
       <div className={label}>Case against</div>
-      <div className="text-ink">{col.against.text}</div>
+      <div className="text-ink" data-content>
+        {col.against.text}
+      </div>
       <div className="text-muted">{SURVIVES_WORD[col.against.survives]}</div>
       {col.was.length > 0 && (
         <div className="mt-1.5 border-t border-line pt-1.5 text-muted">
@@ -662,7 +666,17 @@ function PanelLines({ here, node }: { here: Here; node: MapNode }) {
               {sc ? (
                 <span className="shrink-0">
                   <MarkText mark={sc.mark} must={row.weight === "must"} />
-                  {sc.guess && <span className="text-hint-strong"> guess</span>}
+                  {/* "can't tell" says it is unsure already: "can't tell
+                      guess" read as two marks */}
+                  {sc.guess && sc.mark !== "unknown" && (
+                    <span
+                      className="text-hint-strong"
+                      title="No fact backs it yet"
+                    >
+                      {" "}
+                      guess
+                    </span>
+                  )}
                   {sc.who === "you" && <span className="text-ink"> you</span>}
                 </span>
               ) : (

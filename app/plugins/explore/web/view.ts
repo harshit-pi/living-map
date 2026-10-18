@@ -167,6 +167,8 @@ export function tagOf(
   view: ExploreView | null,
   nodes: MapDoc["nodes"],
   n: MapDoc["nodes"][string],
+  // the node's panel, whose own lines say the case against in full
+  inPanel = false,
 ): string | undefined {
   if (!view || !n.parent) return undefined;
   if (n.dropped || n.status === "dropped") return undefined;
@@ -201,7 +203,9 @@ export function tagOf(
         : "option",
     view.stand[n.parent]?.lead === n.id &&
       (causes ? "★ Claude's guess" : "★ Claude's lead"),
-    against && `case against: ${SURVIVES_WORD[against.survives].toLowerCase()}`,
+    !inPanel &&
+      against &&
+      `case against: ${SURVIVES_WORD[against.survives].toLowerCase()}`,
   ]
     .filter(Boolean)
     .join(" · ");

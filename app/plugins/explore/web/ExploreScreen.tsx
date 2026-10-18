@@ -22,7 +22,7 @@ import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
 import { setAside } from "../../../web/lib/layout.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
-import { LAYING_OUT } from "../shared.ts";
+import { isCheck, LAYING_OUT } from "../shared.ts";
 
 // the room you can see in the board's pane, less its gutters
 const WIDE = "calc(var(--pane-w, 100vw) - 16px - var(--cover))";
@@ -212,8 +212,11 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
             onClose={() => setSelection([])}
             actions={here ? <PanelActions here={here} node={one} /> : undefined}
             extra={here ? <PanelExtra here={here} node={one} /> : undefined}
-            tag={tagOf(view, map.nodes, one)}
+            tag={tagOf(view, map.nodes, one, true)}
             plain
+            // a check is yours to run: its box asks what it found (Next's
+            // "Run the check yourself" opens it here)
+            placeholder={isCheck(one) ? "What did it find?" : undefined}
           />
         )}
         {here && sheet && view?.boards[sheet.q] && (

@@ -112,9 +112,11 @@ export function ReviewPanel({
       <div className="space-y-2">
         {lastStep && lastItems.length > 0 && (
           <div className="text-[12.5px] text-success-strong">
+            {/* what is counted is said: "3 of 3" beside eight links drawn
+                read as a count of nothing */}
             ✓ Step {stepNumber(view, lastStep)} rebuilt ·{" "}
             {lastItems.filter((it) => it.today === "unaided").length} of{" "}
-            {lastItems.length} by you
+            {lastItems.length} key links by you
           </div>
         )}
         {next && onPick && (
@@ -195,6 +197,7 @@ export function ClosingCard({
     unaided: number;
     of: number;
     last: number | null;
+    rebuilt: number;
     // the last "which idea" card, told as it came out: the review closed
     // the moment it was answered
     card: { right: boolean; correct: string | null } | null;
@@ -221,9 +224,14 @@ export function ClosingCard({
           )}
         </div>
       )}
+      {/* the key links, counted: "3 of 3 by you" beside eight links drawn
+          read as a count of nothing. With nothing rebuilt today there is no
+          score ("0 of 2 by you" after I'm done today at once) */}
       <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] leading-snug font-medium text-success-strong">
-        ✓ Done for today · {closed.unaided} of {closed.of} by you
-        {closed.last !== null ? ` (last time ${closed.last})` : ""}.
+        ✓ Done for today
+        {closed.rebuilt > 0 &&
+          ` · ${closed.unaided} of ${closed.of} key links by you${closed.last !== null ? ` (last time ${closed.last})` : ""}`}
+        .
         {view.due.next !== null &&
           ` Next review ${inDays(view.due.next, view.now)}.`}
       </div>

@@ -191,11 +191,20 @@ export const helpLine = (
   const put = orderStops(st.frame)
     ? "Put the parts in order"
     : `Put each part in its ${slotWord(st.frame)}`;
+  // it counts down as you draw (a learner with 2 of 3 drawn had to work out
+  // which one was left): the links still to draw, by count only, never
+  // which; all drawn, the check is next. Once checked, the count is the
+  // check's (a wrong link drawn is no link less to find)
   const n = st.keys ?? 0;
+  const left = st.check
+    ? n - st.check.keyRight
+    : n - st.links.filter((l) => !l.given).length;
   const say =
     st.help === 0
       ? n > 0
-        ? `Draw the ${plural(n, "missing link")}`
+        ? left > 0
+          ? `Draw the ${plural(left, "missing link")}`
+          : "Check your links"
         : "Draw the missing links"
       : st.help === 1
         ? loose

@@ -12,7 +12,7 @@ import { MapsMenu } from "./components/MapList.tsx";
 import { Segmented } from "./components/Segmented.tsx";
 import { UpdateButton } from "./components/UpdateButton.tsx";
 import { WorkingBar, WorkingPill } from "./components/WorkingBar.tsx";
-import { act } from "./lib/api.ts";
+import { act, useUpdate } from "./lib/api.ts";
 import { useLiveMap } from "./lib/live.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
@@ -34,6 +34,7 @@ const useRoomy = () => useSyncExternalStore(onResize, isRoomy, () => false);
 
 export default function App() {
   const live = useLiveMap();
+  const update = useUpdate();
   const { map } = live;
   const roomy = useRoomy();
   const [selection, setSelection] = useState<string[]>([]);
@@ -236,12 +237,20 @@ export default function App() {
             </span>
           )}
           {plugin.Header && <plugin.Header ws={ws} />}
-          <UpdateButton steps={live.updateSteps} />
+          {!simple && <UpdateButton steps={live.updateSteps} update={update} />}
+          {/* the simpler header keeps the update inside Maps, a dot on it
+              saying one is out */}
           <MapsMenu
             onOpen={(id) => {
               void openMap(id);
             }}
             onNew={simple ? startNew : undefined}
+            update={
+              simple ? (
+                <UpdateButton steps={live.updateSteps} update={update} inMenu />
+              ) : undefined
+            }
+            dot={simple && !!update.info?.available}
           />
           {!simple && (
             <button

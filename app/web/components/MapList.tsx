@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { MapSummary } from "../../shared/model.ts";
 import { ago } from "../lib/ago.ts";
@@ -15,18 +15,22 @@ export function MapRows({
   maps,
   onOpen,
   limit,
+  onCurrent,
 }: {
   maps: MapSummary[];
   onOpen: (id: string) => void;
   limit?: number;
+  // the map open now goes back to it (the start screen), instead of being
+  // a row you cannot press
+  onCurrent?: () => void;
 }) {
   return (
     <ul className="divide-y divide-line">
       {maps.slice(0, limit).map((m) => (
         <li key={m.id}>
           <button
-            onClick={() => onOpen(m.id)}
-            disabled={m.current}
+            onClick={() => (m.current ? onCurrent?.() : onOpen(m.id))}
+            disabled={m.current && !onCurrent}
             className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-panel disabled:cursor-default disabled:bg-primary-soft/50"
           >
             <span
@@ -64,10 +68,17 @@ export function MapRows({
 export function MapsMenu({
   onOpen,
   onNew,
+  update,
+  dot = false,
 }: {
   onOpen: (id: string) => void;
   // New inside the menu, first (the simpler header has no New button)
   onNew?: () => void;
+  // the update row (the simpler header's): kept mounted while the menu is
+  // shut, so an update under way still reloads the page when it is done
+  update?: ReactNode;
+  // a dot on the button: something waits inside (an update)
+  dot?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const maps = useMaps(open);
@@ -97,11 +108,19 @@ export function MapsMenu({
         onClick={() => setOpen((v) => !v)}
         className="whitespace-nowrap rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
       >
+        {dot && (
+          <span
+            aria-hidden
+            className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle"
+          />
+        )}
         Maps ▾
       </button>
-      {open && (
-        <div className="absolute right-0 top-10 z-40 max-h-[70vh] w-[420px] overflow-y-auto rounded-xl bg-surface shadow-xl ring-1 ring-line">
-          {onNew && (
+      {(open || update) && (
+        <div
+          className={`absolute right-0 top-10 z-40 max-h-[70vh] w-[420px] overflow-y-auto rounded-xl bg-surface shadow-xl ring-1 ring-line ${open ? "" : "hidden"}`}
+        >
+          {open && onNew && (
             <button
               onClick={() => {
                 setOpen(false);
@@ -112,10 +131,13 @@ export function MapsMenu({
               + New map
             </button>
           )}
-          <div className="border-b border-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-            Your maps
-          </div>
-          {maps.length ? (
+          {update}
+          {open && (
+            <div className="border-b border-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+              Your maps
+            </div>
+          )}
+          {!open ? null : maps.length ? (
             <MapRows
               maps={maps}
               onOpen={(id) => {

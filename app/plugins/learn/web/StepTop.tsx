@@ -105,7 +105,8 @@ export function PredictCard({ here, st }: { here: Here; st: StepView }) {
         onClick={() => void here.act("hide", { step: st.step })}
         className="rounded-lg bg-primary px-3 py-1.5 text-[13px] font-medium text-on-primary hover:bg-primary-strong"
       >
-        {p ? "Hide it, I'll build it →" : "Hide it and build it →"}
+        {/* one wording, with a question or without (after Show the model) */}
+        Hide it, I'll build it →
       </button>
     </div>
   );

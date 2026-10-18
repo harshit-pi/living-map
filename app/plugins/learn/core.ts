@@ -2793,6 +2793,7 @@ function stepView(
     recalled: st.recall ? null : (st.recalled ?? null),
     reviewing: !!st.reviewing,
     lowered: !!st.reviewing && !!st.lowered,
+    ...(st.viaModel ? { viaModel: true } : {}),
     itemsDue: items.filter((i) => rebuilt(i) && i.due <= now).length,
   };
   if (!m || !ready) return base;

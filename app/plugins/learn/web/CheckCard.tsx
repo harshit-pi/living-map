@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ArgueBox } from "./BuildCanvas.tsx";
 import { MARK, notYet, passRule, type Here } from "./view.ts";
 import {
+  placingIsAnswer,
   SURES,
   type LinkView,
   type Mark,
@@ -19,13 +20,17 @@ const SURE_WORD: Record<Sure, string> = {
 export function HowSure({
   value,
   onPick,
+  ask = "How sure?",
 }: {
   value: Sure | null;
   onPick: (s: Sure) => void;
+  // what it asks: beside a build, what you are to be sure of ("How sure?"
+  // under Check read as sure about what)
+  ask?: string;
 }) {
   return (
-    <div className="flex items-center gap-1.5 text-[12px] text-muted">
-      How sure?
+    <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
+      <span className="whitespace-nowrap">{ask}</span>
       {SURES.map((s) => (
         <button
           key={s}
@@ -52,22 +57,43 @@ function useLater(ms: number, key: string): boolean {
 
 const STUCK_MS = 20_000;
 
-// The check card beside a build. Its one filled button is at the top: Check
-// before the first check; after a check that did not pass, Hint while the
-// build is as it was checked, then Check again once you change it. Under it,
-// how sure you are (once you have drawn a link), the one line the check
-// says, the hints you took, and what it found. Show one link and Show the
-// model are in the card's More.
+// The check card beside a build. Its buttons are at the top, Check first
+// and Hint beside it, in the same places every time (swapped as the fill
+// moved, the button under the pointer changed meaning). Filled: nothing
+// before you have done anything (the canvas is the task then, and a filled
+// Check over an empty build read as "check now"); then Check; after a check
+// that did not pass, Hint while the build is as it was checked, then Check
+// again once you change it; nothing while an argue box is open (it owns the
+// filled button). Under it, how sure you are (once you have drawn a link),
+// the one line the check says, the hints you took, and what it found. Show
+// one link and Show the model are in the card's More.
 export function CheckCard({ here, st }: { here: Here; st: StepView }) {
   const { act } = here;
   const step = st.step;
   const c = st.check;
   const own = st.links.filter((l) => !l.given).length;
+  const [arguing, setArguing] = useState<string | null>(null);
   // a first try with nothing drawn for a while: a way out before the first
   // check, which is when hints open (not in a review or a rebuild, which
-  // are from memory)
-  const fresh = !c && own === 0 && !st.reviewing && !st.recall && !st.onCase;
+  // are from memory, nor after Show the model: that rebuild is no first try)
+  const fresh =
+    !c &&
+    own === 0 &&
+    st.checks === 0 &&
+    !st.viaModel &&
+    !st.reviewing &&
+    !st.recall &&
+    !st.onCase;
   const idle = useLater(STUCK_MS, `${step}:${st.checks}`);
+  // where placing the parts is part of the task, a part placed is a start
+  const placing = st.help >= 2 || (st.help === 1 && placingIsAnswer(st.frame));
+  const begun =
+    !!c ||
+    own > 0 ||
+    (placing &&
+      (st.frame.kind === "free"
+        ? st.placed.length > 0
+        : st.placed.some((p) => p.slot)));
   const hintFirst = !!c && !c.pass && !st.changed && st.canHint;
   const checkBtn = (primary: boolean) => (
     <button
@@ -99,11 +125,8 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           argued link's verdict moved them, and a click meant for Hint
           landed on Check again */}
       <div className="flex gap-1.5">
-        {hintFirst
-          ? [hintBtn(true), checkBtn(false)]
-          : c && st.canHint
-            ? [checkBtn(true), hintBtn(false)]
-            : [checkBtn(true)]}
+        {checkBtn(begun && !hintFirst && !arguing)}
+        {c && st.canHint && hintBtn(hintFirst && !arguing)}
       </div>
       {fresh && idle && (
         <button
@@ -119,6 +142,7 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           what the check found; what you said is kept) */}
       {own > 0 && !c && (
         <HowSure
+          ask="Sure of your links?"
           value={st.sure}
           onPick={(sure) => void act("sure", { step, sure })}
         />
@@ -150,7 +174,12 @@ export function CheckCard({ here, st }: { here: Here; st: StepView }) {
           )}
         </div>
       )}
-      <CheckFindings here={here} st={st} />
+      <CheckFindings
+        here={here}
+        st={st}
+        arguing={arguing}
+        setArguing={setArguing}
+      />
     </div>
   );
 }
@@ -165,15 +194,23 @@ export function CheckFindings({
   here,
   st,
   passed = false,
+  arguing: heldArguing,
+  setArguing: setHeldArguing,
 }: {
   here: Here;
   st: StepView;
   passed?: boolean;
+  // the link being argued for, held by the check card above, whose filled
+  // button gives way to the argue box's Send
+  arguing?: string | null;
+  setArguing?: (id: string | null) => void;
 }) {
   const { act } = here;
   const step = st.step;
   const c = st.check;
-  const [arguing, setArguing] = useState<string | null>(null);
+  const [ownArguing, setOwnArguing] = useState<string | null>(null);
+  const arguing = setHeldArguing ? (heldArguing ?? null) : ownArguing;
+  const setArguing = setHeldArguing ?? setOwnArguing;
   const [text, setText] = useState("");
   const labelOf = (id: string) =>
     st.placed.find((p) => p.id === id)?.label ?? "";

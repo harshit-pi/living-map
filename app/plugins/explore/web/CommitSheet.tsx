@@ -44,6 +44,15 @@ export function CommitSheet({
   // its own panel
   const options = board.columns.filter((c) => !c.faded || c.id === option);
   const open = view.open;
+  const first = open[0];
+  // the first open thing by name where it is one want (a must still empty
+  // or a guess): "4 guesses on 1 must" said neither which must nor whether
+  // a guess stops you choosing. Pressed, it opens what it names: the want,
+  // or the lead with no case against; going to the board you are on
+  // changed nothing on screen
+  const firstNode =
+    first?.node && here.ws.map.nodes[first.node] ? first.node : undefined;
+  const mustKind = first?.kind === "empty-must" || first?.kind === "guess-must";
   const commit = () => {
     if (!pick) return;
     void here.act("commit", {
@@ -55,7 +64,10 @@ export function CommitSheet({
   };
   const goTo = (id: string) => {
     onClose();
-    if (view.boards[id]?.shape === "choose") here.openBoard(id);
+    if (firstNode) {
+      if (view.boards[id]?.shape === "choose") here.openBoard(id);
+      here.select(firstNode);
+    } else if (view.boards[id]?.shape === "choose") here.openBoard(id);
     else here.select(id);
   };
   return (
@@ -120,15 +132,19 @@ export function CommitSheet({
           </button>
         ))}
       </div>
-      {open.length > 0 && (
+      {first && (
         <div className="mt-2 text-xs text-warning-strong">
           Still open:{" "}
           <button
-            onClick={() => goTo(open[0].q)}
-            title="Choosing anyway is allowed"
+            onClick={() => goTo(first.q)}
+            title={`${first.label}. Choosing anyway is allowed`}
             className="underline underline-offset-2 hover:text-ink"
           >
-            {open[0].label}
+            {mustKind && firstNode ? (
+              <span data-content>{here.ws.map.nodes[firstNode].title}</span>
+            ) : (
+              first.label
+            )}
           </button>
           {open.length > 1 && ` (+${open.length - 1})`}
         </div>

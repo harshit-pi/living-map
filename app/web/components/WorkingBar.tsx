@@ -6,8 +6,9 @@ type Props = {
   working: Working | null;
   queued: number;
   onStop: () => void;
-  // the seconds only, the task said on hover: the screen under it already
-  // says what is being drawn, and the label was six more words in the header
+  // the task without "Claude ·": "Claude · 24s" alone left a newcomer
+  // wondering whether to wait (a next step drawn while you build, a
+  // pre-mortem after a choice), so the few words of what it is stay
   compact?: boolean;
 };
 
@@ -22,14 +23,17 @@ export function WorkingPill({ working, queued, onStop, compact }: Props) {
   }, [working]);
   if (!working) return null;
   const secs = Math.max(0, Math.round((now - working.since) / 1000));
+  // a move Next started is known to the server as "Next: …"; the pill says
+  // what it does, not which button sent it
+  const label = compact ? working.label.replace(/^Next: /, "") : working.label;
   return (
     <div
-      title={compact ? `${working.label}…` : undefined}
+      title={compact ? `Claude: ${label}…` : undefined}
       className="flex min-w-0 items-center gap-2 rounded-full bg-surface py-1 pr-1 pl-3 text-xs text-body shadow-xs ring-1 ring-line"
     >
       <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary" />
       <span className="truncate">
-        {compact ? "Claude ·" : `Claude · ${working.label}…`}{" "}
+        {compact ? `${label}…` : `Claude · ${label}…`}{" "}
         <span className="text-faint tabular-nums">{`${secs}s`}</span>
         {queued > 0 && (
           <span className="text-primary-strong"> · {queued} waiting</span>

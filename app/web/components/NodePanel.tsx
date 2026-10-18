@@ -76,6 +76,7 @@ export function NodePanel({
   extra,
   tag,
   plain = false,
+  placeholder,
 }: {
   map: MapDoc;
   node: MapNode;
@@ -99,6 +100,8 @@ export function NodePanel({
   // fewer words: what Claude is sent goes into a tooltip, Fork is "New
   // thread", and the box asks what you know (Explore)
   plain?: boolean;
+  // what the box asks, in place of the usual (a check to run: what it found)
+  placeholder?: string;
 }) {
   const learn = !!asSteps;
   const threads = useMemo(
@@ -346,13 +349,18 @@ export function NodePanel({
         )}
         {others.length > 0 && (
           <div className="mb-3">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">
-              Under this
-            </div>
+            {/* plain: the chips say what they are; the heading was two
+                more words over them */}
+            {!plain && (
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">
+                Under this
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {others.map((c) => (
                 <button
                   key={c.id}
+                  data-content
                   onClick={() => onSelect(c.id)}
                   className={`rounded-md border px-2 py-0.5 text-left text-xs hover:border-primary ${c.dropped ? "border-dashed border-line-strong text-faint line-through" : "border-line-strong text-body"}`}
                 >
@@ -363,8 +371,14 @@ export function NodePanel({
           </div>
         )}
 
-        <div className="mb-2 flex items-center gap-1 border-b border-line pb-1.5">
-          {threads.map((t) => (
+        {/* plain: one thread is just the conversation, with no tab to name
+            it, and none yet has nothing to say; New thread stays once
+            there is one to leave */}
+        <div
+          title={plain ? claudeSees : undefined}
+          className={`mb-2 flex items-center gap-1 ${plain && threads.length < 2 ? "" : "border-b border-line pb-1.5"}`}
+        >
+          {(plain && threads.length < 2 ? [] : threads).map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveId(t.id)}
@@ -375,7 +389,7 @@ export function NodePanel({
               {t.messages.length ? ` · ${t.messages.length}` : ""}
             </button>
           ))}
-          {!threads.length && (
+          {!threads.length && !plain && (
             <span
               className="text-xs text-muted"
               title={plain ? claudeSees : undefined}
@@ -461,13 +475,14 @@ export function NodePanel({
             void run({ type: "stop" });
           }}
           placeholder={
-            writeIt
+            placeholder ??
+            (writeIt
               ? "Write your solution here. Claude traces it on the example and tells you where it breaks."
               : openStep
                 ? "Your answer, or a question about this step…"
                 : plain
                   ? "What do you know about this?"
-                  : `Ask about “${node.title}”…`
+                  : `Ask about “${node.title}”…`)
           }
           onSend={(text) => {
             void run({

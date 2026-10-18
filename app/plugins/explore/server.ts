@@ -237,7 +237,7 @@ function fillTurn(ctx: Ctx, q: MapNode, how: TurnHow = {}) {
   );
   const rest =
     left > 0
-      ? ` ${left} more empty ${left === 1 ? "cell is" : "cells are"} left for later; say Next fills them.`
+      ? ` ${left} more empty ${left === 1 ? "cell is" : "cells are"} left for later; say so, and name no button (the buttons' words change).`
       : " That is every empty cell.";
   return ctx.engine.turn(
     lead(

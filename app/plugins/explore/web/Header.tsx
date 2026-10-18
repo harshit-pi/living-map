@@ -210,10 +210,11 @@ export function ExploreHeader({ ws }: { ws: Workspace }) {
         // title
         className={`flex min-w-0 max-w-[150px] shrink-0 items-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-40 lg:max-w-[220px] xl:max-w-[300px] ${owned ? "border border-line-strong bg-surface text-body hover:border-primary" : "bg-primary text-on-primary hover:bg-primary-strong"}`}
       >
+        {/* the words only: a ▸ at its edge read as a menu caret, and a
+            click on it to see the other steps started a paid move */}
         <span className="min-w-0 truncate">
           {onItsWay ? "On its way…" : text}
         </span>
-        {gap?.kind !== "choose" && <span className="pl-1">▸</span>}
       </button>
       <More sections={sections} />
     </>

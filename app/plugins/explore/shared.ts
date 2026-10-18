@@ -341,6 +341,10 @@ export type OpenItem = {
   label: string;
   // where the first of them is
   q: string;
+  // the node the first of them is on, where there is one: the want of a
+  // must still empty or a guess, the lead with no case against. The Decide
+  // sheet names it and opens it
+  node?: string;
 };
 
 // "run", "tell", "open", "likely" and "settle" are yours, not Claude's: a

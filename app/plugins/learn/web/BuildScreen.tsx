@@ -36,6 +36,7 @@ import { act as send } from "../../../web/lib/api.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
   countsBuilt,
+  placingIsAnswer,
   type LearnView,
   type StepView,
   type Sure,
@@ -128,6 +129,8 @@ type Closed = {
   at: number;
   unaided: number;
   of: number;
+  // the steps rebuilt today: none, and there is no score to tell
+  rebuilt: number;
   last: number | null;
   card: { right: boolean; correct: string | null } | null;
 };
@@ -189,10 +192,14 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
   if (current && pinned !== current.step) setPinned(current.step);
 
   // a different step starts on its own canvas, with nothing half-done. A
-  // play step not yet built opens on its scene, which comes first (spec §1):
-  // "I know some" skipped See, and the step opened on Build the order. Its
-  // mode is known once its model is in, so that counts as a new key too. A
-  // review or a quick rebuild opens on the order: the scene acts it out.
+  // play step built for the first time opens on its scene when there is
+  // one, which comes before the order ("I know some" skipped See, and the
+  // step opened on Build the order). Otherwise it opens on the step, as any
+  // does: opened on an empty scene, the example the predict card talks
+  // about sat behind the toggle, under a second filled button (Play this
+  // step by hand). Its mode is known once its model is in, so that counts
+  // as a new key too. A review or a quick rebuild opens on the order: the
+  // scene acts it out.
   const key = current
     ? `${current.step}:${current.mode}:${!!(current.reviewing || current.recall)}`
     : "";
@@ -203,8 +210,9 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
     setCentre(
       current?.mode === "play" &&
         !fromMemory(current) &&
-        (current.stage === "see" ||
-          (current.stage === "build" && current.checks === 0))
+        current.stage === "build" &&
+        current.checks === 0 &&
+        !!map.scenes[current.step]
         ? "play"
         : "step",
     );
@@ -237,6 +245,7 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
       at: review.at,
       unaided: review.unaided,
       of: review.of,
+      rebuilt: review.items.length,
       last: view.last?.unaided ?? null,
       card: last ? { right: !!last.right, correct: last.correct } : null,
     };
@@ -407,6 +416,7 @@ export function BuildScreen({ ws, view }: { ws: Workspace; view: LearnView }) {
               onSelect={(id) => setSelection([id])}
               onClose={() => (selStep ? setThread(false) : setSelection([]))}
               asSteps
+              plain
               actions={panelActions}
             />
           )}
@@ -542,7 +552,8 @@ function StepArea({
     st.checks === 0 &&
     !st.reviewing &&
     !st.recall &&
-    !st.onCase;
+    !st.onCase &&
+    !st.viaModel;
   const sections: MoreSection[] = [
     {
       head: view.level && !review ? "Starting help" : undefined,
@@ -588,8 +599,9 @@ function StepArea({
           ? [
               {
                 label: "Show the model",
-                title:
-                  "Shows the whole model as long as you want, then you rebuild it with the parts placed. It counts as shown.",
+                // what the rebuild after it starts with, as it does: at L1,
+                // where placing is the answer, the parts wait outside
+                title: `Shows the whole model as long as you want, then you rebuild it ${placingIsAnswer(st.frame) ? "from the parts" : "with the parts placed"}. It counts as shown.`,
                 onClick: () => void act("showModel", { step: st.step }),
               },
             ]
@@ -616,9 +628,16 @@ function StepArea({
     },
   ];
   // Claude's opening note on the path, to read again (it was "How to start"
-  // in the rail)
+  // in the rail): a reply before you said anything after your question. A
+  // map whose opening line is the app's own has none; the first reply to a
+  // question you asked later is no intro.
+  const question = map.chat.findIndex((c) => c.role === "you");
   const intro = map.chat.find(
-    (c) => c.role === "claude" && !c.blankId && !c.nodeId,
+    (c, i) =>
+      c.role === "claude" &&
+      !c.blankId &&
+      !c.nodeId &&
+      !map.chat.slice(question + 1, i).some((x) => x.role === "you"),
   )?.text;
 
   const reviewAt = review ? review.order.indexOf(st.step) + 1 : 0;
@@ -750,8 +769,9 @@ function StepArea({
             Building a playable scene for this step…
           </div>
         ) : (
+          // outlined: a paid extra, never the step's one next thing (the
+          // right card has that)
           <SmallBtn
-            primary
             disabled={busy}
             title={busy ? WAIT_TITLE : "One Claude move"}
             onClick={() =>
@@ -862,7 +882,10 @@ function StepArea({
       {/* stacked (under 1024 wide), this keeps its own height and the side
           card scrolls in under it: let shrink to fit, the canvas ran past
           its end and the message box sat on the check card's heading */}
-      <div className="flex min-w-0 flex-none flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
+      {/* it grows into the room the side card leaves (at 768 the card was
+          one button, and the window's lower third stood empty), and never
+          shrinks below the canvas's own height */}
+      <div className="flex min-w-0 flex-[1_0_auto] flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
         {trayOn && <Tray here={here} st={st} />}
         {/* stacked (under 1024 wide), the canvas keeps a height of its own
           and the side card follows below it: squeezed to fit, the build had

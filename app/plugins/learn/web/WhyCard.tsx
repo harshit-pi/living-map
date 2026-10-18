@@ -5,6 +5,7 @@ import { HowSure } from "./CheckCard.tsx";
 import { CREDIT, inDays, stepNumber, WAIT_TITLE, type Here } from "./view.ts";
 import {
   orderStops,
+  placingIsAnswer,
   showsCase,
   type StepView,
   type Sure,
@@ -80,6 +81,8 @@ export function WhyCard({
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
         }}
         rows={3}
+        // the one thing to do once the build passed: the cursor is in it
+        autoFocus
         placeholder="One or two lines…"
         className="block w-full resize-none rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] outline-hidden focus:border-primary"
       />
@@ -203,10 +206,14 @@ export function BuiltCard({
       {st.recallDue && (
         <SmallBtn
           primary={!whatif.on}
+          // as the rebuild starts: where placing is the answer, the parts
+          // wait outside the frame (said "placed", they were in the tray)
           title={
             orderStops(st.frame)
               ? "The parts wait under the axis; you put them in order and draw the key links again"
-              : "The parts are placed; you draw the key links again"
+              : placingIsAnswer(st.frame)
+                ? "The parts wait outside the frame; you put each one in place and draw the key links again"
+                : "The parts are placed; you draw the key links again"
           }
           onClick={() => void act("recall", { step })}
         >
@@ -340,7 +347,11 @@ export function BuiltCard({
           )}
         </div>
       )}
-      {caseWriting || st.newCase === "broken" ? <WaitNote here={here} /> : null}
+      {/* while the new example is written, the line above says so; its
+          Try again waits for the map to settle, and this says why */}
+      {st.newCase === "broken" && !caseWriting ? (
+        <WaitNote here={here} typed={false} />
+      ) : null}
     </div>
   );
 }
