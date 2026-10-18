@@ -1390,13 +1390,33 @@ function threadAllows(
 
 // One of the model's board ops, cleaned field by field: how many things it
 // changed, 0 when refused, or null when it is not a board op (core's then).
+// A cell op is written with short keys: a Fill writes a couple of dozen,
+// and the long keys were a third of its words. The long keys still read.
+const CELL_KEYS = {
+  o: "option",
+  w: "want",
+  m: "mark",
+  n: "note",
+  f: "facts",
+  s: "sure",
+} as const;
+export function longCell(op: Raw): Raw {
+  if (op?.op !== "cell") return op;
+  const out: Raw = { ...op };
+  for (const [short, long] of Object.entries(CELL_KEYS))
+    if (out[long] === undefined && out[short] !== undefined)
+      out[long] = out[short];
+  return out;
+}
+
 export function applyExploreOp(
   s: ExploreState,
   nodes: Nodes,
-  op: Raw,
+  raw: Raw,
   { scope = null as string | null, now = Date.now() } = {},
 ): number | null {
-  if (!op || typeof op !== "object" || !BOARD_OPS.has(op.op)) return null;
+  if (!raw || typeof raw !== "object" || !BOARD_OPS.has(raw.op)) return null;
+  const op = longCell(raw);
   if (scope && !threadAllows(s, nodes, scope, op)) return 0;
   switch (op.op) {
     case "frame": {

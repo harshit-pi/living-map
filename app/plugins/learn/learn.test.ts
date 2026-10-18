@@ -1,4 +1,5 @@
-// Learn as a plugin: registered, its classic prompts pinned word for word,
+// Learn as a plugin: registered, its classic prompts pinned word for word
+// (the system prompt and a move's sections in its message, together),
 // and build mode's pure logic (cleaning, grading, fading, the schedule, the
 // view) and its moves on the engine with a scripted model. The fixture is the
 // text core sent before Learn was a plugin; a change to the classic prompts
@@ -111,7 +112,7 @@ import {
 } from "./web/frame.ts";
 import { act } from "../../server/actions/index.ts";
 import { applyOps } from "../../server/core/canvas.ts";
-import { systemPrompt } from "../../server/core/prompts.ts";
+import { promptParts, systemPrompt } from "../../server/core/prompts.ts";
 import type { Raw, StoredMap } from "../../server/core/types.ts";
 import { createEngine } from "../../server/engine.ts";
 import { modeOf, pluginFor, PLUGINS } from "../../server/plugins.ts";
@@ -136,8 +137,14 @@ test("Learn is a registered plugin, and serves a map whose mode is not installed
 
 test("Learn's prompts are word for word what core sent before the move", () => {
   assert.equal(fixture.length, 3);
-  for (const { sections, prompt } of fixture)
+  for (const { sections, prompt } of fixture) {
     assert.equal(systemPrompt("learn", sections, learn), prompt, `${sections}`);
+    // the same words, now in two places: the mode's job as the system
+    // prompt, the same on every move, and the move's sections in its message
+    const { system, move } = promptParts("learn", sections, learn);
+    assert.equal(move ? `${system}\n\n${move}` : system, prompt);
+    assert.equal(system, promptParts("learn", [], learn).system);
+  }
 });
 
 // ---------------------------------------------------------------- fixtures
@@ -1567,8 +1574,11 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
     calls[0].req.system,
     /build them back|build it back|builds? .*back from memory/,
   );
-  assert.match(calls[0].req.system, /MODEL OPS/);
-  assert.doesNotMatch(calls[0].req.system, /TOPIC DIAGRAM \(learning/);
+  assert.match(calls[0].req.message, /MODEL OPS/);
+  assert.doesNotMatch(
+    calls[0].req.system + calls[0].req.message,
+    /TOPIC DIAGRAM \(learning/,
+  );
   calls[0].release(reply([...PATH_OPS, ...MODEL_OPS("s1")]));
   await started;
   const m = engine.state.map!;
@@ -1670,7 +1680,10 @@ test("a new Learn map is a build map: path and step 1's model in one move, and t
     }),
   );
   await settled(calls, 3);
-  assert.match(calls[2].req.system, /WHY on a key link/);
+  assert.match(calls[2].req.message, /WHY on a key link/);
+  // the why is sent on the same system prompt as the model was: the process
+  // started ahead after one move fits the next
+  assert.equal(calls[2].req.system, calls[0].req.system);
   assert.match(calls[2].req.message, /rubric: the rubric of/);
   calls[2].release(
     reply([
@@ -1794,7 +1807,7 @@ test("a new case that only swaps the numbers is retried; one that holds is built
   const { engine, calls } = setup(m);
   const asked = act(engine, learnAct("newCase", { step: "s1" }));
   await settled(calls, 1);
-  assert.match(calls[0].req.system, /NEW CASE for a step/);
+  assert.match(calls[0].req.message, /NEW CASE for a step/);
   const sameShape = MODEL_OPS("s1", "c1").filter((o) => o.op !== "predict");
   (sameShape[0] as Raw).of = "m-s1";
   (sameShape[0] as Raw).case = "days 0-21, a virus you have never met";

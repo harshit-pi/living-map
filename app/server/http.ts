@@ -72,7 +72,7 @@ export function createApp(engine: Engine, hub: Hub) {
   app.post("/api/update", (_req, res) => {
     res.json({ started: true });
     void runUpdate((s) => hub.emit({ type: "update", ...s }), {
-      beforeRestart: () => engine.stop(),
+      beforeRestart: () => engine.stop({ release: true }),
     }).then((r) => {
       if (!r.ok)
         hub.emit({
