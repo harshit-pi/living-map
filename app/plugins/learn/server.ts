@@ -11,6 +11,7 @@
 // Blanks, scene moves and builds are checked against the answers the model
 // wrote; the answers never reach the browser.
 
+import { answerStep, fullAnswer } from "./answer.ts";
 import {
   applyBuildOp,
   BUILD_ACTIONS,
@@ -321,6 +322,9 @@ export const learn: ServerPlugin = {
   // build.ts's (hint and deeper answer both screens)
   actions: {
     ...BUILD_ACTIONS,
+    // Show me the answer: a step's, or the whole question's (answer.ts)
+    answerStep,
+    fullAnswer,
     fill: (ctx, a: Raw) => fill(ctx, id(a.blankId), a.text),
     scene: (ctx, a: Raw) => buildScene(ctx, id(a.nodeId)),
     play: (ctx, a: Raw) => play(ctx, id(a.nodeId), a.key),
