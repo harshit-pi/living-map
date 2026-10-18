@@ -3,7 +3,7 @@
 <p align="center"><b>Understand anything by seeing it, and by doing it.</b><br>
 A visual canvas that drives your own Claude Code: you steer and answer on the picture, not in a wall of text.</p>
 
-https://github.com/user-attachments/assets/38625c2e-6cb5-4a5e-8310-b8fd85114ca8
+https://github.com/user-attachments/assets/5310e726-ee2f-4876-9324-3dee512b2bd5
 
 ---
 
