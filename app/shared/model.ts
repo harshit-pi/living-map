@@ -168,6 +168,8 @@ export type MapSummary = {
   current: boolean;
   // a mode's own one-line summary, e.g. "7 parts · 6 wires"
   summary?: string;
+  // review items due now, and when the next one falls due (Learn)
+  due?: { now: number; next: number | null };
 };
 
 // What Claude is doing now, and what waits its turn.
@@ -277,6 +279,7 @@ export type ServerEvent =
       busy: boolean;
       threadId: string | null;
       working: Working | null;
+      waiting: Waiting[];
     }
   | { type: "delta"; text: string; threadId: string | null }
   | { type: "ping" }

@@ -49,6 +49,10 @@ export type TurnOptions = {
   // the instructions this move needs beyond the canvas's job (see prompts.ts)
   sections?: readonly Section[];
   keep?: boolean; // may add and change nodes, never remove one
+  // the reply's words are neither streamed nor kept, only its ops applied
+  // (Learn writing a later step's model while you build: its caption could
+  // say what the hidden model holds)
+  quiet?: boolean;
   // what the working bar says once the move's ops show what it is doing
   // (null: keep the label): the first move's label is a guess from the
   // question's words until the model frames it
@@ -105,10 +109,15 @@ export function createEngine({
           sceneView(sc, m.play[id]),
         ]),
       ),
-      ...(pluginFor(m.purpose)?.view
-        ? { data: { [m.purpose]: pluginFor(m.purpose)!.view!(m) } }
-        : {}),
+      ...dataOf(m),
     };
+
+  // a plugin's view, when it has one for this map (a Learn map from before
+  // build mode has none, and goes out exactly as it did)
+  const dataOf = (m: StoredMap) => {
+    const v = pluginFor(m.purpose)?.view?.(m);
+    return v === undefined ? {} : { data: { [m.purpose]: v } };
+  };
 
   const snapshot = (): ServerEvent => ({
     type: "map",
@@ -160,7 +169,10 @@ export function createEngine({
     const plugin = modeOf(m.purpose);
     return [
       `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${outline(m.nodes)}`,
-      plugin.outline?.(m) ?? "",
+      plugin.outline?.(m, {
+        sections: opts.sections ?? [],
+        nodeId: scope ?? opts.nodeId ?? null,
+      }) ?? "",
       scope
         ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(
             m.nodes,
@@ -238,6 +250,9 @@ export function createEngine({
           return n;
         }
       : undefined;
+    const opClean = plugin.cleanOp
+      ? (op: Raw) => plugin.cleanOp!(m, op)
+      : undefined;
     state.busy = true;
     stopped = false;
     state.working = {
@@ -247,7 +262,15 @@ export function createEngine({
       blankId: opts.blankId ?? null,
       since: Date.now(),
     };
-    hub.emit({ type: "busy", busy: true, threadId, working: state.working });
+    // what waits goes with it: a map pushed by the action that queued this
+    // move still held its ticket, and "1 waiting" stayed with nothing queued
+    hub.emit({
+      type: "busy",
+      busy: true,
+      threadId,
+      working: state.working,
+      waiting: state.waiting,
+    });
 
     const messages = threadOf(m, threadId);
     const notes = m.notes.splice(0);
@@ -275,13 +298,17 @@ export function createEngine({
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          system: systemPrompt(m.purpose, opts.sections ?? [], plugin),
+          system: systemPrompt(
+            m.purpose,
+            opts.sections ?? [],
+            plugin.promptFor?.(m) ?? plugin,
+          ),
           message: text,
           ...settings,
         },
         (soFar) => {
           const visible = visiblePart(soFar);
-          if (visible.length > shown.length) {
+          if (!opts.quiet && visible.length > shown.length) {
             hub.emit({
               type: "delta",
               text: visible.slice(shown.length),
@@ -296,6 +323,7 @@ export function createEngine({
                 scope,
                 judge: opts.judge,
                 extra: opExtra,
+                clean: opClean,
                 keep: opts.keep,
                 keepYours: plugin.keepUserNodes,
               });
@@ -343,6 +371,7 @@ export function createEngine({
           scope,
           judge: opts.judge,
           extra: opExtra,
+          clean: opClean,
           keep: opts.keep,
           keepYours: plugin.keepUserNodes,
         });
@@ -362,14 +391,15 @@ export function createEngine({
           text: "Claude replied without changing the canvas.",
           ts: Date.now(),
         });
-      messages.push({
-        role: "claude",
-        text: visiblePart(reply.final).trim() || "(updated the canvas)",
-        ts: Date.now(),
-        view,
-        ...(opts.blankId ? { blankId: opts.blankId } : {}),
-        ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
-      });
+      if (!opts.quiet)
+        messages.push({
+          role: "claude",
+          text: visiblePart(reply.final).trim() || "(updated the canvas)",
+          ts: Date.now(),
+          view,
+          ...(opts.blankId ? { blankId: opts.blankId } : {}),
+          ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
+        });
       // it says how to have them made: told only that they were not, you
       // were left with a reply naming changes the map did not show
       if (refused)

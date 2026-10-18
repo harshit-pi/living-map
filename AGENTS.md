@@ -1,6 +1,6 @@
 # Living Map
 
-A local web app that drives a model (your own Claude Code by default) from a visual canvas. **Explore**: a question as a decision board of options against what you want, with a tree view. **Learn**: any subject as a path of steps, a topic diagram with blanks you fill, and steps you play by hand.
+A local web app that drives a model (your own Claude Code by default) from a visual canvas. **Explore**: a question as a decision board of options against what you want, with a tree view. **Learn**: any subject as a path of steps; each step is a small model you see once and build back from memory, checked by the server, then rebuilt days later with less help (older maps keep the topic diagram with blanks).
 
 The app lives in `app/`; run every npm command there.
 
@@ -18,6 +18,7 @@ npm install
 npm start              # build, then serve http://localhost:4317 under server/launcher.ts
                        # (exit code 75 = restart after a one-click update)
 npm run dev            # server with --watch, plus Vite on :5173
+LIVING_MAP_CLOCK_SKEW_DAYS=8 npm start   # testing only: Learn's review clock runs 8 days ahead (server/clock.ts)
 npm run check          # ESLint, tsc, Prettier, Vitest: the same as the pre-commit hook
 npm test               # Vitest only
 npm run eval           # does Learn pick a fitting diagram, and how fast (calls the model, costs ~$1; only when asked)
@@ -43,7 +44,8 @@ For a UI change, also run `npm start` and try it in the browser: Explore and Lea
 - `app/web/`: `App.tsx` is the shell; `screens/` (Start, Loading), `components/`, `hooks/`, `lib/` (live connection, API client, storage).
 - `app/eval/forms.ts`: the diagram-fit eval, through the same provider.
 - Every mode is a plugin: Explore, Learn and Design. The contract is `app/server/plugin.ts` and `app/web/plugin.ts`; the registries are `app/server/plugins.ts` and `app/web/plugins.ts` (a map whose mode is not installed is served as Learn; a new one starts as Explore). A plugin can name modes it switches with (`switchesWith`: Explore and Learn share one map), act when a map is switched into it (`enter`: Learn lays out a path), and add header controls (`Header`). A plugin lives in `app/plugins/<id>/`: `shared.ts` (types both sides use), `core.ts` (pure logic, tested), `server.ts` (prompt, ops, actions, browser view), `web/` (its screen). Its state is `map.data[<id>]`.
-- Learn keeps its state in the map's top-level fields (`diagram`, `fills`, `answers`, `scenes`, `play`), never `map.data`: saved maps hold them there, and core (`app/server/core/diagram.ts`, `scene.ts`, `canvas.ts`) applies and checks them on every map. Hints and shown answers are core (`app/server/actions/steps.ts`): Design uses them too.
+- A Learn map is `build` or `classic` (`map.data.learn.mode`). Build (every new map): `app/plugins/learn/core.ts` grades your build against Claude's hidden model with no model call; `build.ts` holds its prompt, ops and actions; its screen is `web/BuildScreen.tsx` (`web/view.ts` holds the one busy guard: a button that starts a paid move is off while a move runs or waits). Classic (a map with no `data.learn`) is served exactly as before: its state is the map's top-level fields (`diagram`, `fills`, `answers`, `scenes`, `play`), applied by core (`app/server/core/diagram.ts`, `scene.ts`, `canvas.ts`); Practise this as builds turns it into a build map and keeps them. Hints and shown answers on classic maps are core (`app/server/actions/steps.ts`): Design uses them too.
+- Learn's review schedule reads the time only through `app/server/clock.ts`; `LIVING_MAP_CLOCK_SKEW_DAYS` moves it forward by whole days, for trying a return visit (testing only).
 - Explore's board keeps its options, questions and wants as ordinary nodes (a want is a fact), so Learn and the Tree still read them; everything else (rows, cells, the stand, commits) is `map.data.explore`. `reconcile` in `app/plugins/explore/core.ts` prunes it against the nodes; `view` and `outline` run it on a copy, so opening a map writes nothing.
 
 ## Releases
@@ -63,7 +65,7 @@ Every push to `main` that passes CI publishes a GitHub release `v0.1.<run>` (the
 
 ## Never
 
-- Never send an answer to the browser: scene moves, blank answers and accepted forms stay on the server.
+- Never send an answer to the browser: scene moves, blank answers, accepted forms and Learn's step models stay on the server.
 - Never use `--no-verify`, and never commit on or push to `main` (`.claude/hooks/protect-main.sh`).
 - Never commit `out/`, `cache/`, `data/` or anything from `~/.living-map`: they can hold private transcripts and maps.
 - Never break `npm ci`, `npm run build` or the launcher's restart: every running copy installs `main` with them.

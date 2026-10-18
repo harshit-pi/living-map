@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { MapSummary } from "../../shared/model.ts";
+import { ago } from "../lib/ago.ts";
 import { useMaps } from "../lib/api.ts";
 import { pluginFor } from "../plugins.ts";
 
@@ -8,16 +9,6 @@ const BADGE = {
   success: "bg-success-soft text-success-strong",
   warning: "bg-warning-soft text-warning-strong",
 };
-
-function ago(ms: number) {
-  const m = Math.round((Date.now() - ms) / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} h ago`;
-  const d = Math.round(h / 24);
-  return d === 1 ? "yesterday" : `${d} days ago`;
-}
 
 // Earlier maps, newest first: what it was, which mode, how far you got.
 export function MapRows({
@@ -52,6 +43,14 @@ export function MapRows({
                 {m.summary ?? `${m.nodes} nodes · ${m.open} open`}
               </span>
             </span>
+            {!!m.due?.now && (
+              <span
+                title="Steps due for review now"
+                className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[10.5px] font-semibold text-primary-strong"
+              >
+                ↻ {m.due.now}
+              </span>
+            )}
             <span className="shrink-0 text-[11px] text-faint">
               {m.current ? "open now" : ago(m.updatedAt)}
             </span>

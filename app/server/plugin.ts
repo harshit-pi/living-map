@@ -21,8 +21,20 @@ export type ServerPlugin = {
   prompt: string;
   // extra instructions by name, sent only on moves that list them in `sections`
   sections?: Record<string, string>;
-  // what the model is told about the plugin's state on every move
-  outline?: (map: StoredMap) => string;
+  // the job and sections for one map, when they depend on it (Learn's older
+  // maps keep their topic-diagram prompt; its build maps get another)
+  promptFor?: (map: StoredMap) => {
+    prompt: string;
+    sections?: Record<string, string>;
+  };
+  // what the model is told about the plugin's state on every move; the
+  // move's sections say what it is for (Learn shows a hidden model only to
+  // the moves that work on it), and `nodeId` the node it is about (its
+  // thread's, or the one it was asked on)
+  outline?: (
+    map: StoredMap,
+    move?: { sections: readonly string[]; nodeId?: string | null },
+  ) => string;
   // an op from the model's reply that core does not know; return how many
   // things it changed, or null when it is not this plugin's op either. The
   // model's output is untrusted: clean every field before it reaches the map.
@@ -31,6 +43,11 @@ export type ServerPlugin = {
     op: Raw,
     opts: { scope: string | null },
   ) => number | null;
+  // a node op (add, update) from the model's reply, before core applies it:
+  // the plugin may clean its text in place (Learn leaves out what would say
+  // the links of a step you are building), or return false to drop it (a
+  // note Learn's screen never shows)
+  cleanOp?: (map: StoredMap, op: Raw) => void | false;
   // the model may not change or remove a node you made, chose or settled
   // (by: "you"), whatever its reply says
   keepUserNodes?: boolean;
@@ -51,6 +68,9 @@ export type ServerPlugin = {
   view?: (map: StoredMap) => unknown;
   // one line for the maps list, e.g. "7 parts · 6 wires"
   summary?: (map: StoredMap) => string;
+  // how many steps wait for review now, and when the next falls due
+  // (Learn's spaced rebuilds), for the start screen and the maps list
+  due?: (map: StoredMap, now: number) => { now: number; next: number | null };
 };
 
 // a plugin's state on a map, created on first use

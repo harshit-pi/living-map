@@ -1,14 +1,42 @@
-// Learn on the server: any subject as a path of steps, a topic diagram with
-// blanks you fill, and steps you play by hand. Its map is core's node map,
-// shared with Explore, which is why the two switch into each other. Its state
-// is the map's top-level fields (diagram, fills, answers, scenes, play), not
-// map.data: saved maps hold it there, core applies the diagram and scene ops
-// on every map, and an Explore map switched to Learn and back keeps it.
-// Blanks and scene moves are checked here against the answers the model
-// wrote, with no model call; the answers never reach the browser.
+// Learn on the server: any subject as a path of steps. Its map is core's
+// node map, shared with Explore, which is why the two switch into each other.
+// A map is in one of two modes (map.data.learn.mode):
+// - build (every new map): each step is a small model you see once and build
+//   back from memory, checked here with no model call (build.ts, core.ts).
+// - classic (a map from before, with no data.learn): a topic diagram with
+//   blanks you fill, and steps you play by hand, exactly as before. Its
+//   state is the map's top-level fields (diagram, fills, answers, scenes,
+//   play): saved maps hold it there, and core applies the diagram and scene
+//   ops on every map.
+// Blanks, scene moves and builds are checked against the answers the model
+// wrote; the answers never reach the browser.
 
+import {
+  applyBuildOp,
+  BUILD_ACTIONS,
+  BUILD_PROMPT,
+  BUILD_SECTIONS,
+  cleanBuildOp,
+  enterBuild,
+  isBuildMap,
+  rebuilding,
+  startBuildMap,
+  watched,
+} from "./build.ts";
+import {
+  dueOf,
+  lastVisit,
+  outlineOf,
+  pathSteps,
+  peek,
+  stepOf,
+  viewOf,
+} from "./core.ts";
+import { countsBuilt } from "./shared.ts";
 import * as canvas from "../../server/actions/canvas.ts";
 import type { Ctx } from "../../server/actions/context.ts";
+import { hint as coreHint } from "../../server/actions/steps.ts";
+import { now as clock } from "../../server/clock.ts";
 import {
   accepts,
   diagramOutline,
@@ -16,7 +44,13 @@ import {
   revealBlank,
 } from "../../server/core/diagram.ts";
 import { newPlay, playMove, showMove } from "../../server/core/scene.ts";
-import { own, safeId, type Play, type Raw } from "../../server/core/types.ts";
+import {
+  own,
+  safeId,
+  type Play,
+  type Raw,
+  type StoredMap,
+} from "../../server/core/types.ts";
 import type { ServerPlugin } from "../../server/plugin.ts";
 import type { ActionResult, MapNode } from "../../shared/model.ts";
 
@@ -131,17 +165,26 @@ function buildScene(
 ): Promise<ActionResult> | ActionResult {
   const found = ctx.node(nodeId);
   if (!found) return { error: "No such step." };
+  if (rebuilding(ctx.map, nodeId)) return { error: REBUILDING };
+  // on a build map the scene is played on the step's own case, which its
+  // model, its Why and its feedback are about (it was played on another);
+  // and a move is answered from what is on screen: "Click the town York's
+  // road reaches" was asked over a row of distances with no road in it, and
+  // the road was said only after the pick
   return ctx.engine.turn(
-    `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), on the same tiny example as the diagram where it fits.`,
+    `SCENE for step ${found.named}: build a playable scene for this step (op "scene", step "${nodeId}"), ${isBuildMap(ctx.map) ? "on the step's own case (the CURRENT STEP's case and parts above): the same list, numbers and target, move for move as its parts say. Every move can be worked out from the picture and its note as they stand when it is asked: a road, an edge or a number a move asks about is in an item, a pointer or the note before that move, never only in its why" : "on the same tiny example as the diagram where it fits"}.`,
     ctx.settings,
     { label: "Building a playable scene", nodeId, sections: ["scene"] },
   );
 }
 
 // A finished scene counts as worked out by you unless most of it was shown.
+// On a build map a step is built by its build and Why (build.ts): a scene
+// played to the end set it answered, and the path read "2 of 4 built" with
+// the subgoal order not built.
 function finishScene(ctx: Ctx, node: MapNode, p: Play) {
   const total = ctx.map.scenes[node.id].moves.length;
-  if (node.kind === "question" && !node.revealed) {
+  if (node.kind === "question" && !node.revealed && !isBuildMap(ctx.map)) {
     if (p.shown * 2 > total) node.revealed = true;
     else node.status = "answered";
   }
@@ -149,6 +192,9 @@ function finishScene(ctx: Ctx, node: MapNode, p: Play) {
     `Played the scene on "${node.title}": ${total} moves, ${p.wrong} wrong tries, ${p.shown} shown.`,
   );
 }
+
+const REBUILDING =
+  "Rebuild the order first: the scene comes back once it is checked.";
 
 function advance(
   ctx: Ctx,
@@ -158,6 +204,7 @@ function advance(
   const scene = ctx.map.scenes[nodeId];
   const node = ctx.map.nodes[nodeId];
   if (!scene || !node) return { error: "No scene on that step." };
+  if (rebuilding(ctx.map, nodeId)) return { error: REBUILDING };
   const before = ctx.map.play[nodeId] ?? newPlay();
   const p = step(before);
   ctx.map.play[nodeId] = p;
@@ -178,49 +225,74 @@ const show = (ctx: Ctx, nodeId: string) =>
 
 function replay(ctx: Ctx, nodeId: string): ActionResult {
   if (!ctx.map.scenes[nodeId]) return { error: "No scene on that step." };
+  if (rebuilding(ctx.map, nodeId)) return { error: REBUILDING };
   ctx.map.play[nodeId] = newPlay();
   ctx.engine.push();
   return {};
 }
+
+// a build map has no topic diagram section: a core move that names it (a
+// message, Next) sends it only to classic maps
+const CLASSIC: Record<string, string> = { diagram: DIAGRAM, scene: SCENE };
+const BUILD: Record<string, string> = { ...BUILD_SECTIONS, scene: SCENE };
+
+// the moves that work on a step's hidden model, and so may read it whole
+const ON_MODEL = new Set(["model", "why", "case", "argue", "layer"]);
+
+const classicOutline = (map: StoredMap) =>
+  `TOPIC DIAGRAM:\n${diagramOutline(map.diagram, map.fills, map.answers)}`;
+
+// the root's steps, as the path counts them
+const stepsOf = (map: StoredMap) => {
+  const nodes = Object.values(map.nodes);
+  const root = nodes.find((n) => !n.parent);
+  return nodes.filter(
+    (n) => n.kind === "question" && n.parent && n.parent === root?.id,
+  );
+};
+
+// a core action the classic screen sends, which a build map answers its own way
+const either =
+  (classic: (ctx: Ctx, a: Raw) => Promise<ActionResult> | ActionResult) =>
+  (build: (ctx: Ctx, a: Raw) => Promise<ActionResult> | ActionResult) =>
+  (ctx: Ctx, a: Raw) => (isBuildMap(ctx.map) ? build(ctx, a) : classic(ctx, a));
 
 export const learn: ServerPlugin = {
   id: "learn",
   label: "Learn",
   canvasName: "learning path",
   switchesWith: ["explore"],
+  // a classic map's prompt, word for word as before (pinned by a fixture)
   prompt: PROMPT,
   sections: { diagram: DIAGRAM, scene: SCENE },
-  outline: (map) =>
-    `TOPIC DIAGRAM:\n${diagramOutline(map.diagram, map.fills, map.answers)}`,
-
-  async start(ctx) {
-    const m = ctx.map;
-    const r = await ctx.engine.turn(startAction(m.title), ctx.settings, {
-      label: "Drawing the topic and your path",
-      sections: ["diagram"],
+  promptFor: (map) =>
+    isBuildMap(map)
+      ? { prompt: BUILD_PROMPT, sections: BUILD }
+      : { prompt: PROMPT, sections: CLASSIC },
+  outline: (map, move) => {
+    const s = peek(map.data);
+    if (s?.mode !== "build") return classicOutline(map);
+    const full = !!move?.sections.some((x) => ON_MODEL.has(x));
+    // the step the move is about (a scene asked on step 2 was written on
+    // step 1's case, the step last worked on), else the one worked on
+    const text = outlineOf(s, map.nodes, {
+      full,
+      at: stepOf(map.nodes, move?.nodeId),
+      others: !!move?.sections.includes("model"),
     });
-    if (!r.error && !r.stopped && !Object.keys(m.nodes).length && !m.diagram)
-      return {
-        error:
-          "Claude did not lay anything out. Try again, or rephrase the question.",
-      };
-    return r;
+    // a map practised as builds after the topic diagram keeps it in view
+    return map.diagram ? `${text}\n\n${classicOutline(map)}` : text;
+  },
+  applyOp: (map, op, { scope }) => applyBuildOp(map, op, scope),
+  cleanOp: (map, op) => cleanBuildOp(map, op),
+
+  start(ctx) {
+    return startBuildMap(ctx);
   },
 
-  // a map switched to Learn with no topic diagram gets its path and diagram
-  enter(ctx) {
-    if (ctx.map.diagram || ctx.engine.state.busy) return {};
-    return ctx.engine.turn(
-      "the canvas was switched to LEARN mode. Keep the root; under it make 3-5 step questions in learning order, and build the TOPIC DIAGRAM with 2-3 blanks. Write the diagram op first. Remove nothing: every node already on the map stays where it is (the learner explored it, and it is listed under what they looked into); a useful existing question can be one of the steps, but keep its title and summary as they are (Explore reads them when the learner switches back): say what a step is in the caption, never by rewriting an existing node.",
-      ctx.settings,
-      // what you explored stays, with its threads, for when you switch back
-      {
-        label: "Turning this into a learning path",
-        sections: ["diagram"],
-        keep: true,
-      },
-    );
-  },
+  // a map switched to Learn that was never in it gets its path and step 1's
+  // model; one that was keeps what it has, with no call
+  enter: (ctx) => enterBuild(ctx),
 
   // every core action: the path, the diagram and the step panel use them all
   core: [
@@ -245,40 +317,91 @@ export const learn: ServerPlugin = {
   ],
 
   // blanks and scenes are Learn's own; thread, deeper and next are core's,
-  // worded for a learner working through steps
+  // worded for a learner working through steps; the build actions are
+  // build.ts's (hint and deeper answer both screens)
   actions: {
+    ...BUILD_ACTIONS,
     fill: (ctx, a: Raw) => fill(ctx, id(a.blankId), a.text),
     scene: (ctx, a: Raw) => buildScene(ctx, id(a.nodeId)),
     play: (ctx, a: Raw) => play(ctx, id(a.nodeId), a.key),
     playshow: (ctx, a: Raw) => show(ctx, id(a.nodeId)),
     replay: (ctx, a: Raw) => replay(ctx, id(a.nodeId)),
+    // what Claude says while you build is watched (build.ts): a key link it
+    // names counts as hinted
     thread: (ctx, a: Raw) =>
-      canvas.thread(
-        ctx,
-        id(a.nodeId),
-        id(a.threadId) || undefined,
-        a.text,
-        ({ node, named }) =>
-          node.kind === "question"
-            ? `the learner wrote in the thread on step ${named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`
-            : null,
+      watched(ctx, id(a.nodeId), () =>
+        canvas.thread(
+          ctx,
+          id(a.nodeId),
+          id(a.threadId) || undefined,
+          a.text,
+          ({ node, named }) =>
+            node.kind !== "question"
+              ? null
+              : isBuildMap(ctx.map)
+                ? `the learner wrote in the thread on step ${named}. Answer their question about this step without naming the links of its model: they build it back from memory, and the server checks it.`
+                : `the learner wrote in the thread on step ${named}. If it is an answer to the step, judge it; otherwise answer their question about this step.`,
+        ),
       ),
-    deeper: (ctx, a: Raw) =>
+    explain: (ctx, a: Raw) =>
+      watched(ctx, id(a.nodeId), () => canvas.explain(ctx, id(a.nodeId))),
+    message: (ctx, a: Raw) =>
+      watched(ctx, null, () =>
+        canvas.message(
+          ctx,
+          a.text,
+          Array.isArray(a.selection) ? a.selection : [],
+        ),
+      ),
+    hint: either((ctx, a) => coreHint(ctx, id(a.nodeId)))(BUILD_ACTIONS.hint),
+    // a build map goes deeper on a part of a step's model; without a part
+    // (or on a classic map) it breaks the step down as before
+    deeper: either((ctx, a) =>
       canvas.deeper(ctx, id(a.nodeId), "Breaking it into smaller steps"),
+    )((ctx, a) =>
+      a?.part
+        ? BUILD_ACTIONS.deeper(ctx, a)
+        : canvas.deeper(ctx, id(a.nodeId ?? a.step), "Going deeper"),
+    ),
     next: (ctx) =>
-      canvas.next(
-        ctx,
-        "next: point the learner at the next open step and make its first move clear, without solving it.",
+      watched(ctx, null, () =>
+        canvas.next(
+          ctx,
+          isBuildMap(ctx.map)
+            ? "next: point the learner at the next step to build, without giving away its model."
+            : "next: point the learner at the next open step and make its first move clear, without solving it.",
+        ),
       ),
   },
 
-  // the path's steps, counted as the path counts them: worked out by you, not shown
+  // what the browser sees of a build map; a classic map has no view, so it
+  // goes out exactly as it did before build mode
+  view: (map) => {
+    const s = peek(map.data);
+    return s?.mode === "build"
+      ? viewOf(s, map.nodes, clock(), !!map.diagram)
+      : undefined;
+  },
+
+  due: (map, now) => {
+    const s = peek(map.data);
+    if (s?.mode !== "build") return { now: 0, next: null };
+    return dueOf(s, new Set(pathSteps(map.nodes).map((p) => p.id)), now);
+  },
+
+  // the path's steps: worked out by you (classic), or built (build), and due
   summary(map) {
-    const nodes = Object.values(map.nodes);
-    const root = nodes.find((n) => !n.parent);
-    const steps = nodes.filter(
-      (n) => n.kind === "question" && n.parent && n.parent === root?.id,
-    );
+    const steps = stepsOf(map);
+    if (isBuildMap(map)) {
+      const s = peek(map.data);
+      const built = steps.filter((n) =>
+        countsBuilt(n.status, s?.steps[n.id]?.rungs),
+      ).length;
+      const due = learn.due!(map, clock()).now;
+      // the headline of the last review: today, unaided
+      const last = s ? lastVisit(s) : null;
+      return `${built} of ${steps.length} built${due ? ` · ${due} ${due === 1 ? "step" : "steps"} due` : ""}${last ? ` · last review ${last.unaided} of ${last.of} unaided` : ""}`;
+    }
     const done = steps.filter(
       (n) => n.status === "answered" && !n.revealed,
     ).length;

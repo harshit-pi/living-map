@@ -91,17 +91,31 @@ function Board({
   );
 }
 
+// A row's cells are as wide as its longest item, every cell alike so the
+// pointers and indexes above and below stay in line: at a fixed 64px,
+// "Doncaster 50" ran into "York 40" beside it.
+const cellWidth = (items: string[]) =>
+  Math.min(
+    168,
+    Math.max(
+      64,
+      Math.ceil(Math.max(0, ...items.map((v) => v.length)) * 10.4) + 18,
+    ),
+  );
+
 function Row({ s, pick, flash }: { s: ArrayState; pick?: Pick; flash: Flash }) {
   const marks = new Map<number, Tone[]>();
   for (const m of s.marks)
     marks.set(m.at, [...(marks.get(m.at) ?? []), m.tone]);
+  const width = { width: cellWidth(s.items) };
   return (
     <div className="inline-flex flex-col items-start">
       <div className="flex">
         {s.items.map((_, i) => (
           <div
             key={i}
-            className="flex h-9 w-16 flex-col items-center justify-end text-[11px] font-semibold text-primary-strong"
+            style={width}
+            className="flex h-9 flex-col items-center justify-end text-[11px] font-semibold text-primary-strong"
           >
             {s.pointers
               .filter((p) => p.at === i)
@@ -125,7 +139,8 @@ function Row({ s, pick, flash }: { s: ArrayState; pick?: Pick; flash: Flash }) {
               key={i}
               disabled={!pick}
               onClick={() => pick?.(k)}
-              className={`flex h-14 w-16 items-center justify-center border-r border-line-strong bg-surface font-mono text-[17px] last:border-r-0 ${toneClasses(marks.get(i) ?? [])} ${pick ? "cursor-pointer hover:bg-primary-soft" : ""} ${f}`}
+              style={width}
+              className={`flex h-14 items-center justify-center border-r border-line-strong bg-surface px-1 text-center font-mono text-[17px] leading-tight break-words last:border-r-0 ${toneClasses(marks.get(i) ?? [])} ${pick ? "cursor-pointer hover:bg-primary-soft" : ""} ${f}`}
             >
               {v}
             </button>
@@ -136,7 +151,8 @@ function Row({ s, pick, flash }: { s: ArrayState; pick?: Pick; flash: Flash }) {
         {s.items.map((_, i) => (
           <div
             key={i}
-            className="w-16 pt-1 text-center font-mono text-[10px] text-faint"
+            style={width}
+            className="pt-1 text-center font-mono text-[10px] text-faint"
           >
             {i}
           </div>
@@ -230,6 +246,7 @@ function Tree({ s, pick, flash }: { s: TreeState; pick?: Pick; flash: Flash }) {
 export function ScenePlay({
   scene,
   stepTitle,
+  caseLine = "",
   busy,
   building,
   onKey,
@@ -237,16 +254,23 @@ export function ScenePlay({
   onReplay,
   onHint,
   onNext,
+  nextLabel = "Next step ▸",
 }: {
   scene: Scene;
   stepTitle: string;
+  // a build map's step case, which the scene is played on
+  caseLine?: string;
   busy: boolean;
   building: boolean;
   onKey: (key: string) => Promise<{ ok?: boolean }>;
   onShow: () => void;
   onReplay: () => void;
-  onHint: () => void;
+  // a build map has no hint ladder on a scene: its hints are on the build
+  onHint?: () => void;
   onNext: () => void;
+  // what the finish card's main button says (a build map's play step goes
+  // on to rebuild the order, not to the next step)
+  nextLabel?: string;
 }) {
   const [flash, setFlash] = useState<Flash>(null);
   const [text, setText] = useState("");
@@ -278,6 +302,14 @@ export function ScenePlay({
         <h2 className="mt-0.5 text-center font-serif text-2xl text-ink">
           {scene.title}
         </h2>
+        {caseLine && (
+          <div className="mt-1 max-w-xl text-center text-[12.5px] text-muted">
+            <span className="font-semibold tracking-wide text-faint uppercase">
+              Case
+            </span>{" "}
+            · {caseLine}
+          </div>
+        )}
         <div className="mt-2 flex gap-1">
           {Array.from({ length: scene.total }, (_, i) => (
             <span
@@ -402,7 +434,7 @@ export function ScenePlay({
                 onClick={onNext}
                 className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-on-primary hover:bg-primary-strong"
               >
-                Next step ▸
+                {nextLabel}
               </button>
               <button
                 onClick={onReplay}
@@ -413,12 +445,14 @@ export function ScenePlay({
             </>
           ) : (
             <>
-              <button
-                onClick={onHint}
-                className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-body hover:bg-panel"
-              >
-                {busy ? "Hint (after Claude)" : "Hint"}
-              </button>
+              {onHint && (
+                <button
+                  onClick={onHint}
+                  className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-body hover:bg-panel"
+                >
+                  {busy ? "Hint (after Claude)" : "Hint"}
+                </button>
+              )}
               <button
                 onClick={onShow}
                 title="Counts as shown, not worked out"

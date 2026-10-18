@@ -59,6 +59,7 @@ export function useLiveMap(): Live {
       } else if (ev.type === "busy") {
         setBusy(ev.busy);
         setWorking(ev.working);
+        setWaiting(ev.waiting);
         if (ev.busy) setStream({ threadId: ev.threadId, text: "" });
       }
     };

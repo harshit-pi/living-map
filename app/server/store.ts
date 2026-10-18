@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { now } from "./clock.ts";
 import { CURRENT_FILE, MAPS_DIR } from "./config.ts";
 import type { StoredMap } from "./core/types.ts";
 import { pluginFor } from "./plugins.ts";
@@ -87,6 +88,8 @@ export function listMaps(currentId: string | null): MapSummary[] {
     const steps = nodes.filter((n) => n.kind === "question" && n.parent);
     // a mode words its own line (Learn: how much of the path you worked out)
     const summary = pluginFor(m.purpose)?.summary?.(m);
+    // a mode with spaced review says what is due (the start screen's strip)
+    const due = pluginFor(m.purpose)?.due?.(m, now());
     out.push({
       id: m.id,
       title: m.title,
@@ -97,6 +100,7 @@ export function listMaps(currentId: string | null): MapSummary[] {
       done: steps.filter((n) => n.status === "answered").length,
       current: m.id === currentId,
       ...(summary ? { summary } : {}),
+      ...(due ? { due } : {}),
     });
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);

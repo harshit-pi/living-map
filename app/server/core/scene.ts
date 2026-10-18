@@ -13,7 +13,15 @@ import {
   type Raw,
   type SceneData,
 } from "./types.ts";
-import type { Scene, SceneKind, SceneState, Tone } from "../../shared/model.ts";
+import type {
+  ArrayState,
+  BoardState,
+  Scene,
+  SceneKind,
+  SceneState,
+  Tone,
+  TreeState,
+} from "../../shared/model.ts";
 
 export const SCENE_KINDS = new Set<SceneKind>(["board", "array", "tree"]);
 const TONES = new Set<Tone>(["focus", "attack", "good", "bad", "path", "dim"]);
@@ -197,11 +205,37 @@ export function showMove(scene: SceneData, play: Play): Play {
   };
 }
 
+// The picture in front of an open move, with no pointer or mark on its
+// answer: the model draws the state after the last move, and a "next ↓"
+// pointer over the box a move asks for (or a mark on the square) gives it
+// away. Marks elsewhere stay.
+function offAnswer(kind: SceneKind, state: SceneState, a: Answer): SceneState {
+  const on = new Set(
+    a.type === "cell" || a.type === "index" || a.type === "node" ? a.keys : [],
+  );
+  if (!on.size) return state;
+  if (kind === "board") {
+    const b = state as BoardState;
+    return { ...b, marks: b.marks.filter((m) => !on.has(m.at.join(","))) };
+  }
+  if (kind === "array") {
+    const x = state as ArrayState;
+    return {
+      ...x,
+      pointers: x.pointers.filter((p) => !on.has(String(p.at))),
+      marks: x.marks.filter((m) => !on.has(String(m.at))),
+    };
+  }
+  const t = state as TreeState;
+  return { ...t, marks: t.marks.filter((m) => !on.has(normKey(m.at))) };
+}
+
 // What the browser gets: the board as it stands and the question in front of
 // you, never the answers.
 export function sceneView(scene: SceneData, play: Play = newPlay()): Scene {
   const done = scene.complete !== false && play.at >= scene.moves.length;
   const move = scene.moves[play.at];
+  const state = play.at === 0 ? scene.start : scene.moves[play.at - 1].then;
   return {
     kind: scene.kind,
     title: scene.title,
@@ -209,7 +243,7 @@ export function sceneView(scene: SceneData, play: Play = newPlay()): Scene {
     at: play.at,
     done,
     waiting: !done && !move, // the model is still writing the next move
-    state: play.at === 0 ? scene.start : scene.moves[play.at - 1].then,
+    state: move && !done ? offAnswer(scene.kind, state, move.answer) : state,
     ask: move?.ask ?? "",
     choices: move?.choices ?? [],
     answerType: move?.answer.type ?? null,
