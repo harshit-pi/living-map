@@ -1,33 +1,10 @@
 import { SmallBtn } from "./BuildCanvas.tsx";
-import { stepNumber, type Here } from "./view.ts";
+import { inDays, stepNumber, type Here } from "./view.ts";
 import { reviewMinutes } from "../../../web/lib/ago.ts";
-import {
-  MIXED_FROM,
-  type How,
-  type LearnView,
-  type ReviewView,
-} from "../shared.ts";
-
-const HOW: Record<How, string> = {
-  unaided: "by you",
-  hinted: "hinted",
-  fixed: "fixed after the check",
-  shown: "shown",
-  wrong: "wrong",
-};
-const howCls = (h: How | null) =>
-  h === "unaided"
-    ? "text-success-strong"
-    : h === "hinted" || h === "fixed"
-      ? "text-warning-strong"
-      : h === "shown"
-        ? "text-hint-strong"
-        : h === "wrong"
-          ? "text-danger-strong"
-          : "text-faint";
+import type { LearnView, ReviewView } from "../shared.ts";
 
 // The map opens here when something is due: how much, and one press to
-// start. Nothing here blocks the rest of the map.
+// start. Not now goes on along the path; what is due stays due.
 export function ReviewStart({
   here,
   onPath,
@@ -37,31 +14,14 @@ export function ReviewStart({
 }) {
   const { view } = here;
   const steps = view.steps.filter((s) => s.itemsDue > 0);
-  const links = steps.reduce((n, s) => n + s.itemsDue, 0);
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl bg-surface p-5 shadow-xs ring-1 ring-line">
-        <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-          Review
-        </div>
-        <div className="mt-1 text-[18px] font-semibold text-ink">
-          {steps.length} {steps.length === 1 ? "step is" : "steps are"} due
-        </div>
+      <div className="w-full max-w-sm rounded-2xl bg-surface p-5 shadow-xs ring-1 ring-line">
+        <div className="text-[18px] font-semibold text-ink">Time to review</div>
         <div className="mt-1 text-[13px] text-muted">
-          {links} key {links === 1 ? "link" : "links"} to rebuild from memory,
-          about {reviewMinutes(steps.length)} min
-          {/* two can come back in path order (mixedOrder) */}
-          {steps.length >= MIXED_FROM ? ", in a mixed order" : ""}.{" "}
-          {/* what the levels do (reviewHelp): "a little less help than last
-              time" was false on a first review, which comes back at L1 */}
-          The help fades as you rebuild a step by yourself; a step you needed
-          help with comes back with a little more.
+          {steps.length} {steps.length === 1 ? "step" : "steps"} · about{" "}
+          {reviewMinutes(steps.length)} min
         </div>
-        {view.last && (
-          <div className="mt-2 text-[12.5px] text-body">
-            Last time, unaided: {view.last.unaided} of {view.last.of}
-          </div>
-        )}
         <div className="mt-4 flex items-center gap-3">
           <SmallBtn primary onClick={() => void here.act("review")}>
             Start the review
@@ -70,7 +30,7 @@ export function ReviewStart({
             onClick={onPath}
             className="text-[12.5px] text-muted hover:text-ink"
           >
-            or carry on along the path
+            Not now
           </button>
         </div>
       </div>
@@ -78,8 +38,8 @@ export function ReviewStart({
   );
 }
 
-// Over the canvas while a review is open: how long it has been, and the due
-// steps in the order they come.
+// Over the canvas while a review of more than one step is open: the due
+// steps in the order they come ("Review 1 of 2" is said on the canvas).
 export function ReviewStrip({
   view,
   review,
@@ -91,59 +51,44 @@ export function ReviewStrip({
   current: string | null;
   onPick: (step: string) => void;
 }) {
-  const pathOrder = view.steps
-    .map((s) => s.step)
-    .filter((id) => review.order.includes(id));
+  if (review.order.length < 2) return null;
   return (
-    <div className="space-y-1">
-      <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-        Review
-        {review.since !== null &&
-          ` · ${review.since} ${review.since === 1 ? "day" : "days"} since your last visit`}
-        {` · ${review.order.length} ${review.order.length === 1 ? "step" : "steps"} due`}
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
-        {review.order.map((id, i) => {
-          const st = view.steps.find((s) => s.step === id);
-          if (!st) return null;
-          return (
-            <span key={id} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-faint">then</span>}
-              <button
-                onClick={() => onPick(id)}
-                className={`rounded-full px-2 py-0.5 ${current === id ? "bg-primary-soft text-primary-strong ring-1 ring-primary-line" : "text-body hover:bg-panel"}`}
-              >
-                {st.reviewing ? "" : "✓ "}
-                {stepNumber(view, id)} {st.title}
-              </button>
-            </span>
-          );
-        })}
-        {/* only when it is: two steps can come back in path order */}
-        {review.order.length > 1 &&
-          review.order.some((id, i) => id !== pathOrder[i]) && (
-            <span className="text-[11.5px] text-faint">(mixed order)</span>
-          )}
-      </div>
+    <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+      {review.order.map((id) => {
+        const st = view.steps.find((s) => s.step === id);
+        if (!st) return null;
+        return (
+          <button
+            key={id}
+            onClick={() => onPick(id)}
+            className={`rounded-full px-2 py-0.5 ${current === id ? "bg-primary-soft text-primary-strong ring-1 ring-primary-line" : "text-body hover:bg-panel"}`}
+          >
+            {st.reviewing ? "" : "✓ "}
+            {stepNumber(view, id)} <span data-content>{st.title}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-// Beside a review: each key link last time → today, once its step's rebuild
-// is checked; Today, unaided; the "which idea is this?" cards once the
-// rebuilds are done; and I'm done today. `onPick`: on a step you rebuilt
-// out of the review's order, the step still to rebuild, first (it said
-// nothing, under the step's old cards, and Next step went along the path).
+// Beside a review, under the rebuild's own check card: how the last rebuild
+// came out, the step still to rebuild when you are on another, and I'm done
+// today. Once the rebuilds are done, "Which idea is this?" one card at a
+// time; with none left the screen closes the review (ClosingCard).
 export function ReviewPanel({
   here,
   review,
   current,
   onPick,
+  onDone,
 }: {
   here: Here;
   review: ReviewView;
   current?: string;
   onPick?: (step: string) => void;
+  // I'm done today: the screen closes the review and keeps what it said
+  onDone: () => void;
 }) {
   const { view, act } = here;
   const due = review.order.filter(
@@ -151,110 +96,150 @@ export function ReviewPanel({
   );
   const left = due.length;
   const next = onPick && !due.includes(current ?? "") ? due[0] : undefined;
-  const nextSt = next ? view.steps.find((s) => s.step === next) : undefined;
-  return (
-    <div className="space-y-3">
-      {left === 0 && (
-        <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] font-medium text-success-strong">
-          ✓ Review done · today, unaided {review.unaided} of {review.of}
-        </div>
-      )}
-      {nextSt && onPick && (
-        <div className="space-y-1.5 rounded-lg bg-primary-soft/60 px-2.5 py-2 ring-1 ring-primary-line">
-          <div className="text-[12.5px] text-body">
-            {left === 1 ? "One step is" : `${left} steps are`} still to rebuild
-            in this review.
-          </div>
-          <SmallBtn primary onClick={() => onPick(nextSt.step)}>
-            Next: rebuild {stepNumber(view, nextSt.step)} {nextSt.title} →
-          </SmallBtn>
-        </div>
-      )}
-      <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-        Last time → today
-      </div>
-      {review.items.length ? (
-        <ul className="space-y-1.5">
-          {review.items.map((it, i) => (
-            <li key={i} className="text-[12px] leading-snug">
-              <div className="text-body">{it.label}</div>
-              <div>
-                <span className={howCls(it.last)}>
-                  {it.last ? HOW[it.last] : "first review"}
-                </span>
-                <span className="text-faint"> → </span>
-                <span className={`font-medium ${howCls(it.today)}`}>
-                  {HOW[it.today]}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div className="text-[12px] text-muted">
-          Each step's links show here once you check its rebuild.
-        </div>
-      )}
-      <div className="rounded-lg bg-panel px-2.5 py-2">
-        <div className="text-[11px] text-muted">Today, unaided</div>
-        <div className="text-[16px] font-semibold text-ink">
-          {review.unaided} of {review.of}
-          <span className="ml-1 text-[11.5px] font-normal text-muted">
-            key links{left ? " so far" : ""}
-          </span>
-        </div>
-        {left > 0 && (
-          <div className="text-[11.5px] text-muted">
-            {left} {left === 1 ? "step" : "steps"} left to rebuild
+  // the rebuild just checked, told as it comes out: the review goes on to
+  // the next step at once, and its result was otherwise never seen
+  const doneSteps = review.order.filter((id) => !due.includes(id));
+  const lastStep = doneSteps[doneSteps.length - 1];
+  const lastItems = review.items.filter((it) => it.step === lastStep);
+  const card = review.cards.find((c) => c.picked === null);
+  const answered = review.cards.filter((c) => c.picked !== null);
+  const lastCard = answered[answered.length - 1];
+  const titleOf = (id: string | null) =>
+    view.steps.find((s) => s.step === id)?.title ?? "";
+
+  if (left > 0)
+    return (
+      <div className="space-y-2">
+        {lastStep && lastItems.length > 0 && (
+          <div className="text-[12.5px] text-success-strong">
+            {/* what is counted is said: "3 of 3" beside eight links drawn
+                read as a count of nothing */}
+            ✓ Step {stepNumber(view, lastStep)} rebuilt ·{" "}
+            {lastItems.filter((it) => it.today === "unaided").length} of{" "}
+            {lastItems.length} key links by you
           </div>
         )}
-      </div>
-
-      {review.cards.length > 0 && (
-        <div className="space-y-2 border-t border-line pt-2">
-          <div className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-            Which idea is this?
-          </div>
-          {review.cards.map((c) => (
-            <div key={c.id} className="space-y-1">
-              <div className="text-[12.5px] leading-snug text-ink">{c.ask}</div>
-              <div className="flex flex-wrap gap-1">
-                {c.choices.map((ch) => {
-                  const mine = c.picked === ch.step;
-                  const it = c.correct === ch.step;
-                  return (
-                    <button
-                      key={ch.step}
-                      disabled={c.picked !== null}
-                      onClick={() =>
-                        void act("idea", { card: c.id, pick: ch.step })
-                      }
-                      className={`rounded-lg border px-2 py-0.5 text-[12px] ${mine ? (c.right ? "border-success bg-success-soft text-success-strong" : "border-danger bg-danger-soft text-danger-strong") : it ? "border-success-line text-success-strong" : "border-line-strong text-body hover:border-primary disabled:opacity-60 disabled:hover:border-line-strong"}`}
-                    >
-                      {ch.title}
-                      {mine && (c.right ? " ✓" : " ✗")}
-                      {it && " ✓ it was this one"}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="border-t border-line pt-2">
-        <SmallBtn
-          primary={left === 0}
-          onClick={() => void act("done")}
+        {next && onPick && (
+          <SmallBtn primary onClick={() => onPick(next)}>
+            Rebuild the next step →
+          </SmallBtn>
+        )}
+        <button
+          onClick={onDone}
           title="What you did not rebuild stays due"
+          className="text-[12px] text-muted hover:text-ink"
         >
           I'm done today
-        </SmallBtn>
-        <div className="mt-1 text-[11px] text-faint">
-          Nothing here blocks the rest of the map.
-        </div>
+        </button>
       </div>
+    );
+
+  return (
+    <div className="space-y-3">
+      {lastCard && (
+        <div
+          className={`text-[12.5px] ${lastCard.right ? "text-success-strong" : "text-danger-strong"}`}
+        >
+          {lastCard.right ? (
+            "✓ Right."
+          ) : (
+            <>
+              ✗ It was “<span data-content>{titleOf(lastCard.correct)}</span>
+              ”.
+            </>
+          )}
+        </div>
+      )}
+      {card ? (
+        <div className="space-y-1.5">
+          <div className="text-[13px] font-medium text-ink">
+            Which idea is this?
+          </div>
+          <div className="text-[12.5px] leading-snug text-ink" data-content>
+            {card.ask}
+          </div>
+          <div className="flex flex-col gap-1">
+            {card.choices.map((ch) => (
+              <button
+                key={ch.step}
+                onClick={() =>
+                  void act("idea", { card: card.id, pick: ch.step })
+                }
+                className="rounded-lg border border-line-strong px-2 py-1 text-left text-[12.5px] text-body hover:border-primary"
+              >
+                <span data-content>{ch.title}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={onDone}
+            className="text-[12px] text-muted hover:text-ink"
+          >
+            I'm done today
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// What a finished review leaves on screen once it is closed (the server
+// logs it then, so "next review" is the real day): today's score beside
+// last time's, and the next step on the path if one is left. Nothing here
+// is filled: the visit is over.
+export function ClosingCard({
+  view,
+  closed,
+  onCarryOn,
+}: {
+  view: LearnView;
+  closed: {
+    unaided: number;
+    of: number;
+    last: number | null;
+    rebuilt: number;
+    // the last "which idea" card, told as it came out: the review closed
+    // the moment it was answered
+    card: { right: boolean; correct: string | null } | null;
+  };
+  onCarryOn: { step: string; go: () => void } | null;
+}) {
+  const card = closed.card;
+  return (
+    <div className="space-y-2">
+      {card && (
+        <div
+          className={`text-[12.5px] ${card.right ? "text-success-strong" : "text-danger-strong"}`}
+        >
+          {card.right ? (
+            "✓ Right."
+          ) : (
+            <>
+              ✗ It was “
+              <span data-content>
+                {view.steps.find((s) => s.step === card.correct)?.title ?? ""}
+              </span>
+              ”.
+            </>
+          )}
+        </div>
+      )}
+      {/* the key links, counted: "3 of 3 by you" beside eight links drawn
+          read as a count of nothing. With nothing rebuilt today there is no
+          score ("0 of 2 by you" after I'm done today at once) */}
+      <div className="rounded-lg bg-success-soft px-2.5 py-1.5 text-[13px] leading-snug font-medium text-success-strong">
+        ✓ Done for today
+        {closed.rebuilt > 0 &&
+          ` · ${closed.unaided} of ${closed.of} key links by you${closed.last !== null ? ` (last time ${closed.last})` : ""}`}
+        .
+        {view.due.next !== null &&
+          ` Next review ${inDays(view.due.next, view.now)}.`}
+      </div>
+      {onCarryOn && (
+        <SmallBtn onClick={onCarryOn.go}>
+          Carry on: step {stepNumber(view, onCarryOn.step)}
+        </SmallBtn>
+      )}
     </div>
   );
 }

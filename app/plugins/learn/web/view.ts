@@ -6,12 +6,12 @@ import { useRef, useState } from "react";
 import type { Action, ActionResult, MapDoc } from "../../../shared/model.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
 import {
-  HELP,
   orderStops,
   placingIsAnswer,
   PLUGIN_ID,
   type Credit,
   type LearnView,
+  type Level,
   type Mark,
   type StepView,
 } from "../shared.ts";
@@ -118,6 +118,19 @@ export type Here = {
 
 // ---------------------------------------------------------------- words
 
+// How much help the first builds start with. Each level's cost is its
+// tooltip: the pick decides how much help you get, so you can see what it
+// takes away before you pick.
+export const LEVELS: [Level, string, string][] = [
+  ["new", "I'm new", "Shows an example first"],
+  ["some", "I know some", "Parts placed; you link them"],
+  ["cold", "I know it well", "Just the parts, no help"],
+];
+
+// the first step on the path you have not built, to carry on with
+export const toCarryOn = (view: LearnView) =>
+  topSteps(view).find((s) => s.stage !== "built");
+
 // a frame's word for one of its slots
 export const slotWord = (frame: StepView["frame"]): string =>
   frame.kind === "lanes"
@@ -128,35 +141,94 @@ export const slotWord = (frame: StepView["frame"]): string =>
         ? "tick"
         : "column";
 
-// what a pass needs of where the parts sit, on any frame: said with "only
-// the key links are checked", which an axis review then failed on its order
-const placeNeed = (frame: StepView["frame"]): string =>
-  frame.kind === "free"
-    ? ""
-    : orderStops(frame)
-      ? ", with every part on a tick, in order"
-      : `, with every part in a ${slotWord(frame)}`;
+// What a pass needs, in a line: the tooltip of the check's "Not yet" (a
+// card full of ✓ that has not passed says why; with 3 other links, 70% is
+// all 3).
+export const passRule = (st: StepView): string => {
+  const c = st.check;
+  const rest =
+    c && c.restNeed > 0
+      ? `, and ${c.restNeed} of the ${c.rest} other links (you have ${c.restGot})`
+      : "";
+  const place =
+    st.frame.kind === "free"
+      ? ""
+      : orderStops(st.frame)
+        ? ", with every part on a tick, in order"
+        : `, with every part in a ${slotWord(st.frame)}`;
+  return `A pass needs every key link${rest}${place}.`;
+};
 
-export const helpLine = (st: StepView): string => {
+const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n} ${n === 1 ? one : many}`;
+
+// A failed check in one line: the first thing a pass still needs.
+export const notYet = (st: StepView): string => {
+  const c = st.check;
+  if (!c) return "Not yet";
+  if (c.keyMissing > 0 || c.keyRight < c.keys)
+    return `Not yet: ${plural(Math.max(c.keyMissing, c.keys - c.keyRight), "key link")} missing`;
+  if (c.outOfOrder > 0)
+    return `Not yet: ${plural(c.outOfOrder, "pair")} out of order`;
+  if ((c.loose ?? 0) > 0)
+    return `Not yet: ${plural(c.loose!, "part")} not in a ${slotWord(st.frame)}`;
+  if (c.restGot < c.restNeed)
+    return `Not yet: ${plural(c.restNeed - c.restGot, "more link")} needed`;
+  return "Not yet";
+};
+
+// What to do on the canvas, in plain words: the help level says how much of
+// the model you start with ("Draw the 2 missing links", "Link the parts").
+// The level's name (L0, "Fill the gaps") and the pass rule are kept off the
+// screen: what a pass needs is the check's tooltip.
+export const helpLine = (
+  st: StepView,
+  review?: { at: number; of: number },
+): string => {
   // where a part sits is the answer (an axis's order, a sort's columns, a
   // lane or a box): at L1 its parts wait under the frame
   const loose = placingIsAnswer(st.frame) && st.help === 1;
   const put = orderStops(st.frame)
-    ? "put the parts in order along the axis"
-    : `put each part in its ${slotWord(st.frame)}`;
-  const keys = `only the key links are checked${placeNeed(st.frame)}`;
-  if (st.recall)
-    return `Quick rebuild · L1 · ${HELP[1].name}: ${loose ? `${put}; ` : ""}${keys}`;
-  // a new case's own help (the view sends it): L2, or L1 after Show the model
-  if (st.onCase)
-    return `New case · L${st.help} · ${HELP[st.help].name}: ${st.caseTitle}`;
-  // a review checks only the key links, as a quick rebuild does
-  if (st.reviewing)
-    return `Review · L${st.help} · ${HELP[st.help].name}: ${loose ? put : HELP[st.help].says.toLowerCase()}; ${keys}`;
-  if (st.help === 0)
-    return `L0 · ${HELP[0].name}: draw the key links that are missing`;
-  if (loose) return `L1 · ${HELP[1].name}: ${put}, then link them`;
-  return `L${st.help} · ${HELP[st.help].name}: ${HELP[st.help].says.toLowerCase()}`;
+    ? "Put the parts in order"
+    : `Put each part in its ${slotWord(st.frame)}`;
+  // it counts down as you draw (a learner with 2 of 3 drawn had to work out
+  // which one was left): the links still to draw, by count only, never
+  // which; all drawn, the check is next. Once checked, the count is the
+  // check's (a wrong link drawn is no link less to find)
+  const n = st.keys ?? 0;
+  const left = st.check
+    ? n - st.check.keyRight
+    : n - st.links.filter((l) => !l.given).length;
+  const say =
+    st.help === 0
+      ? n > 0
+        ? left > 0
+          ? `Draw the ${plural(left, "missing link")}`
+          : "Check your links"
+        : "Draw the missing links"
+      : st.help === 1
+        ? loose
+          ? `${put}, then link them`
+          : "Link the parts"
+        : `${st.help === 2 ? "Place" : "Name"} the parts, then link them${st.frame.kind === "free" ? "" : `. ${put}`}`;
+  if (review)
+    return review.of > 1
+      ? `Review ${review.at} of ${review.of} · ${say}`
+      : `Review · ${say}`;
+  if (st.recall) return `Quick rebuild · ${say}`;
+  if (st.onCase) return `New example · ${say}`;
+  return say;
+};
+
+// how a part is placed, said while parts wait outside the frame, then how
+// a link is drawn, until you have drawn one: one at a time, so the line
+// stays one line over the frame
+export const howTo = (st: StepView): string => {
+  const own = st.links.filter((l) => !l.given).length;
+  const placing = st.trayCount > 0 || st.placed.some((p) => !p.slot);
+  if (placing && st.frame.kind !== "free" && own === 0)
+    return "drag each one in";
+  return own === 0 ? "click a part, then the part it links to" : "";
 };
 
 // a mark is a symbol and a word, never colour alone

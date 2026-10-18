@@ -3,14 +3,17 @@
 // is weighted) and the lines under its summary (an option's case against and
 // its history, a want's marks across the options, a question's answer).
 
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent as ClickEvent, type ReactNode } from "react";
 
-import { Btn, MarkText, NameLeft } from "./ui.tsx";
-import { anchorOf, PAID, type Here } from "./view.ts";
+import { Btn, MarkText, NameLeft, WAIT_TITLE } from "./ui.tsx";
+import { anchorOf, PAID, useDecide, type Here } from "./view.ts";
 import type { MapNode, NodeAction } from "../../../shared/model.ts";
+import { More, type MoreSection } from "../../../web/components/More.tsx";
 import {
   cellKey,
+  SURVIVES_WORD,
   tooLong,
+  WEIGHT_HEAD,
   WEIGHT_WORD,
   WEIGHTS,
   type BoardView,
@@ -40,6 +43,8 @@ function rowOf(
   return null;
 }
 
+const SURE = [50, 70, 90];
+
 const shapeOf = (view: ExploreView, q: string | null) =>
   q
     ? (view.boards[q]?.shape ??
@@ -47,94 +52,89 @@ const shapeOf = (view: ExploreView, q: string | null) =>
       "open")
     : "open";
 
+// A panel's buttons: the first two in the row, the rest behind one ⋯ (each
+// a menu item). `primary` marks the panel's one next action, which then owns
+// the screen's one filled button.
+type Act = {
+  label: string;
+  // a menu item has no button to anchor on, so no event: an Act that needs
+  // one (Choose…) is always among the first two
+  onClick: (e?: ClickEvent<HTMLButtonElement>) => void;
+  primary?: boolean;
+  busy?: boolean;
+  title?: string;
+};
+
+function Row({
+  acts,
+  more = [],
+  before,
+  after,
+}: {
+  acts: (Act | false | null | undefined)[];
+  // already put away by the caller (a lean and its how sure)
+  more?: MoreSection[];
+  before?: ReactNode;
+  after?: ReactNode;
+}) {
+  const all = acts.filter((a): a is Act => !!a);
+  const shown = all.slice(0, 2);
+  const rest = all.slice(2);
+  const sections: MoreSection[] = [
+    ...more,
+    {
+      items: rest.map((a) => ({
+        label: a.label,
+        title: a.busy ? WAIT_TITLE : a.title,
+        disabled: a.busy,
+        onClick: () => a.onClick(),
+      })),
+    },
+  ];
+  return (
+    <>
+      {before}
+      {shown.map((a) => (
+        <Btn
+          key={a.label}
+          primary={a.primary}
+          lead={a.primary}
+          busy={a.busy}
+          title={a.title}
+          onClick={a.onClick}
+        >
+          {a.label}
+        </Btn>
+      ))}
+      <More sections={sections} left />
+      {after}
+    </>
+  );
+}
+
 export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
-  const { view, ws, act, busy } = here;
+  const { view, ws, busy } = here;
   // the busy guard, as the board's own actions have it (view's guardedAct)
   const core = (type: NodeAction) => {
     if (busy && PAID.has(type)) return;
     void ws.run({ type, nodeId: node.id });
   };
-  const explain = !node.detail && (
-    <Btn busy={busy} onClick={() => core("explain")}>
-      Explain
-    </Btn>
-  );
+  const explain: Act | false = !node.detail && {
+    label: "Explain",
+    busy,
+    onClick: () => core("explain"),
+  };
   if (node.dropped)
     return (
-      <>
-        <Btn onClick={() => core("restore")}>Restore</Btn>
-        {explain}
-      </>
+      <Row
+        acts={[{ label: "Restore", onClick: () => core("restore") }, explain]}
+      />
     );
 
-  if (node.kind === "option") {
-    const shape = shapeOf(view, node.parent);
-    const chosen = node.status === "chosen";
-    // set aside by a Choose (another option won): it can win instead, or
-    // come back into the running; setting it aside again would only move it
-    // to the drawer
-    const chosenOver = node.status === "dropped";
+  if (node.kind === "option")
     return (
-      <>
-        {chosen && shape === "causes" && (
-          <Btn
-            onClick={() => core("restore")}
-            title="It goes back to a possible cause"
-          >
-            Unmark likely
-          </Btn>
-        )}
-        {!chosen &&
-          (shape === "choose" ? (
-            <Btn
-              primary
-              onClick={(e) => here.choose(node.id, anchorOf(e.currentTarget))}
-            >
-              {chosenOver ? "Choose this instead…" : "Choose…"}
-            </Btn>
-          ) : (
-            <Btn
-              primary
-              onClick={() => void act("commit", { option: node.id })}
-              title={
-                shape === "causes"
-                  ? "Mark this cause likely; the other causes stay open"
-                  : undefined
-              }
-            >
-              {shape === "causes" ? "Mark likely" : "Choose"}
-            </Btn>
-          ))}
-        <Btn
-          busy={busy}
-          onClick={() => void act("against", { option: node.id })}
-          title="The strongest single reason it is the wrong choice"
-        >
-          Case against
-        </Btn>
-        {explain}
-        <Btn busy={busy} onClick={() => core("deeper")}>
-          Go deeper
-        </Btn>
-        <OptionRename key={node.id} here={here} node={node} />
-        {chosenOver ? (
-          <Btn
-            onClick={() => core("restore")}
-            title="Back in the running beside your choice: the question is open again"
-          >
-            Restore
-          </Btn>
-        ) : (
-          <Btn
-            onClick={() => core("drop")}
-            title="Rule it out: it moves to the set-aside drawer and Claude stops raising it"
-          >
-            Set aside
-          </Btn>
-        )}
-      </>
+      <OptionActions key={node.id} here={here} node={node} explain={explain} />
     );
-  }
 
   if (node.kind === "question")
     return (
@@ -160,13 +160,13 @@ export function PanelActions({ here, node }: { here: Here; node: MapNode }) {
     );
 
   return (
-    <>
-      <Btn busy={busy} onClick={() => core("challenge")}>
-        Challenge
-      </Btn>
-      {explain}
-      <Btn onClick={() => core("drop")}>Set aside</Btn>
-    </>
+    <Row
+      acts={[
+        { label: "Challenge", busy, onClick: () => core("challenge") },
+        explain,
+        { label: "Set aside", onClick: () => core("drop") },
+      ]}
+    />
   );
 }
 
@@ -181,7 +181,7 @@ function WantActions({
   node: MapNode;
   board: BoardView;
   row: RowView;
-  explain: ReactNode;
+  explain: Act | false;
 }) {
   const { act } = here;
   const q = board.question;
@@ -194,52 +194,63 @@ function WantActions({
   ).length;
   const remove = () => void act("want", { q, id: row.id, remove: true });
   return (
-    <>
-      {row.suggested && (
+    <Row
+      before={
+        // how much it matters: the chips stay in view, as the one place a
+        // weight is set
+        <span className="flex basis-full flex-wrap gap-1.5">
+          {WEIGHTS.map((w) => (
+            <button
+              key={w}
+              onClick={() => void act("want", { q, id: row.id, weight: w })}
+              title={
+                w === "must"
+                  ? "Options that miss it are ruled out"
+                  : "How much it matters"
+              }
+              className={`rounded-full border px-3 py-1 text-xs ${row.weight === w ? "border-ink bg-panel font-semibold text-ink" : "border-line-strong text-body hover:border-primary"}`}
+            >
+              {WEIGHT_HEAD[w]}
+            </button>
+          ))}
+        </span>
+      }
+      acts={[
+        row.suggested && {
+          label: "Keep",
+          primary: true,
+          onClick: () => void act("want", { q, id: row.id, keep: true }),
+        },
+        row.suggested && {
+          label: "Skip",
+          onClick: () => void act("want", { q, id: row.id, keep: false }),
+        },
+        { label: "Rename", onClick: () => setRenaming(!renaming) },
+        !row.suggested && {
+          label: "Remove",
+          onClick: () => (marks ? setRemoving(true) : remove()),
+        },
+        explain,
+      ]}
+      after={
         <>
-          <Btn
-            primary
-            onClick={() => void act("want", { q, id: row.id, keep: true })}
-          >
-            Keep
-          </Btn>
-          <Btn onClick={() => void act("want", { q, id: row.id, keep: false })}>
-            Skip
-          </Btn>
+          {removing && (
+            <span className="flex basis-full flex-wrap items-center gap-1.5 text-xs text-body">
+              Remove it and its {marks === 1 ? "mark" : `${marks} marks`}?
+              <Btn onClick={remove}>Remove</Btn>
+              <Btn onClick={() => setRemoving(false)}>Keep it</Btn>
+            </span>
+          )}
+          {renaming && (
+            <RenameForm
+              initial={node.title}
+              onSave={(title) => void act("want", { q, id: row.id, title })}
+              onClose={() => setRenaming(false)}
+            />
+          )}
         </>
-      )}
-      {WEIGHTS.map((w) => (
-        <button
-          key={w}
-          onClick={() => void act("want", { q, id: row.id, weight: w })}
-          title="How much it matters"
-          className={`rounded-full border px-3 py-1 text-xs ${row.weight === w ? "border-ink bg-panel font-semibold text-ink" : "border-line-strong text-body hover:border-primary"}`}
-        >
-          {WEIGHT_WORD[w].toLowerCase()}
-        </button>
-      ))}
-      <Btn onClick={() => setRenaming(!renaming)}>Rename</Btn>
-      {!row.suggested &&
-        (removing ? (
-          <span className="flex basis-full flex-wrap items-center gap-1.5 text-xs text-body">
-            Remove it and its {marks === 1 ? "mark" : `${marks} marks`}?
-            <Btn onClick={remove}>Remove</Btn>
-            <Btn onClick={() => setRemoving(false)}>Keep it</Btn>
-          </span>
-        ) : (
-          <Btn onClick={() => (marks ? setRemoving(true) : remove())}>
-            Remove
-          </Btn>
-        ))}
-      {explain}
-      {renaming && (
-        <RenameForm
-          initial={node.title}
-          onSave={(title) => void act("want", { q, id: row.id, title })}
-          onClose={() => setRenaming(false)}
-        />
-      )}
-    </>
+      }
+    />
   );
 }
 
@@ -276,7 +287,7 @@ function RenameForm({
       <button
         type="submit"
         disabled={tooLong(title)}
-        className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
+        className="rounded-full border border-line-strong bg-surface px-3 py-1 text-xs font-medium text-body hover:border-primary disabled:opacity-40"
       >
         Rename
       </button>
@@ -287,25 +298,137 @@ function RenameForm({
   );
 }
 
-// Rename, on an option you added: Claude may not touch it, so a typo or a
-// long name stayed for good
-function OptionRename({ here, node }: { here: Here; node: MapNode }) {
+function OptionActions({
+  here,
+  node,
+  explain,
+}: {
+  here: Here;
+  node: MapNode;
+  explain: Act | false;
+}) {
+  const { view, ws, act, busy } = here;
   const [renaming, setRenaming] = useState(false);
-  const found = columnOf(here.view, node.id);
-  if (!found || found.col.by !== "you" || !node.parent) return null;
-  const q = node.parent;
-  return (
-    <>
-      <Btn onClick={() => setRenaming(!renaming)}>Rename</Btn>
-      {renaming && (
-        <RenameForm
-          initial={node.title}
-          onSave={(title) => void here.act("option", { q, id: node.id, title })}
-          onClose={() => setRenaming(false)}
-        />
-      )}
-    </>
-  );
+  // the Decide sheet, once open, owns the screen's one filled button
+  const [deciding] = useDecide(ws.map);
+  const core = (type: NodeAction) => {
+    if (busy && PAID.has(type)) return;
+    void ws.run({ type, nodeId: node.id });
+  };
+  {
+    const shape = shapeOf(view, node.parent);
+    const chosen = node.status === "chosen";
+    // set aside by a Choose (another option won): it can win instead, or
+    // come back into the running; setting it aside again would only move it
+    // to the drawer
+    const chosenOver = node.status === "dropped";
+    const found = columnOf(view, node.id);
+    const q = node.parent;
+    const lean = found?.board.lean;
+    const leaning = lean?.option === node.id;
+    // your lean, and how sure, kept from Claude: in the ⋯ (it was a toggle
+    // on every column and a row of percentages on the stand line)
+    const leanMore: MoreSection[] =
+      shape === "choose" && !chosen && !chosenOver && q
+        ? [
+            {
+              items: [
+                {
+                  label: "I lean to this",
+                  on: leaning,
+                  title: leaning
+                    ? "Your lean (kept from Claude). Click to clear it"
+                    : "Lean towards this one. Claude is not told",
+                  onClick: () =>
+                    void act("lean", { q, option: leaning ? null : node.id }),
+                },
+              ],
+            },
+            {
+              head: "How sure?",
+              items: leaning
+                ? SURE.map((n) => ({
+                    label: `${n}%`,
+                    on: lean?.sure === n,
+                    onClick: () =>
+                      void act("lean", {
+                        q,
+                        option: node.id,
+                        ...(lean?.sure === n ? {} : { sure: n }),
+                      }),
+                  }))
+                : [],
+            },
+          ]
+        : [];
+    // Rename, on an option you added: Claude may not touch it, so a typo
+    // or a long name stayed for good
+    const yours = found?.col.by === "you" && !!q;
+    return (
+      <Row
+        more={leanMore}
+        acts={[
+          chosen &&
+            shape === "causes" && {
+              label: "Unmark likely",
+              title: "It goes back to a possible cause",
+              onClick: () => core("restore"),
+            },
+          !chosen &&
+            (shape === "choose"
+              ? {
+                  label: chosenOver ? "Choose this instead…" : "Choose…",
+                  primary: !deciding,
+                  onClick: (e) =>
+                    e && here.choose(node.id, anchorOf(e.currentTarget)),
+                }
+              : {
+                  label: shape === "causes" ? "Mark likely" : "Choose",
+                  primary: true,
+                  title:
+                    shape === "causes"
+                      ? "Mark this cause likely; the other causes stay open"
+                      : undefined,
+                  onClick: () => void act("commit", { option: node.id }),
+                }),
+          {
+            label: found?.col.against ? "Case against again" : "Case against",
+            busy,
+            title: found?.col.against
+              ? "Claude makes the case again; this one is kept as history"
+              : "The strongest single reason it is the wrong choice",
+            onClick: () => void act("against", { option: node.id }),
+          },
+          explain,
+          { label: "Go deeper", busy, onClick: () => core("deeper") },
+          yours && { label: "Rename", onClick: () => setRenaming(!renaming) },
+          chosenOver
+            ? {
+                label: "Restore",
+                title:
+                  "Back in the running beside your choice: the question is open again",
+                onClick: () => core("restore"),
+              }
+            : {
+                label: "Set aside",
+                title:
+                  "Rule it out: it moves to the set-aside drawer and Claude stops raising it",
+                onClick: () => core("drop"),
+              },
+        ]}
+        after={
+          renaming &&
+          q && (
+            <RenameForm
+              initial={node.title}
+              onSave={(title) => void act("option", { q, id: node.id, title })}
+              onClose={() => setRenaming(false)}
+            />
+          )
+        }
+      />
+    );
+  }
 }
 
 function QuestionActions({
@@ -315,7 +438,7 @@ function QuestionActions({
 }: {
   here: Here;
   node: MapNode;
-  explain: ReactNode;
+  explain: Act | false;
 }) {
   const { view, ws, act, busy } = here;
   const stand = view.stand[node.id];
@@ -338,58 +461,61 @@ function QuestionActions({
   };
   const board = view.boards[node.id];
   return (
-    <>
-      <Btn primary onClick={() => setSettling(!settling)}>
-        Settle…
-      </Btn>
-      {board?.shape === "choose" && (
-        <Btn onClick={() => here.openBoard(node.id)}>Open its board</Btn>
-      )}
-      <Btn busy={busy} onClick={() => core("deeper")}>
-        Go deeper
-      </Btn>
-      <Btn busy={busy} onClick={() => core("challenge")}>
-        Challenge
-      </Btn>
-      {explain}
-      {node.parent && <Btn onClick={() => core("drop")}>Set aside</Btn>}
-      {settling && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!answer.trim()) return;
-            void act("settle", { q: node.id, answer });
-            setSettling(false);
-          }}
-          className="flex basis-full gap-1.5"
-        >
-          <textarea
-            autoFocus
-            rows={2}
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter settles, as a one-line field would; Shift-Enter wraps
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
-              }
+    <Row
+      acts={[
+        {
+          label: "Settle…",
+          primary: true,
+          onClick: () => setSettling(!settling),
+        },
+        board?.shape === "choose" && {
+          label: "Open its board",
+          onClick: () => here.openBoard(node.id),
+        },
+        { label: "Go deeper", busy, onClick: () => core("deeper") },
+        { label: "Challenge", busy, onClick: () => core("challenge") },
+        explain,
+        !!node.parent && { label: "Set aside", onClick: () => core("drop") },
+      ]}
+      after={
+        settling && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!answer.trim()) return;
+              void act("settle", { q: node.id, answer });
+              setSettling(false);
             }}
-            placeholder={
-              stand?.line ? `Claude: ${stand.line}` : "Your answer, in a line"
-            }
-            maxLength={240}
-            className="min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] leading-snug text-ink focus:border-primary focus:outline-none"
-          />
-          <button
-            type="submit"
-            className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary-strong"
+            className="flex basis-full gap-1.5"
           >
-            Settle
-          </button>
-        </form>
-      )}
-    </>
+            <textarea
+              autoFocus
+              rows={2}
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter settles, as a one-line field would; Shift-Enter wraps
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder={
+                stand?.line ? `Claude: ${stand.line}` : "Your answer, in a line"
+              }
+              maxLength={240}
+              className="min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-surface px-2 py-1 text-[13px] leading-snug text-ink focus:border-primary focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="rounded-full border border-line-strong bg-surface px-3 py-1 text-xs font-medium text-body hover:border-primary"
+            >
+              Settle
+            </button>
+          </form>
+        )
+      }
+    />
   );
 }
 
@@ -402,15 +528,19 @@ function AgainstLines({ col }: { col: ColumnView }) {
   return (
     <div className={box}>
       <div className={label}>Case against</div>
-      <div className="text-ink">{col.against.text}</div>
-      <div className="text-muted">survives: {col.against.survives}</div>
+      <div className="text-ink" data-content>
+        {col.against.text}
+      </div>
+      <div className="text-muted">{SURVIVES_WORD[col.against.survives]}</div>
       {col.was.length > 0 && (
         <div className="mt-1.5 border-t border-line pt-1.5 text-muted">
           <div className={label}>Was</div>
           {col.was.map((a, i) => (
             <div key={i}>
               {a.text}{" "}
-              <span className="text-faint">(survives: {a.survives})</span>
+              <span className="text-faint">
+                ({SURVIVES_WORD[a.survives].toLowerCase()})
+              </span>
             </div>
           ))}
         </div>
@@ -536,7 +666,17 @@ function PanelLines({ here, node }: { here: Here; node: MapNode }) {
               {sc ? (
                 <span className="shrink-0">
                   <MarkText mark={sc.mark} must={row.weight === "must"} />
-                  {sc.guess && <span className="text-hint-strong"> guess</span>}
+                  {/* "can't tell" says it is unsure already: "can't tell
+                      guess" read as two marks */}
+                  {sc.guess && sc.mark !== "unknown" && (
+                    <span
+                      className="text-hint-strong"
+                      title="No fact backs it yet"
+                    >
+                      {" "}
+                      guess
+                    </span>
+                  )}
                   {sc.who === "you" && <span className="text-ink"> you</span>}
                 </span>
               ) : (

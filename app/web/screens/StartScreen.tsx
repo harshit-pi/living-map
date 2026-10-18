@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Purpose } from "../../shared/model.ts";
 import { Logo } from "../components/Logo.tsx";
 import { MapRows } from "../components/MapList.tsx";
 import { Segmented } from "../components/Segmented.tsx";
 import { ago, reviewMinutes } from "../lib/ago.ts";
-import { useMaps } from "../lib/api.ts";
+import { useMapList } from "../lib/api.ts";
 import { store, stored } from "../lib/storage.ts";
 import { PLUGINS } from "../plugins.ts";
 
@@ -27,7 +27,9 @@ export function StartScreen({
   onOpen: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
-  const maps = useMaps(true);
+  const list = useMapList(true);
+  const maps = list ?? [];
+  const [listing, setListing] = useState(false);
   // an older browser may remember "decide", which is now "explore"
   const [purpose, setPurpose] = useState<Purpose>(() => {
     const p = stored<string>("purpose", "explore");
@@ -37,6 +39,21 @@ export function StartScreen({
     if (text.trim()) onStart(text.trim(), purpose);
   };
   const mode = MODES.find((m) => m.id === purpose) ?? MODES[0];
+  // The simpler start screen: the examples are a first visit's way in, and
+  // your maps (with the one open now, which is the way back) wait behind one
+  // "Your maps ▾" once there are any. A list of three maps and a back link
+  // were 60 more words than the box and its two examples.
+  const simple = !!mode.simple;
+  const firstVisit = list !== null && list.length === 0;
+  // Esc goes back to the map you came from, as the back link did
+  useEffect(() => {
+    if (!simple || !onCancel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [simple, onCancel]);
   // maps with review items due now, most due first: opening one opens it on
   // its review
   const due = maps
@@ -53,6 +70,7 @@ export function StartScreen({
         <div className="mb-4 flex justify-center">
           <Segmented
             value={purpose}
+            filled={!!mode.simple}
             options={MODES.map((m) => [m.id, m.label])}
             onChange={(p) => {
               setPurpose(p);
@@ -80,13 +98,25 @@ export function StartScreen({
             className="block w-full resize-none border-0 bg-transparent px-4 pt-3 text-base outline-hidden focus:ring-0"
           />
           <div className="flex justify-end px-2 pb-2">
-            <button
-              onClick={() => go(q)}
-              disabled={!q.trim()}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary disabled:opacity-40"
-            >
-              ↑
-            </button>
+            {mode.simple ? (
+              // a word, not an arrow: the one thing this screen asks of you
+              <button
+                data-primary
+                onClick={() => go(q)}
+                disabled={!q.trim()}
+                className="h-8 rounded-lg bg-primary px-4 text-sm font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
+              >
+                Start
+              </button>
+            ) : (
+              <button
+                onClick={() => go(q)}
+                disabled={!q.trim()}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary disabled:opacity-40"
+              >
+                ↑
+              </button>
+            )}
           </div>
         </div>
         {working !== null && (
@@ -101,7 +131,7 @@ export function StartScreen({
             {error}
           </div>
         )}
-        {onCancel && (
+        {onCancel && !simple && (
           <div className="mt-3 text-center">
             <button
               onClick={onCancel}
@@ -112,7 +142,7 @@ export function StartScreen({
           </div>
         )}
         <div className="mt-3 flex flex-wrap justify-center gap-2">
-          {mode.examples.map((e) => (
+          {(!simple || firstVisit ? mode.examples : []).map((e) => (
             <button
               key={e}
               onClick={() => go(e)}
@@ -160,7 +190,28 @@ export function StartScreen({
             </ul>
           </div>
         )}
-        {maps.length > 0 && (
+        {maps.length > 0 && simple && (
+          <div className="mt-6 text-center">
+            <button
+              onClick={() => setListing((v) => !v)}
+              aria-expanded={listing}
+              className="text-sm text-muted hover:text-ink"
+            >
+              Your maps {listing ? "▴" : "▾"}
+            </button>
+            {listing && (
+              <div className="mt-2 overflow-hidden rounded-xl bg-surface text-left ring-1 ring-line">
+                <MapRows
+                  maps={maps}
+                  onOpen={onOpen}
+                  onCurrent={onCancel}
+                  limit={6}
+                />
+              </div>
+            )}
+          </div>
+        )}
+        {maps.length > 0 && !simple && (
           <div className="mt-8">
             <div className="mb-1 px-1 text-[11px] font-semibold tracking-wide text-faint uppercase">
               Pick up where you left off

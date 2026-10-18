@@ -13,6 +13,7 @@ import {
   isCheck,
   LAYING_OUT,
   PLUGIN_ID,
+  SURVIVES_WORD,
   type ExploreView,
   type RootState,
   type Weight,
@@ -28,6 +29,16 @@ type Ui = {
   showDropped: boolean;
   // the groups you opened, by `${mapId}|${question}`, kept in localStorage
   opened: Record<string, Weight[]>;
+  // the Decide sheet: opened from Next (in the header, nothing picked) or
+  // from an option's panel (that option picked), so both sides share it
+  decide: Decide | null;
+};
+
+export type Decide = {
+  mapId: string;
+  q: string;
+  option: string | null;
+  at: Anchor;
 };
 
 // v2: the first record also held every group a want was added to, which
@@ -40,6 +51,7 @@ let ui: Ui = {
   board: null,
   showDropped: true,
   opened: stored<Record<string, Weight[]>>(OPENED, {}),
+  decide: null,
 };
 const listeners = new Set<() => void>();
 const subscribe = (cb: () => void) => {
@@ -87,6 +99,17 @@ export function usePlace(map: MapDoc) {
 export function useShowDropped(): [boolean, (v: boolean) => void] {
   const u = useUi();
   return [u.showDropped, (v) => set({ showDropped: v })];
+}
+
+// The Decide sheet open on this map, if any, and the way to open or close it.
+export function useDecide(
+  map: MapDoc,
+): [Decide | null, (d: Omit<Decide, "mapId"> | null) => void] {
+  const u = useUi();
+  return [
+    u.decide?.mapId === map.id ? u.decide : null,
+    (d) => set({ decide: d && { ...d, mapId: map.id } }),
+  ];
 }
 
 // The row groups you opened on one board; your choice is kept per board.
@@ -144,6 +167,8 @@ export function tagOf(
   view: ExploreView | null,
   nodes: MapDoc["nodes"],
   n: MapDoc["nodes"][string],
+  // the node's panel, whose own lines say the case against in full
+  inPanel = false,
 ): string | undefined {
   if (!view || !n.parent) return undefined;
   if (n.dropped || n.status === "dropped") return undefined;
@@ -178,7 +203,9 @@ export function tagOf(
         : "option",
     view.stand[n.parent]?.lead === n.id &&
       (causes ? "★ Claude's guess" : "★ Claude's lead"),
-    against && `against: survives ${against.survives}`,
+    !inPanel &&
+      against &&
+      `case against: ${SURVIVES_WORD[against.survives].toLowerCase()}`,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -255,6 +282,6 @@ export type Here = {
   // NodePanel on a node
   select: (id: string) => void;
   openBoard: (q: string) => void;
-  // the Choose… sheet for an option, anchored on what opened it
+  // the Decide sheet with an option picked, anchored on what opened it
   choose: (option: string, at: Anchor) => void;
 };

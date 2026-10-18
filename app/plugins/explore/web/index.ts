@@ -10,14 +10,15 @@ export const exploreWeb: WebPlugin = {
   label: "Explore",
   order: 10,
   switchesWith: ["learn"],
-  heading: "What do you want to think through?",
-  blurb:
-    "A choice to make or a question to think through. Claude lays out the options against what you want on a board, fills in what it knows and marks its guesses; you rate, choose and settle.",
-  placeholder: "e.g. Which database for the new service?",
+  heading: "What are you deciding or figuring out?",
+  blurb: "Claude lays out your options against what you want.",
+  placeholder: "A choice, or a why question…",
   examples: [
-    "Which learning vertical should Living Map start with?",
-    "Postgres or DynamoDB for a new service?",
+    "Should I learn Spanish or Mandarin first?",
+    "Why do my houseplants keep dying?",
   ],
+  // one filled button per screen: Start, then Next on the board
+  simple: true,
   Screen: ExploreScreen,
   Header: ExploreHeader,
 };

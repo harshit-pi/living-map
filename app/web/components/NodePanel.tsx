@@ -75,6 +75,8 @@ export function NodePanel({
   actions,
   extra,
   tag,
+  plain = false,
+  placeholder,
 }: {
   map: MapDoc;
   node: MapNode;
@@ -95,6 +97,11 @@ export function NodePanel({
   extra?: ReactNode;
   // a plugin's own word for the node's kind, over the title
   tag?: string;
+  // fewer words: what Claude is sent goes into a tooltip, Fork is "New
+  // thread", and the box asks what you know (Explore)
+  plain?: boolean;
+  // what the box asks, in place of the usual (a check to run: what it found)
+  placeholder?: string;
 }) {
   const learn = !!asSteps;
   const threads = useMemo(
@@ -146,6 +153,7 @@ export function NodePanel({
     node.status === "open" &&
     !node.revealed;
   const path = pathOf(map.nodes, node.id);
+  const claudeSees = `Claude sees: the map · ${path.map((p) => p.title).join(" → ")} · this thread only`;
   const act = (type: NodeAction) => {
     void run({ type, nodeId: node.id });
   };
@@ -166,7 +174,10 @@ export function NodePanel({
             >
               {tag ?? look.tag}
             </div>
-            <div className="mt-0.5 text-[17px] font-semibold leading-snug text-ink">
+            <div
+              className="mt-0.5 text-[17px] font-semibold leading-snug text-ink"
+              data-content
+            >
               {node.title}
             </div>
           </div>
@@ -179,7 +190,10 @@ export function NodePanel({
           </button>
         </div>
         {node.summary && (
-          <div className="mt-1 text-[13.5px] leading-snug text-body">
+          <div
+            className="mt-1 text-[13.5px] leading-snug text-body"
+            data-content
+          >
             {node.summary.replace(/^Recommended:\s*/, "")}
           </div>
         )}
@@ -335,13 +349,18 @@ export function NodePanel({
         )}
         {others.length > 0 && (
           <div className="mb-3">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">
-              Under this
-            </div>
+            {/* plain: the chips say what they are; the heading was two
+                more words over them */}
+            {!plain && (
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">
+                Under this
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {others.map((c) => (
                 <button
                   key={c.id}
+                  data-content
                   onClick={() => onSelect(c.id)}
                   className={`rounded-md border px-2 py-0.5 text-left text-xs hover:border-primary ${c.dropped ? "border-dashed border-line-strong text-faint line-through" : "border-line-strong text-body"}`}
                 >
@@ -352,19 +371,31 @@ export function NodePanel({
           </div>
         )}
 
-        <div className="mb-2 flex items-center gap-1 border-b border-line pb-1.5">
-          {threads.map((t) => (
+        {/* plain: one thread is just the conversation, with no tab to name
+            it, and none yet has nothing to say; New thread stays once
+            there is one to leave */}
+        <div
+          title={plain ? claudeSees : undefined}
+          className={`mb-2 flex items-center gap-1 ${plain && threads.length < 2 ? "" : "border-b border-line pb-1.5"}`}
+        >
+          {(plain && threads.length < 2 ? [] : threads).map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveId(t.id)}
+              title={plain ? claudeSees : undefined}
               className={`rounded-md px-2 py-0.5 text-xs ${active?.id === t.id ? "bg-panel font-medium text-ink" : "text-muted hover:text-ink"}`}
             >
               {t.title}
               {t.messages.length ? ` · ${t.messages.length}` : ""}
             </button>
           ))}
-          {!threads.length && (
-            <span className="text-xs text-muted">Side thread</span>
+          {!threads.length && !plain && (
+            <span
+              className="text-xs text-muted"
+              title={plain ? claudeSees : undefined}
+            >
+              Side thread
+            </span>
           )}
           <div className="flex-1" />
           {threads.length > 0 && (
@@ -379,17 +410,18 @@ export function NodePanel({
               }}
               className="rounded-md px-2 py-0.5 text-xs text-primary-strong hover:bg-primary-soft disabled:opacity-40"
             >
-              ⑂ Fork
+              {plain ? "New thread" : "⑂ Fork"}
             </button>
           )}
         </div>
-        <div
-          className="mb-2 text-[11px] leading-snug text-faint"
-          title="What Claude is sent for this thread"
-        >
-          Claude sees: the map · {path.map((p) => p.title).join(" → ")} · this
-          thread only
-        </div>
+        {!plain && (
+          <div
+            className="mb-2 text-[11px] leading-snug text-faint"
+            title="What Claude is sent for this thread"
+          >
+            {claudeSees}
+          </div>
+        )}
         <div className="space-y-3">
           {active?.messages.map((m, i) =>
             m.role === "you" ? (
@@ -399,7 +431,7 @@ export function NodePanel({
                 </div>
               </div>
             ) : m.role === "claude" ? (
-              <div key={i} className="answer answer-sm">
+              <div key={i} className="answer answer-sm" data-content>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {m.text}
                 </ReactMarkdown>
@@ -443,11 +475,14 @@ export function NodePanel({
             void run({ type: "stop" });
           }}
           placeholder={
-            writeIt
+            placeholder ??
+            (writeIt
               ? "Write your solution here. Claude traces it on the example and tells you where it breaks."
               : openStep
                 ? "Your answer, or a question about this step…"
-                : `Ask about “${node.title}”…`
+                : plain
+                  ? "What do you know about this?"
+                  : `Ask about “${node.title}”…`)
           }
           onSend={(text) => {
             void run({

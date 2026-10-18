@@ -55,6 +55,10 @@ export const Composer = forwardRef<
     compact?: boolean;
     onStop?: () => void;
     code?: boolean;
+    // the model and effort pickers behind one ⚙: two selects of words most
+    // people never change, beside every box
+    foldSettings?: boolean;
+    autoFocus?: boolean;
   }
 >(function Composer(
   {
@@ -68,10 +72,13 @@ export const Composer = forwardRef<
     compact,
     onStop,
     code,
+    foldSettings,
+    autoFocus,
   },
   ref,
 ) {
   const [text, setText] = useState("");
+  const [gear, setGear] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const { models, efforts } = useProvider();
   useImperativeHandle(ref, () => ({ focus: () => input.current?.focus() }), []);
@@ -90,6 +97,7 @@ export const Composer = forwardRef<
         ref={input}
         value={text}
         rows={rows}
+        autoFocus={autoFocus}
         placeholder={placeholder}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -116,7 +124,17 @@ export const Composer = forwardRef<
           </span>
         )}
         <div className="flex-1" />
-        {!compact && (
+        {!compact && foldSettings && (
+          <button
+            onClick={() => setGear((v) => !v)}
+            title="Model and effort"
+            aria-label="Model and effort"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[15px] hover:bg-panel ${gear ? "text-ink" : "text-muted"}`}
+          >
+            ⚙
+          </button>
+        )}
+        {!compact && (!foldSettings || gear) && (
           <Picker
             title="Model"
             value={settings.model}
@@ -124,7 +142,7 @@ export const Composer = forwardRef<
             onChange={(model) => onSettings({ model })}
           />
         )}
-        {!compact && (
+        {!compact && (!foldSettings || gear) && (
           <Picker
             title="Reasoning effort"
             value={settings.effort}

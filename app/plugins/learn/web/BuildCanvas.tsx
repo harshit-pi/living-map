@@ -1,7 +1,6 @@
 import {
   Background,
   BaseEdge,
-  Controls,
   EdgeLabelRenderer,
   getViewportForBounds,
   Handle,
@@ -50,7 +49,6 @@ import {
   ARGUABLE,
   FAMILIES,
   familyOf,
-  placingIsAnswer,
   type Family,
   type LinkView,
   type Mark,
@@ -232,6 +230,8 @@ type RoutedData = {
   // what the link takes up, its label's box included
   box: Box;
   onLabel?: (e: ReactMouseEvent) => void;
+  // said on hover over its label ("Given")
+  title?: string;
 };
 function RoutedEdge({
   id,
@@ -247,6 +247,7 @@ function RoutedEdge({
       {label && (
         <EdgeLabelRenderer>
           <div
+            title={data.title}
             className={`nodrag nopan absolute rounded-sm bg-surface px-1 text-[11px] leading-[14px] whitespace-nowrap text-body ${data.onLabel ? "cursor-pointer" : ""}`}
             style={{
               transform: `translate(-50%, -50%) translate(${data.lx}px, ${data.ly}px)`,
@@ -278,10 +279,10 @@ const TONE: Record<Mark | "plain" | "given" | "ghost", string> = {
   ghost: "var(--color-hint)",
 };
 
-// a given link is dashed; a ghost from the hint ladder is dotted, in the
-// hint colour; a link not in Claude's model is plain grey with its "?"
+// a given link is solid grey ("Given" on hover: dashed, it read as a hint);
+// a ghost from the hint ladder is dotted, in the hint colour; a link not in
+// Claude's model is plain grey with its "?"
 const DASH: Partial<Record<keyof typeof TONE, string>> = {
-  given: "5 4",
   ghost: "1.5 3.5",
 };
 
@@ -327,7 +328,13 @@ function edgeOf(
   };
   return {
     type: "routed",
-    data: { path: pathD(pts), lx: c.x, ly: c.y, box },
+    data: {
+      path: pathD(pts),
+      lx: c.x,
+      ly: c.y,
+      box,
+      ...(tone === "given" ? { title: "Given" } : {}),
+    },
     id,
     source: from,
     target: to,
@@ -384,12 +391,15 @@ export function BuildCanvas({
   mode,
   whatif,
   onDeeper,
+  line,
 }: {
   here: Here;
   st: StepView;
   mode: "worked" | "build" | "done";
   whatif: WhatIfMode | null;
   onDeeper: (part: string) => void;
+  // what to do, over the top left of your build (helpLine), and how
+  line?: { say: string; how: string; lowered: boolean };
 }) {
   const { act, busy } = here;
   const rf = useReactFlow();
@@ -397,6 +407,10 @@ export function BuildCanvas({
   // the first part clicked, waiting for the second
   const [pick, setPick] = useState<string | null>(null);
   const [pop, setPop] = useState<Pop>(null);
+  // Tidy is offered once there is something to tidy: parts you place
+  // yourself (L2 and up), or one you dragged here. The server lays out a
+  // given frame neatly, and Tidy beside it was one more button to read.
+  const [dragged, setDragged] = useState(false);
   const [argue, setArgue] = useState("");
   // where you dragged a part, until the server has it: kept only while the
   // server still has the part where it was when the drag began
@@ -452,15 +466,12 @@ export function BuildCanvas({
     frame,
     parts.filter((p) => "slot" in p && p.slot),
   );
-  // the zone for parts outside the frame, while any wait there, and for the
-  // whole build where parts start outside it (it went with the last part
-  // taken out of it, and the frame was fitted afresh)
+  // the zone for parts outside the frame, while any wait there or in the
+  // tray: with every part placed, an empty "Not in a box yet" took a third
+  // of the canvas. It goes without a refit (nothing is out of view), and a
+  // part dragged back out of the frame brings it back.
   const waiting =
-    mode === "build" &&
-    (st.trayCount > 0 ||
-      st.help >= 2 ||
-      (st.help === 1 && placingIsAnswer(frame)) ||
-      st.placed.some((p) => !p.slot));
+    mode === "build" && (st.trayCount > 0 || st.placed.some((p) => !p.slot));
   // the worked case's hidden part has no slot (its slot would point at the
   // answer) and is drawn under the frame: the zone says why it is out there
   const hiddenOut = !!worked?.hidden;
@@ -784,6 +795,45 @@ export function BuildCanvas({
       : { x, y: Math.max(8, y), room: Math.max(120, seen - y - 8) };
   };
 
+  // The verb picker opens beside the two parts, clear of both: at the
+  // click it sat on the second part, over the very link being drawn. To the
+  // right of the pair if there is room, then the left, then below, then
+  // above.
+  const clearOf = (
+    a: string,
+    b: string,
+    e: { clientX: number; clientY: number },
+  ): Spot => {
+    const r = box.current?.getBoundingClientRect();
+    const pa = at[a];
+    const pb = at[b];
+    if (!r || !pa || !pb) return where(e);
+    const corners = [pa, pb].flatMap((p) => [
+      rf.flowToScreenPosition({ x: p.x, y: p.y }),
+      rf.flowToScreenPosition({ x: p.x + NODE_W, y: p.y + NODE_H }),
+    ]);
+    const left = Math.min(...corners.map((c) => c.x)) - r.left;
+    const right = Math.max(...corners.map((c) => c.x)) - r.left;
+    const top = Math.min(...corners.map((c) => c.y)) - r.top;
+    const bottom = Math.max(...corners.map((c) => c.y)) - r.top;
+    const seen = Math.min(r.height, window.innerHeight - r.top);
+    const W = 238;
+    const y = Math.max(8, Math.min(top, seen - 200));
+    if (r.width - right > W + 8)
+      return { x: right + 8, y, room: Math.max(120, seen - y - 8) };
+    if (left > W + 8)
+      return { x: left - W - 8, y, room: Math.max(120, seen - y - 8) };
+    const x = Math.max(8, Math.min(left, r.width - W));
+    if (seen - bottom > 160)
+      return { x, y: bottom + 8, room: Math.max(120, seen - bottom - 16) };
+    return {
+      x,
+      y: top,
+      up: Math.max(8, r.height - top + 8),
+      room: Math.max(120, top - 16),
+    };
+  };
+
   // Escape lets go of a part picked to link from, and closes a popover
   // (only a click on the empty canvas did)
   useEffect(() => {
@@ -917,6 +967,7 @@ export function BuildCanvas({
         }}
         onNodeDragStop={(_, n) => {
           if (mode !== "build" || n.type !== "part") return;
+          setDragged(true);
           const p = {
             x: Math.round(n.position.x),
             y: Math.round(n.position.y),
@@ -942,7 +993,12 @@ export function BuildCanvas({
             return setPop({ kind: "part", id: n.id, at: where(e) });
           if (mode !== "build") return;
           if (!pick || pick === n.id) return setPick(pick ? null : n.id);
-          setPop({ kind: "verb", from: pick, to: n.id, at: where(e) });
+          setPop({
+            kind: "verb",
+            from: pick,
+            to: n.id,
+            at: clearOf(pick, n.id, e),
+          });
         }}
         onEdgeClick={(e, ed) => edgeClick(e, ed.id)}
         onPaneClick={() => {
@@ -952,35 +1008,61 @@ export function BuildCanvas({
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color="var(--color-line)" />
-        {/* top right, under Tidy: at the bottom they sat on the "Not in a
-            box yet" strip, next to the message box */}
-        <Controls
-          showInteractive={false}
-          fitViewOptions={FIT_WHOLE}
-          position="top-right"
-          style={{ marginTop: 44 }}
-        />
       </ReactFlow>
 
-      {mode === "build" && (
-        <div className="pointer-events-none absolute inset-x-0 top-2 flex justify-between gap-2 px-3">
-          <div className="rounded-lg bg-surface/90 px-2.5 py-1 text-[12px] text-muted shadow-xs ring-1 ring-line">
-            {pick
-              ? `Now click the part “${parts.find((p) => p.id === pick)?.label ?? ""}” links to`
-              : frame.kind === "free"
-                ? "Click a part, then another, then pick a verb"
-                : "Drag each part into its place; click a part, then another, then pick a verb"}
+      {/* what to do, top left; Tidy and Fit, top right (zoom is the wheel
+          or a pinch: its two buttons were two more things on screen) */}
+      <div className="pointer-events-none absolute inset-x-0 top-2 flex items-start justify-between gap-2 px-3">
+        {mode === "build" && line ? (
+          <div className="max-w-[70%] rounded-lg bg-surface/90 px-2.5 py-1 text-[12px] text-body shadow-xs ring-1 ring-line">
+            {pick ? (
+              <>
+                Now click the part “
+                <span data-content>
+                  {parts.find((p) => p.id === pick)?.label ?? ""}
+                </span>
+                ” links to
+              </>
+            ) : (
+              <>
+                {line.say}
+                {line.how && `: ${line.how}`}
+                {line.lowered && (
+                  <span
+                    className="pointer-events-auto text-warning-strong"
+                    title="Your quick rebuild needed a second check."
+                  >
+                    {" "}
+                    · more help this time
+                  </span>
+                )}
+              </>
+            )}
           </div>
-          {st.placed.length > 1 && (
-            <button
-              onClick={doTidy}
-              className="pointer-events-auto rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-body shadow-xs hover:border-primary"
-            >
-              Tidy
-            </button>
-          )}
+        ) : (
+          <span />
+        )}
+        <div className="flex gap-1.5">
+          {mode === "build" &&
+            st.placed.length > 1 &&
+            (st.help >= 2 || dragged) && (
+              <button
+                onClick={doTidy}
+                title="Lay the parts out neatly"
+                className="pointer-events-auto rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-body shadow-xs hover:border-primary"
+              >
+                Tidy
+              </button>
+            )}
+          <button
+            onClick={() => void rf.fitView({ ...FIT_WHOLE, duration: 200 })}
+            title="Fit the whole frame in view"
+            className="pointer-events-auto rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[12px] text-body shadow-xs hover:border-primary"
+          >
+            Fit
+          </button>
         </div>
-      )}
+      </div>
 
       {pop?.kind === "verb" && (
         <Popover at={pop.at} onClose={() => setPop(null)}>
@@ -1179,6 +1261,8 @@ export function SmallBtn({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      // the filled one is the screen's one next thing (data-primary)
+      data-primary={primary || undefined}
       className={`rounded-lg px-2.5 py-1 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${primary ? "bg-primary text-on-primary hover:bg-primary-strong" : "border border-line-strong bg-surface text-body hover:border-primary hover:text-primary-strong"}`}
     >
       {children}
@@ -1188,14 +1272,23 @@ export function SmallBtn({
 
 // Under a button that starts a paid move and is off while Claude works:
 // why a press does nothing yet (a Why sent while the next step was being
-// drawn looked lost), and that what you typed stays.
-export function WaitNote({ here }: { here: Here }) {
+// drawn looked lost), and, under a box, that what you typed stays.
+export function WaitNote({
+  here,
+  typed = true,
+}: {
+  here: Here;
+  // under a box you type in: what you typed is kept
+  typed?: boolean;
+}) {
   if (!here.busy) return null;
   const w = here.ws.live.working;
   return (
-    <div className="text-[11.5px] leading-snug text-muted">
-      Claude is busy{w ? ` (${w.label.toLowerCase()})` : ""}. This opens when it
-      is done; what you typed stays.
+    <div
+      className="text-[11.5px] leading-snug text-muted"
+      title={w ? `${w.label}…` : undefined}
+    >
+      {typed ? "Claude is busy; what you typed stays." : "Claude is busy."}
     </div>
   );
 }

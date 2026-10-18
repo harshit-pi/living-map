@@ -1,6 +1,9 @@
-// The Choose… sheet: why, in one line, and how sure you are. Both are
-// optional; once you choose, Claude writes how it could fail, what the choice
-// rests on, and the first steps.
+// The Decide sheet: the options still in play as one pick, nothing picked
+// for you (Claude's lead has its star, nothing more), then why in a line and
+// how sure you are, both optional. Opened from Next, or from an option's
+// panel with that option picked. What is still open is said here, at the
+// moment it matters; choosing anyway stays allowed. Once you choose, Claude
+// writes how it could fail, what the choice rests on, and the first steps.
 
 import { useState } from "react";
 
@@ -11,62 +14,114 @@ const SURE = [50, 70, 90];
 
 export function CommitSheet({
   here,
+  q,
   option,
   at,
   onClose,
 }: {
   here: Here;
-  option: string;
+  q: string;
+  // picked already: the sheet was opened from that option's panel
+  option: string | null;
   at: Anchor;
   onClose: () => void;
 }) {
-  const node = here.ws.map.nodes[option];
-  const q = node?.parent ?? "";
-  const stand = here.view.stand[q];
-  const lean = here.view.boards[q]?.lean;
+  const { view } = here;
+  const board = view.boards[q];
+  const stand = view.stand[q];
+  const [pick, setPick] = useState<string | null>(option);
   // the why is yours: Claude's line weighs the options (it may argue for
-  // another), so it is a hint to start from, never your reason by default
+  // another), so it is never your reason by default
   const [why, setWhy] = useState("");
-  // once a choice is made, Claude's line is about that choice, whatever it
-  // leads: it argues for this option only when nothing is chosen yet
-  const hint =
-    stand?.lead === option && stand.line && !here.view.boards[q]?.commit
-      ? `Claude: ${stand.line}`
-      : "What tipped it, in your words";
   // how sure you said you were when you leaned this way
   const [sure, setSure] = useState<number | null>(
-    lean?.option === option ? (lean.sure ?? null) : null,
+    board?.lean && board.lean.option === option
+      ? (board.lean.sure ?? null)
+      : null,
   );
-  if (!node) return null;
-  const commit = (args: Record<string, unknown>) => {
-    void here.act("commit", { option, ...args });
+  if (!board) return null;
+  // the options in play; one set aside by a Choose can be picked again from
+  // its own panel
+  const options = board.columns.filter((c) => !c.faded || c.id === option);
+  const open = view.open;
+  const first = open[0];
+  // the first open thing by name where it is one want (a must still empty
+  // or a guess): "4 guesses on 1 must" said neither which must nor whether
+  // a guess stops you choosing. Pressed, it opens what it names: the want,
+  // or the lead with no case against; going to the board you are on
+  // changed nothing on screen
+  const firstNode =
+    first?.node && here.ws.map.nodes[first.node] ? first.node : undefined;
+  const mustKind = first?.kind === "empty-must" || first?.kind === "guess-must";
+  const commit = () => {
+    if (!pick) return;
+    void here.act("commit", {
+      option: pick,
+      why,
+      ...(sure !== null ? { sure } : {}),
+    });
     onClose();
   };
+  const goTo = (id: string) => {
+    onClose();
+    if (firstNode) {
+      if (view.boards[id]?.shape === "choose") here.openBoard(id);
+      here.select(firstNode);
+    } else if (view.boards[id]?.shape === "choose") here.openBoard(id);
+    else here.select(id);
+  };
   return (
-    <Pop
-      anchor={at}
-      width={340}
-      onClose={onClose}
-      title={<>Choose “{node.title}”</>}
-    >
-      <label className="block text-xs text-muted">
-        Why, in one line (optional)
-        <input
-          autoFocus
-          value={why}
-          onChange={(e) => setWhy(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter")
-              commit({ why, ...(sure !== null ? { sure } : {}) });
-          }}
-          placeholder={hint}
-          title={hint}
-          maxLength={200}
-          className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-[13px] text-ink focus:border-primary focus:outline-none"
-        />
-      </label>
+    <Pop anchor={at} width={340} onClose={onClose} title="Decide">
+      <div role="radiogroup" aria-label="Your choice" className="space-y-1">
+        {options.map((c) => (
+          <label
+            key={c.id}
+            className={`flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-[13px] ${pick === c.id ? "bg-panel ring-1 ring-ink" : "hover:bg-panel"}`}
+          >
+            <input
+              type="radio"
+              name={`decide-${q}`}
+              checked={pick === c.id}
+              onChange={() => {
+                setPick(c.id);
+                // a lean you gave this option keeps its how sure
+                if (board.lean?.option === c.id && board.lean.sure)
+                  setSure(board.lean.sure);
+              }}
+              className="mt-0.5"
+            />
+            <span className="min-w-0 text-ink">
+              {c.lead && (
+                <span className="text-primary-strong" title="Claude's lead">
+                  ★{" "}
+                </span>
+              )}
+              <span data-content>{c.title}</span>
+              {c.lean && <span className="text-muted"> · ● your lean</span>}
+              {c.failsMust && (
+                <span className="text-danger-strong"> · ✕ fails a must</span>
+              )}
+            </span>
+          </label>
+        ))}
+      </div>
+      <input
+        value={why}
+        onChange={(e) => setWhy(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
+        placeholder="Why? (optional)"
+        title={
+          stand?.lead && stand.lead === pick && stand.line && !board.commit
+            ? `Claude: ${stand.line}`
+            : "What tipped it, in your words"
+        }
+        maxLength={200}
+        className="mt-2 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-[13px] text-ink focus:border-primary focus:outline-none"
+      />
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-        How sure are you? (optional)
+        How sure?
         {SURE.map((n) => (
           <button
             key={n}
@@ -77,23 +132,27 @@ export function CommitSheet({
           </button>
         ))}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Btn
-          primary
-          onClick={() => commit({ why, ...(sure !== null ? { sure } : {}) })}
-        >
+      {first && (
+        <div className="mt-2 text-xs text-warning-strong">
+          Still open:{" "}
+          <button
+            onClick={() => goTo(first.q)}
+            title={`${first.label}. Choosing anyway is allowed`}
+            className="underline underline-offset-2 hover:text-ink"
+          >
+            {mustKind && firstNode ? (
+              <span data-content>{here.ws.map.nodes[firstNode].title}</span>
+            ) : (
+              first.label
+            )}
+          </button>
+          {open.length > 1 && ` (+${open.length - 1})`}
+        </div>
+      )}
+      <div className="mt-3">
+        <Btn primary lead disabled={!pick} onClick={commit}>
           Choose
         </Btn>
-        <button
-          onClick={() => commit({})}
-          className="text-xs text-muted underline-offset-2 hover:text-ink hover:underline"
-        >
-          Choose without these
-        </button>
-      </div>
-      <div className="mt-2 text-[11.5px] leading-snug text-faint">
-        Claude then writes how it could fail, the assumptions it rests on, and
-        the first steps.
       </div>
     </Pop>
   );

@@ -1,10 +1,12 @@
 // One cell of the board: an option judged on one thing you want. A mark and
-// its word, a short note and how many facts back it; a guess is hatched, your
-// own rating has a solid left edge, and an empty cell is a gap you can see,
-// with "ask" (Claude writes this one cell) and "rate" (you judge it).
+// its word and a short note; a guess is hatched, your own rating has a solid
+// left edge, and an empty cell (once the board is filled) is a gap you can
+// see. The cell is a spot in the board's grid, not a button: a click or
+// Enter opens its popover, where you rate it or ask Claude about it. How
+// many facts back it is said on hover.
 
-import { Btn, MarkText, Pop, WAIT_TITLE } from "./ui.tsx";
-import { anchorOf, type Anchor, type Here } from "./view.ts";
+import { Btn, MarkText, Pop } from "./ui.tsx";
+import type { Anchor, Here } from "./view.ts";
 import type { MapNode } from "../../../shared/model.ts";
 import {
   cellKey,
@@ -39,18 +41,19 @@ function backing(nodes: Record<string, MapNode>, ids: string[]) {
 const waits = (n: number) =>
   n === 1 ? "waits on 1 check" : `waits on ${n} checks`;
 
-export function Cell({
+export function CellBody({
   here,
   board,
   col,
   row,
-  onOpen,
+  filled,
 }: {
   here: Here;
   board: BoardView;
   col: ColumnView;
   row: RowView;
-  onOpen: (option: string, want: string, at: Anchor) => void;
+  // the board has had its Fill: an empty cell is a gap now, not a blank
+  filled: boolean;
 }) {
   const sc: ShownCell | undefined = board.cells[cellKey(col.id, row.id)];
   const fade = col.faded ? "opacity-50" : "";
@@ -72,68 +75,53 @@ export function Cell({
       );
     return (
       <div
-        className="flex h-full items-start gap-1 border-l-2 border-dashed border-warning-line bg-warning-soft/50 px-2 py-2 text-xs text-warning-strong"
-        title="Still empty: a gap on the board"
-      >
-        <span aria-hidden>·</span>
-        <button
-          disabled={here.busy}
-          onClick={() => {
-            void here.act("ask", { option: col.id, want: row.id });
-          }}
-          title={
-            here.busy
-              ? WAIT_TITLE
-              : "Claude judges this one cell, in the option's thread"
-          }
-          className="underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          ask
-        </button>
-        <span aria-hidden>·</span>
-        <button
-          onClick={(e) => onOpen(col.id, row.id, anchorOf(e.currentTarget))}
-          title="Judge it yourself"
-          className="underline-offset-2 hover:underline"
-        >
-          rate
-        </button>
-      </div>
+        className={`h-full min-h-8 ${filled ? "border-l-2 border-dashed border-warning-line bg-warning-soft/50" : ""}`}
+        title={
+          filled
+            ? "Still empty: open it to rate it or ask Claude"
+            : "Fill the board judges it; or open it to rate it yourself"
+        }
+      />
     );
   }
   const yours = sc.who === "you";
   const disagree = yours && sc.claude && sc.claude.mark !== sc.mark;
   const cites = backing(here.ws.map.nodes, sc.facts);
+  const backed = [
+    cites.facts.length ? facts(cites.facts.length) : "",
+    cites.checks.length ? waits(cites.checks.length) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <button
-      onClick={(e) => onOpen(col.id, row.id, anchorOf(e.currentTarget))}
+    <div
       style={sc.guess ? HATCH : undefined}
-      className={`block h-full w-full px-2 py-1.5 text-left text-xs leading-snug hover:bg-panel ${yours ? "border-l-2 border-ink" : "border-l-2 border-transparent"} ${fade}`}
+      // a guess is said by its hatching, and in words on hover
+      title={
+        [
+          sc.mark === "unknown" ? "Claude can't tell" : "",
+          sc.guess ? "A guess: no fact backs it" : "",
+          backed,
+        ]
+          .filter(Boolean)
+          .join(" · ") || undefined
+      }
+      className={`h-full w-full px-2 py-1.5 text-left text-xs leading-snug ${yours ? "border-l-2 border-ink" : "border-l-2 border-transparent"} ${fade}`}
     >
       <div className="flex flex-wrap items-baseline gap-x-1.5">
         <MarkText
           mark={sc.mark}
           must={row.weight === "must"}
           className="text-[12.5px]"
+          terse
         />
-        {sc.guess && (
-          <span className="text-[10.5px] font-semibold text-hint-strong">
-            guess
-          </span>
-        )}
         {yours && (
           <span className="text-[10.5px] font-semibold text-ink">you</span>
         )}
       </div>
-      {sc.note && <div className="mt-0.5 text-body">{sc.note}</div>}
-      {(cites.facts.length > 0 || cites.checks.length > 0) && (
-        <div className="mt-0.5 text-muted">
-          {[
-            cites.facts.length ? facts(cites.facts.length) : "",
-            cites.checks.length ? waits(cites.checks.length) : "",
-          ]
-            .filter(Boolean)
-            .join(" · ")}
+      {sc.note && (
+        <div className="mt-0.5 text-body" data-content>
+          {sc.note}
         </div>
       )}
       {disagree && sc.claude && (
@@ -142,7 +130,7 @@ export function Cell({
           {markWord(sc.claude.mark, row.weight === "must")}
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -202,10 +190,10 @@ export function CellPopover({
       width={330}
       onClose={onClose}
       title={
-        <>
+        <span data-content>
           {nodes[option]?.title ?? option} <span className="text-faint">×</span>{" "}
           {nodes[want]?.title ?? want}
-        </>
+        </span>
       }
     >
       <div className="mb-2 flex flex-wrap items-center gap-1">
@@ -236,7 +224,7 @@ export function CellPopover({
           <span className="text-muted">Claude:</span>{" "}
           <MarkText mark={claude.mark} must={must} />
           {claude.sure && <span className="text-muted"> · {claude.sure}</span>}
-          {claude.note && <> · “{claude.note}”</>}
+          {claude.note && <span data-content> · “{claude.note}”</span>}
         </div>
       )}
       {(

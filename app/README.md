@@ -2,7 +2,7 @@
 
 A local web app that drives your own Claude Code (`claude -p`) from a visual canvas.
 
-- **Explore:** a question as a decision board of options against what you want, with Claude's judgement in each cell; Choose records why and a pre-mortem. Questions about causes open as a tree. Reply on any node in a side thread.
+- **Explore:** a question as a decision board of options against what you want, with Claude's judgement in each cell; Next names the one step to take; Decide… records your pick, why, and a pre-mortem. Questions about causes open as a tree. Reply on any node in a side thread.
 - **Learn:** a path of steps; each is a small model on one concrete case that you see once, then build back from memory. The server checks the build against Claude's hidden model with no model call, and a step comes back days later with less help. Older maps keep the topic diagram with blanks.
 - **Play a step:** do it by hand on a board, array or tree, move by move; clicks are checked instantly on the server. Coding problems end with **Write it**, where Claude traces your code.
 - **Click any part** of a diagram to have it explained in plain words, go deeper, or ask about it in a side thread.

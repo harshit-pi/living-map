@@ -1,10 +1,9 @@
 import { ReactFlowProvider } from "@xyflow/react";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
 import { AfterChoice } from "./AfterChoice.tsx";
 import { Board } from "./Board.tsx";
 import { CommitSheet } from "./CommitSheet.tsx";
-import { SetAsideToggle, TabAndShape } from "./Header.tsx";
 import { PanelActions, PanelExtra } from "./PanelParts.tsx";
 import { StandLine } from "./StandLine.tsx";
 import { Tree } from "./Tree.tsx";
@@ -14,16 +13,16 @@ import {
   layingOut,
   moving,
   tagOf,
+  useDecide,
   usePlace,
   useShowDropped,
-  type Anchor,
   type Here,
 } from "./view.ts";
 import { FloatingComposer } from "../../../web/components/FloatingComposer.tsx";
 import { NodePanel } from "../../../web/components/NodePanel.tsx";
 import { setAside } from "../../../web/lib/layout.ts";
 import type { Workspace } from "../../../web/lib/workspace.ts";
-import { LAYING_OUT } from "../shared.ts";
+import { isCheck, LAYING_OUT } from "../shared.ts";
 
 // the room you can see in the board's pane, less its gutters
 const WIDE = "calc(var(--pane-w, 100vw) - 16px - var(--cover))";
@@ -35,10 +34,8 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
   const [showDropped] = useShowDropped();
   const place = usePlace(ws.map);
   const { view, tab, board } = place;
-  const [sheet, setSheet] = useState<{ option: string; at: Anchor } | null>(
-    null,
-  );
-  const { map, live, setSelection, roomy } = ws;
+  const [sheet, setSheet] = useDecide(ws.map);
+  const { map, live, setSelection } = ws;
   const onTree = tab === "tree";
   // on the tree, what you selected less anything hidden with the set-aside
   // nodes: what you write is then about what you can see
@@ -55,7 +52,8 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
     act: guardedAct(ws.run, busy),
     select: (id) => setSelection([id]),
     openBoard: place.openBoard,
-    choose: (option, at) => setSheet({ option, at }),
+    choose: (option, at) =>
+      setSheet({ q: ws.map.nodes[option]?.parent ?? "", option, at }),
   };
   const shown = view && board ? view.boards[board] : undefined;
   const choices = Object.values(view?.boards ?? {}).filter(
@@ -85,15 +83,7 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
 
   return (
     <div className="absolute inset-0 flex flex-col">
-      {here && standOn && (
-        <StandLine here={here} q={standOn} onBoard={!onTree} />
-      )}
-      {view && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-1.5 xl:hidden">
-          <TabAndShape ws={ws} />
-          <SetAsideToggle ws={ws} className="flex" />
-        </div>
-      )}
+      {here && standOn && <StandLine here={here} q={standOn} />}
       <div className="relative min-h-0 flex-1">
         {onTree || !here || !shown ? (
           // a tree per map, so another map opens framed whole
@@ -125,7 +115,7 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
             // the work only on a narrow one)
             className={`absolute inset-0 overflow-auto [--cover:16px] ${one ? "md:[--cover:452px]" : ""}`}
           >
-            <div className="w-max min-w-full pb-56 pl-4 pr-[var(--cover)] pt-3">
+            <div className="w-max min-w-full pb-6 pl-4 pr-[var(--cover)] pt-3">
               {shown.path.length > 1 && (
                 <nav
                   className="sticky left-4 mb-2 flex flex-wrap items-center gap-1 text-[13px] text-muted"
@@ -222,33 +212,36 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
             onClose={() => setSelection([])}
             actions={here ? <PanelActions here={here} node={one} /> : undefined}
             extra={here ? <PanelExtra here={here} node={one} /> : undefined}
-            tag={tagOf(view, map.nodes, one)}
+            tag={tagOf(view, map.nodes, one, true)}
+            plain
+            // a check is yours to run: its box asks what it found (Next's
+            // "Run the check yourself" opens it here)
+            placeholder={isCheck(one) ? "What did it find?" : undefined}
           />
         )}
-        {/* on a narrow window the panel covers the work, and has its own box
-            for its thread: the main one would run under it */}
-        {(!one || roomy) && (
-          <FloatingComposer
-            ws={{ ...ws, selection }}
-            placeholder={
-              selection.length
-                ? "Say something about the selected nodes…"
-                : onTree
-                  ? "Message Claude about the whole map…"
-                  : "Message Claude about the board…"
-            }
-          />
-        )}
-        {here && sheet && (
+        {here && sheet && view?.boards[sheet.q] && (
           <CommitSheet
-            key={sheet.option}
+            key={`${sheet.q}|${sheet.option ?? ""}`}
             here={here}
+            q={sheet.q}
             option={sheet.option}
             at={sheet.at}
             onClose={() => setSheet(null)}
           />
         )}
       </div>
+      {/* one box at a time: an open panel has its own, for its thread */}
+      {!one && (
+        <FloatingComposer
+          docked
+          ws={{ ...ws, selection }}
+          placeholder={
+            selection.length
+              ? "Say something about the selected nodes…"
+              : "Ask Claude about this…"
+          }
+        />
+      )}
     </div>
   );
 }

@@ -764,6 +764,7 @@ export function openItems(
     kind: OpenItem["kind"],
     found: string[],
     label: (n: number) => string,
+    node?: string,
   ) => {
     if (found.length)
       items.push({
@@ -771,6 +772,7 @@ export function openItems(
         count: found.length,
         label: label(found.length),
         q: found[0],
+        ...(node ? { node } : {}),
       });
   };
   const undecided = Object.values(s.boards).filter(
@@ -794,11 +796,13 @@ export function openItems(
     "empty-must",
     empty.map((h) => qOf.get(h)!),
     (n) => `${plural(n, "empty cell")} ${onMusts(empty)}`,
+    empty[0]?.want,
   );
   add(
     "guess-must",
     guess.map((h) => qOf.get(h)!),
     (n) => `${plural(n, "guess", "guesses")} ${onMusts(guess)}`,
+    guess[0]?.want,
   );
   // a choice made with musts still empty, a guess, or "can't tell" on the
   // option chosen: choosing settles the board, not what is unknown about
@@ -845,12 +849,16 @@ export function openItems(
     })
     .map((b) => b.question);
   // the line is read beside the root's lead: one on a choice below names it
-  add("no-against", noAgainst, (n) =>
-    n > 1
-      ? `${n} leads with no case against`
-      : noAgainst[0] === root
-        ? "no case against the lead"
-        : `${named(nodes, noAgainst[0])}: no case against its lead`,
+  add(
+    "no-against",
+    noAgainst,
+    (n) =>
+      n > 1
+        ? `${n} leads with no case against`
+        : noAgainst[0] === root
+          ? "no case against the lead"
+          : `${named(nodes, noAgainst[0])}: no case against its lead`,
+    noAgainst[0] ? liveLead(s, nodes, noAgainst[0])?.id : undefined,
   );
   add(
     "no-premortem",
@@ -931,7 +939,7 @@ export const checksOn = (nodes: Nodes, q: string): MapNode[] =>
 // Next's label for a pre-mortem, and the move's own: a Choose starts it, and
 // Next, seeing the same label at work, does not offer it a second time
 export const wrapLabel = (nodes: Nodes, option: string) =>
-  `Pre-mortem on ${named(nodes, option)}`;
+  `How could ${named(nodes, option)} fail?`;
 
 // The check Claude said to run first on a causes question (a takeaway on
 // it), while no finding under the question is newer than that pick: until
@@ -1031,6 +1039,7 @@ function tellGap(
     label: tell.check
       ? `Answer ${named(nodes, tell.check)} to settle ${plural(cells, "cell")}`
       : `Say what you know: ${own(nodes, tell.want)?.title ?? tell.want}`,
+    short: tell.check ? "Answer the check" : "Say what you know",
     reason: `${what} Claude ${tell.guess ? "can only guess at" : "can't tell"} without you${tell.note ? ` (${clip(tell.note, 24, 160)})` : ""}`,
   };
 }
@@ -1046,11 +1055,21 @@ export function nextGap(
   const b = own(s.boards, q);
   if (b && b.shape === "choose" && !chosenHere(nodes, q)) {
     const cols = columnsOf(nodes, b).filter(inPlay);
+    // an older board with no list of what you want: nothing to fill yet
+    if (!b.rows.length)
+      return {
+        kind: "suggest",
+        q,
+        label: "Suggest what to weigh",
+        short: "Suggest what to weigh",
+        reason: "this board has no list of what you want yet",
+      };
     if (needsFill(nodes, b))
       return {
         kind: "fill",
         q,
         label: "Fill the board",
+        short: "Fill the board",
         reason: "Claude judges each option on what you want",
       };
     const keep = b.keepAsIs ? own(nodes, b.keepAsIs) : undefined;
@@ -1059,21 +1078,30 @@ export function nextGap(
         kind: "something",
         q,
         label: "Add another option",
+        short: "Add another option",
         reason:
           cols.length < 2
             ? "a choice with one option fails far more often"
             : "there is no keep-things-as-they-are option to weigh against",
       };
-    // A must only you can settle comes before the guesses Claude has not
-    // checked: with what you know still missing, a check on one came back
-    // the same guess, paid for, and Next went on to the next guess (on
-    // "Wait", whose "meets" was true by definition) rather than ask you. An
-    // empty must on a want that does not wait on you still comes first: no
-    // move has judged it yet. A must only you can settle is yours to say,
-    // in its thread, or to rate, and no move is paid for.
-    const tell = waitsOnYou(nodes, b, "must")[0];
+    // An empty must comes first: no move has judged it yet, and deciding
+    // waits for every must to have a mark. Then, once Claude leads: the
+    // lead's case against (and your lean's), an empty cell that matters,
+    // and deciding. What is only a guess, or only you can say, does not
+    // hold the choice back: the Decide sheet says it is still open, at the
+    // moment it matters, and choosing anyway is yours. Asked for first,
+    // Next went round "Say what you know" and "Check a must" and never
+    // came to Decide. With no lead yet, a must only you can settle comes
+    // before the guesses Claude has not checked: with what you know still
+    // missing, a check on one came back the same guess, paid for (on
+    // "Wait", whose "meets" was true by definition). A must only you can
+    // settle is yours to say, in its thread, or to rate, and no move is
+    // paid for.
+    const lead = liveLead(s, nodes, q);
     const musts = holes(s, nodes, b, "must", { rechecks: false });
-    const must = tell ? musts.find((h) => !h.guess) : musts[0];
+    const tell = lead ? undefined : waitsOnYou(nodes, b, "must")[0];
+    const must =
+      musts.find((h) => !h.guess) ?? (lead || tell ? undefined : musts[0]);
     if (must)
       return {
         kind: "ask",
@@ -1081,10 +1109,10 @@ export function nextGap(
         option: must.option,
         want: must.want,
         label: checkLabel(nodes, must.option, must.want),
+        short: "Check a must",
         reason: must.guess ? "a must, only a guess" : "a must, still empty",
       };
     if (tell) return tellGap(nodes, b, tell, "a must");
-    const lead = liveLead(s, nodes, q);
     const lean = b.lean && own(nodes, b.lean.option);
     for (const o of [lead, lean && inPlay(lean) ? lean : undefined])
       if (o && !own(b.against, o.id)?.length)
@@ -1093,6 +1121,9 @@ export function nextGap(
           q,
           option: o.id,
           label: `Strongest case against ${named(nodes, o.id)}`,
+          // the lead is the option Claude prefers: Next names the step, not it
+          short:
+            o === lead ? "Case against the lead" : "Case against your lean",
           reason: "before you choose",
         };
     const matters = holes(s, nodes, b, "matters", { guesses: false })[0];
@@ -1103,9 +1134,33 @@ export function nextGap(
         option: matters.option,
         want: matters.want,
         label: checkLabel(nodes, matters.option, matters.want),
+        short: "Check a cell",
         reason: "it matters, still empty",
       };
+    // Claude leads, no must is empty and the lead has its case against: the
+    // step is yours, choosing. Next opens the Decide sheet with nothing
+    // picked; it never names Claude's lead, which the star already shows
+    if (lead)
+      return {
+        kind: "choose",
+        q,
+        label: "Decide",
+        short: "Decide…",
+        reason: "the musts are judged and the lead has its case against",
+      };
   }
+  // Just chosen: how it could fail comes first, as the Choose itself asks
+  // for it (a "Check a must" beside "✓ Decided" read as the board undoing
+  // the choice)
+  if (b?.commit && !b.commit.premortem.claude.length)
+    return {
+      kind: "wrap",
+      q,
+      option: b.commit.option,
+      label: wrapLabel(nodes, b.commit.option),
+      short: "How could it fail?",
+      reason: "how it could fail, what it rests on, and the first steps",
+    };
   // After a Choose the other columns are out, but what is unknown about the
   // option chosen is the risk you now carry (the open list counts its
   // unsure musts): its musts, then what matters, before Next says nothing
@@ -1133,20 +1188,13 @@ export function nextGap(
         option: cell.option,
         want: cell.want,
         label: checkLabel(nodes, cell.option, cell.want),
+        short: must ? "Check a must" : "Check a cell",
         reason: must
           ? `a must on your choice, ${must.guess ? "only a guess" : "still empty"}`
           : "it matters to your choice, still empty",
       };
     if (tell) return tellGap(nodes, b, tell, "a must on your choice");
   }
-  if (b?.commit && !b.commit.premortem.claude.length)
-    return {
-      kind: "wrap",
-      q,
-      option: b.commit.option,
-      label: wrapLabel(nodes, b.commit.option),
-      reason: "how it could fail, what it rests on, and the first steps",
-    };
   // elsewhere, shallowest first, so Next never goes deeper on a settled
   // branch while a choice above is open; set-aside branches wait
   const points = rollup(s, nodes).points.filter((p) => !p.underAside);
@@ -1165,6 +1213,7 @@ export function nextGap(
       kind: own(s.boards, choice.id) ? "open" : "question",
       q: choice.id,
       label: `Open choice: ${choice.title}`,
+      short: "Open the next choice",
       reason: "the highest choice still open",
     };
   // a cause marked likely is not an answer: a causes question stays open
@@ -1196,6 +1245,7 @@ export function nextGap(
         q: question.id,
         option: result.id,
         label: `Weigh what came in: ${question.title}`,
+        short: "Weigh the new result",
         reason: `${named(nodes, result.id)} came in after Claude's last word on it`,
       };
     // the cause you marked likely is the one Claude's last word leads, and
@@ -1210,6 +1260,7 @@ export function nextGap(
         kind: "settle",
         q: question.id,
         label: `Settle it: ${question.title}`,
+        short: "Settle it",
         reason: `you marked ${named(nodes, st!.lead!)} likely and Claude's last word agrees`,
       };
     // Claude's last word leads a cause, and surely, but you have marked none
@@ -1227,6 +1278,8 @@ export function nextGap(
         q: question.id,
         option: st.lead,
         label: `Mark ${named(nodes, st.lead)} likely, then settle`,
+        // the cause Claude leads is not named on the button (its star is)
+        short: "Mark the best guess likely",
         reason: `Claude's last word leads it, ~${st.sure}% sure`,
       };
     if (question.shape === "causes")
@@ -1238,6 +1291,13 @@ export function nextGap(
           : checks
             ? `Which check to run first: ${question.title}`
             : `Tell the causes apart: ${question.title}`,
+        // "a check", not "the first": said after a check had come back, it
+        // read as if that one was never run
+        short: likely.length
+          ? "Confirm it, then settle"
+          : checks
+            ? "Pick a check"
+            : "Tell the causes apart",
         reason: likely.length
           ? "you marked it likely; a fact that confirms it lets you settle the question"
           : checks
@@ -1248,6 +1308,7 @@ export function nextGap(
       kind: "question",
       q: question.id,
       label: `Open question: ${question.title}`,
+      short: "Next question",
       reason: "the highest question still open",
     };
   }
@@ -1259,12 +1320,17 @@ export function nextGap(
       q: waiting.id,
       option: check.id,
       label: `Run ${named(nodes, check.id)}, then say what it found`,
+      // the check is yours to run, outside the app: "Run <check>" read as
+      // Claude running it, and its name was cut short on the button (the
+      // panel Next opens names it)
+      short: "Run the check yourself",
       reason: `Claude's pick: ${check.why}`,
     };
   return {
     kind: "sum",
     q: root?.id ?? q,
     label: "Sum up where it stands",
+    short: "Sum up",
     reason: "nothing is open",
   };
 }

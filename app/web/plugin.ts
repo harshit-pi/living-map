@@ -4,6 +4,7 @@
 
 import type { ReactElement } from "react";
 
+import type { Action } from "../shared/model.ts";
 import type { Workspace } from "./lib/workspace.ts";
 
 export type WebPlugin = {
@@ -23,4 +24,15 @@ export type WebPlugin = {
   Screen: (props: { ws: Workspace }) => ReactElement;
   // controls this mode adds to the header (Explore's Set aside and Next)
   Header?: (props: { ws: Workspace }) => ReactElement;
+  // the simpler chrome (one filled button per screen): the start screen's
+  // Start button and filled mode switch, New inside Maps, the short working
+  // pill. Off, a mode keeps the chrome it has (Design).
+  simple?: boolean;
+  // a question the loading screen asks while this mode's new map is laid
+  // out: the answer is held, and sent once the map exists, so the first
+  // choice never waits for Claude (Learn's "How much do you know?")
+  Waiting?: (props: {
+    held: Action | null;
+    hold: (a: Action) => void;
+  }) => ReactElement;
 };

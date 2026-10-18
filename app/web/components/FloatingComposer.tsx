@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -14,6 +15,8 @@ export function FloatingComposer({
   beside = true,
   sticky = false,
   scope,
+  collapsed = false,
+  docked = false,
 }: {
   ws: Workspace;
   placeholder: string;
@@ -27,8 +30,35 @@ export function FloatingComposer({
   sticky?: boolean;
   // what a reply belongs to inside the map: it goes when this changes
   scope?: string;
+  // a "💬 Ask Claude" pill until you want it: a wide empty box with two
+  // pickers sat over every canvas, read as one more thing to do
+  collapsed?: boolean;
+  // a bar at the bottom of the screen's own layout, not over the canvas: an
+  // overlay covered the board's last rows and their buttons. Claude's reply
+  // shows inside it, at most three lines (it scrolls)
+  docked?: boolean;
 }) {
   const { map, live, selection, setSelection, roomy } = ws;
+  const [asking, setAsking] = useState(false);
+  // the opened box folds back to the pill when you click away from it (or
+  // press Esc) with nothing typed: what you typed is never thrown away
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!collapsed || !asking) return;
+    const empty = () => !box.current?.querySelector("textarea")?.value.trim();
+    const away = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node) && empty()) setAsking(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && empty()) setAsking(false);
+    };
+    window.addEventListener("mousedown", away);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", away);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [collapsed, asking]);
   const caption = useCaption(map, live.busy, live.stream, sticky, scope);
   const one = selection.length === 1 ? selection[0] : null;
   // the panel already shows what is being written for its own node; a blank's
@@ -37,6 +67,49 @@ export function FloatingComposer({
     caption.live &&
     ((!!live.working?.nodeId && live.working.nodeId === one) ||
       !!live.working?.blankId);
+  const chips =
+    selection.length > 1
+      ? selection.map((id) => (
+          <Chip
+            key={id}
+            onRemove={() => setSelection((s) => s.filter((x) => x !== id))}
+          >
+            {map.nodes[id]?.title ?? id}
+          </Chip>
+        ))
+      : undefined;
+  if (docked)
+    return (
+      <div className="shrink-0 border-t border-line bg-canvas px-4 py-2">
+        <div className="mx-auto w-full max-w-2xl">
+          {caption.text && !inPanel && (
+            <div
+              onClick={caption.clear}
+              title="Click to hide"
+              className="answer answer-sm mb-1.5 max-h-[3lh] cursor-pointer overflow-y-auto px-1 leading-snug"
+              data-content
+            >
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {caption.text}
+              </ReactMarkdown>
+            </div>
+          )}
+          <Composer
+            foldSettings
+            busy={live.busy}
+            settings={ws.settings}
+            onSettings={ws.onSettings}
+            rows={1}
+            onStop={ws.stop}
+            placeholder={placeholder}
+            chips={chips}
+            onSend={(text) => {
+              void ws.run({ type: "message", text, selection });
+            }}
+          />
+        </div>
+      </div>
+    );
   return (
     <div
       className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 px-4 pb-4"
@@ -49,40 +122,39 @@ export function FloatingComposer({
           onClick={caption.clear}
           className={`pointer-events-auto max-w-2xl cursor-pointer rounded-2xl bg-surface/95 px-4 py-2.5 shadow-lg ring-1 ring-line backdrop-blur-sm ${sticky ? "max-h-28 overflow-y-auto" : ""}`}
         >
-          <div className="answer answer-sm">
+          <div className="answer answer-sm" data-content>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {caption.text}
             </ReactMarkdown>
           </div>
         </div>
       )}
-      <div className="pointer-events-auto w-full max-w-2xl">
-        <Composer
-          busy={live.busy}
-          settings={ws.settings}
-          onSettings={ws.onSettings}
-          rows={1}
-          onStop={ws.stop}
-          placeholder={placeholder}
-          chips={
-            selection.length > 1
-              ? selection.map((id) => (
-                  <Chip
-                    key={id}
-                    onRemove={() =>
-                      setSelection((s) => s.filter((x) => x !== id))
-                    }
-                  >
-                    {map.nodes[id]?.title ?? id}
-                  </Chip>
-                ))
-              : undefined
-          }
-          onSend={(text) => {
-            void ws.run({ type: "message", text, selection });
-          }}
-        />
-      </div>
+      {collapsed && !asking ? (
+        <button
+          onClick={() => setAsking(true)}
+          className="pointer-events-auto self-end rounded-full bg-surface px-3.5 py-1.5 text-[13px] text-body shadow-md ring-1 ring-line-strong hover:ring-primary"
+        >
+          💬 Ask Claude
+        </button>
+      ) : (
+        <div ref={box} className="pointer-events-auto w-full max-w-2xl">
+          <Composer
+            foldSettings={collapsed}
+            autoFocus={collapsed}
+            busy={live.busy}
+            settings={ws.settings}
+            onSettings={ws.onSettings}
+            rows={1}
+            onStop={ws.stop}
+            placeholder={placeholder}
+            chips={chips}
+            onSend={(text) => {
+              void ws.run({ type: "message", text, selection });
+              if (collapsed) setAsking(false);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

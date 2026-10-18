@@ -48,6 +48,18 @@ export const WEIGHT_WORD: Record<Weight, string> = {
   matters: "Matters",
   nice: "Nice",
 };
+// the weights as the board's group heads say them
+export const WEIGHT_HEAD: Record<Weight, string> = {
+  must: "Must have",
+  matters: "Matters",
+  nice: "Nice to have",
+};
+// how an option came out of its case against, in plain words
+export const SURVIVES_WORD: Record<Survives, string> = {
+  yes: "Holds",
+  narrowly: "Holds, narrowly",
+  no: "Breaks it",
+};
 export const SHAPE_WORD: Record<Shape, string> = {
   choose: "a choice",
   causes: "finding a cause",
@@ -329,6 +341,10 @@ export type OpenItem = {
   label: string;
   // where the first of them is
   q: string;
+  // the node the first of them is on, where there is one: the want of a
+  // must still empty or a guess, the lead with no case against. The Decide
+  // sheet names it and opens it
+  node?: string;
 };
 
 // "run", "tell", "open", "likely" and "settle" are yours, not Claude's: a
@@ -339,6 +355,7 @@ export type OpenItem = {
 // cause list whose likely cause Claude's last word agrees with, whose
 // question Next opens to settle
 export type GapKind =
+  | "suggest"
   | "fill"
   | "something"
   | "ask"
@@ -350,10 +367,13 @@ export type GapKind =
   | "likely"
   | "run"
   | "tell"
+  | "choose"
   | "sum";
 
-// Next's gaps you act on yourself: pressing Next pays for no move
+// Next's gaps you act on yourself: pressing Next pays for no move. "choose"
+// opens the Decide sheet: the choice is yours, never a move of Claude's
 export const YOURS: ReadonlySet<GapKind> = new Set([
+  "choose",
   "run",
   "tell",
   "open",
@@ -372,7 +392,11 @@ export type Gap = {
   // for "tell", the check still to run the cells wait on: Next opens it,
   // where you answer it, rather than the want
   check?: string;
+  // the server knows a move by its label ("Next: <label>"), so it stays as
+  // it was; Next's button says `short`, in a few plain words that never
+  // name the option Claude prefers
   label: string;
+  short: string;
   reason: string;
 };
 

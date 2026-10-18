@@ -37,9 +37,9 @@ import { lookOf } from "../../../web/components/look.ts";
 import { NodeCard } from "../../../web/components/NodeCard.tsx";
 import { setAside } from "../../../web/lib/layout.ts";
 
-// the floating message box, and Claude's reply above it, cover the bottom of
-// the canvas: frame above both
-const FRAME = { top: 24, left: 24, right: 24, bottom: 200 };
+// the message box and Claude's reply dock under the canvas: a little room at
+// the bottom for the "more below" pill
+const FRAME = { top: 24, left: 24, right: 24, bottom: 56 };
 const px = (f: typeof FRAME) =>
   ({
     top: `${f.top}px`,
@@ -569,6 +569,9 @@ export function Tree({
         <Background color="var(--color-line-strong)" gap={22} />
         <Controls
           showInteractive={false}
+          // Fit only: the wheel and a pinch zoom, and two more buttons in
+          // the corner were two more things to read
+          showZoom={false}
           // its own fit runs React Flow's fitView as well, queued until after
           // ours: that framed the whole tree at an unreadable zoom
           showFitView={false}
@@ -594,13 +597,14 @@ export function Tree({
         <button
           onClick={showNew}
           title="Frame the nodes Claude added since you last looked"
-          className="absolute left-14 top-3 z-10 rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary shadow-md hover:bg-primary-strong"
+          // outlined: Next is the screen's one filled button
+          className="absolute left-14 top-3 z-10 rounded-full bg-surface px-3 py-1 text-xs font-medium text-primary-strong shadow-md ring-1 ring-primary-line hover:bg-primary-soft"
         >
           {fresh.length} new ▸
         </button>
       )}
       {(above.length > 0 || below.length > 0) && (
-        // bottom left, beside the message box
+        // bottom left, above the message box
         <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-1">
           {above.length > 0 && (
             <button

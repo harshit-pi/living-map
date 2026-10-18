@@ -2795,6 +2795,7 @@ function stepView(
     recalled: st.recall ? null : (st.recalled ?? null),
     reviewing: !!st.reviewing,
     lowered: !!st.reviewing && !!st.lowered,
+    ...(st.viaModel ? { viaModel: true } : {}),
     itemsDue: items.filter((i) => rebuilt(i) && i.due <= now).length,
   };
   if (!m || !ready) return base;
@@ -2906,6 +2907,9 @@ function stepView(
         ...(x.slot && x.n ? { n: x.n } : {}),
       }));
     base.links = b.links.map(linkView);
+    // how many key links the model has, said up front ("Draw the 2 missing
+    // links"): a count, never which
+    base.keys = m.links.filter((l) => l.key && !l.argued).length;
     base.check = b.last;
     base.checks = b.checks;
     base.sure = b.sure ?? null;

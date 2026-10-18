@@ -237,7 +237,7 @@ function fillTurn(ctx: Ctx, q: MapNode, how: TurnHow = {}) {
   );
   const rest =
     left > 0
-      ? ` ${left} more empty ${left === 1 ? "cell is" : "cells are"} left for later; say Next fills them.`
+      ? ` ${left} more empty ${left === 1 ? "cell is" : "cells are"} left for later; say so, and name no button (the buttons' words change).`
       : " That is every empty cell.";
   return ctx.engine.turn(
     lead(
@@ -347,6 +347,18 @@ function wrapTurn(ctx: Ctx, q: MapNode, option: MapNode, how: TurnHow = {}) {
   );
 }
 
+// Claude suggests what to weigh on a board with no list of what you want
+// (an older map): from its banner once, now from Next's suggest gap
+function suggestTurn(ctx: Ctx, q: MapNode) {
+  if (ctx.engine.isQueuedOrRunning(q.id, SUGGESTING)) return {};
+  ctx.say("Suggest what to weigh");
+  return ctx.engine.turn(`SUGGEST WANTS for [${q.id}] ${t(q)}.`, ctx.settings, {
+    label: SUGGESTING,
+    sections: ["suggest"],
+    nodeId: q.id,
+  });
+}
+
 // The turn for what Next found, told why.
 function gapTurn(ctx: Ctx, gap: Gap) {
   const nodes = ctx.map.nodes;
@@ -354,6 +366,7 @@ function gapTurn(ctx: Ctx, gap: Gap) {
   const q = own(nodes, gap.q);
   const option = gap.option ? own(nodes, gap.option) : undefined;
   const want = gap.want ? own(nodes, gap.want) : undefined;
+  if (gap.kind === "suggest" && q) return suggestTurn(ctx, q);
   if (gap.kind === "fill" && q) return fillTurn(ctx, q, how);
   if (gap.kind === "something" && q) return somethingTurn(ctx, q, how);
   if (gap.kind === "ask" && option && want)
@@ -377,6 +390,8 @@ function gapTurn(ctx: Ctx, gap: Gap) {
     );
   if (gap.kind === "open")
     return fail("That choice has its own board: Next works on it there.");
+  if (gap.kind === "choose")
+    return fail("The choice is yours: pick an option in the Decide sheet.");
   ctx.say("Next");
   // causes are told apart by a fact, never by a choice
   if (
@@ -900,17 +915,7 @@ export const explore: ServerPlugin = {
       const b = ensureBoard(state(ctx), ctx.map.nodes, q.id);
       if (b.rows.length)
         return fail("This board already has a list of what you want.");
-      if (ctx.engine.isQueuedOrRunning(q.id, SUGGESTING)) return {};
-      ctx.say("Suggest what to weigh");
-      return ctx.engine.turn(
-        `SUGGEST WANTS for [${q.id}] ${t(q)}.`,
-        ctx.settings,
-        {
-          label: SUGGESTING,
-          sections: ["suggest"],
-          nodeId: q.id,
-        },
-      );
+      return suggestTurn(ctx, q);
     },
     next(ctx, a) {
       const s = state(ctx);
