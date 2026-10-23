@@ -32,7 +32,8 @@ function conversation(id: string, lines: unknown[], at = Date.now()) {
   const dir = path.join(claude, "projects", projectFolder(cwd));
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, `${id}.jsonl`);
-  fs.writeFileSync(f, lines.map((l) => JSON.stringify(l)).join("\n"));
+  // Claude Code ends every line, the last one too
+  fs.writeFileSync(f, lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
   fs.utimesSync(f, at / 1000, at / 1000);
   return f;
 }
@@ -139,17 +140,24 @@ test("linking starts a map whose every move reads the conversation; asked again,
   assert.match(text, /\[pg\] option/);
 });
 
-test("a conversation with no map needs a question; one that cannot be found says so", async () => {
+test("a conversation with no map is read first, then drawn in the view it needs; one that cannot be found says so", async () => {
   const { engine, calls } = setup();
-  assert.match(
-    (await link(engine, { session: "older" })).error ?? "",
-    /pass `question`/,
-  );
   assert.match(
     (await link(engine, { session: "nope", question: "Q" })).error ?? "",
     /Could not find/,
   );
   assert.equal(calls.length, 0);
+  const r = await link(engine, { session: "older" });
+  assert.equal(r.created, true);
+  await settle();
+  // the layer's catch-up: only the new turns, not the resumed conversation
+  assert.match(calls[0].system, /LIVE RAIL OF A CONVERSATION/);
+  assert.equal(calls[0].conversation, undefined);
+  assert.match(calls[0].message, /\[turn 1\] USER: Something from last week/);
+  // then the view (Explore, with no other suggested) draws, reading it all
+  assert.equal(engine.state.map?.purpose, "explore");
+  assert.equal(calls[1].conversation?.id, "older");
+  assert.ok(Object.keys(engine.state.map!.nodes).length > 0);
 });
 
 test("a linked map left empty is drawn again when it is linked again", async () => {

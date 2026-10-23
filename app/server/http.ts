@@ -10,9 +10,9 @@ import { link, mapText } from "./actions/link.ts";
 import { STATIC_DIR } from "./config.ts";
 import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
-import { pluginFor } from "./plugins.ts";
-import { linkedMaps, listMaps, readMap, saveMap } from "./store.ts";
+import { listMaps, readMap } from "./store.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
+import { unsentFor } from "../layer/view.ts";
 
 export function createApp(engine: Engine, hub: Hub) {
   const app = express();
@@ -93,7 +93,8 @@ export function createApp(engine: Engine, hub: Hub) {
     res.type("text/plain").send(mapText(engine, m));
   });
 
-  // what your conversation has not heard from its maps (side chats, ticks),
+  // what your conversation has not heard from its maps (side chats, ticks,
+  // what you did on its views),
   // asked by the living-map hook each time you write there; marked heard
   app.post("/api/inbox", (req, res) => {
     const id =
@@ -104,24 +105,10 @@ export function createApp(engine: Engine, hub: Hub) {
       res.json({ text: "" });
       return;
     }
-    const current = engine.state.map;
-    const maps = [
-      ...(current &&
-      (current.conversation?.id === id ||
-        current.conversation?.previous?.includes(id))
-        ? [current]
-        : []),
-      ...linkedMaps(id).filter((m) => m.id !== current?.id),
-    ];
-    const parts: string[] = [];
-    for (const m of maps) {
-      const text = pluginFor(m.purpose)?.unsent?.(m) ?? "";
-      if (!text) continue;
-      parts.push(text);
-      if (m === current) engine.push();
-      else saveMap(m, { current: false });
-    }
-    res.json({ text: parts.join("\n") });
+    const text = unsentFor(id);
+    // the rail's "for your chat" count drops now it is heard
+    if (text) engine.push();
+    res.json({ text });
   });
 
   app.get("/api/maps", (_req, res) => {

@@ -1,14 +1,14 @@
 ---
 name: living-map
-description: Opens a Living Map of this conversation beside the chat, starting the local Living Map server first if it is not running. By default a live Chat map that follows this conversation as it goes (its topics, what is still to do, what was decided, what is open) with side chats that know everything said here; or a decision board (Explore), a learning path (Learn) or a design exercise (Design). Use when the user says "living map", "map this", "open the map", "track this", "start a side chat", "explore this visually", "learn this step by step", "/living-map", or asks what is on their map, what is still to do, or to update it.
-argument-hint: "[chat|explore|learn|design] [question or topic]"
+description: Opens a Living Map of this conversation beside the chat, starting the local Living Map server first if it is not running. The map is one conversation seen in the view it needs (a decision board in Explore, a learning path in Learn, a system design in Design, picked from what the conversation is doing, switchable any time), with a rail beside every view that follows the conversation as it goes (what waits on the user, what Claude still has to do, what was decided) and side chats that know everything said here. Use when the user says "living map", "map this", "open the map", "track this", "what's pending", "start a side chat", "explore this visually", "learn this step by step", "/living-map", or asks what is on their map, what is still to do, or to update it.
+argument-hint: "[explore|learn|design] [question or topic]"
 ---
 
 <!-- living-map-skill: installed by `npm run skill` from {{APP_DIR}}; the server rewrites this file when it updates -->
 
 # Living Map
 
-Living Map is a local web app on http://localhost:{{PORT}} that draws **this conversation** as a map the user works by clicking. Its Chat map follows this conversation as it goes: each topic in turn, with its tasks, decisions and open questions, and the side chats the user starts from any of them. A side chat resumes this conversation (forked, never written to), so it knows everything said here; what it answers comes back to you (see 4). You start the server, link this conversation, open the map beside the chat, and read it back when asked.
+Living Map is a local web app on http://localhost:{{PORT}} that draws **this conversation** as a map the user works by clicking. One conversation, several views: Explore (a decision board), Learn (a path of steps) and Design (a system design), picked from what the conversation is doing and switched in the map's header. Beside every view, a rail follows this conversation as it goes: what waits on the user, what Claude still has to do, what was decided, and the side chats the user starts from any of it. Moves on a view and side chats resume this conversation (forked, never written to), so they know everything said here; what the user does on the map comes back to you (see 4). You start the server, link this conversation, open the map beside the chat, and read it back when asked.
 
 App folder: `{{APP_DIR}}`
 
@@ -22,15 +22,15 @@ It returns at once if the server already runs; otherwise it installs and builds 
 
 ## 2. Link this conversation
 
-- **Mode**: the first argument if it is `chat`, `explore`, `learn` or `design`; otherwise `chat`, the live map of this conversation. Explore is for "lay out my options" on one decision; Learn is for "teach me" / "help me understand"; Design is for practising a system design.
-- **Question**: for `chat`, leave it out (send `""`): the map is of the whole conversation and takes its title. For the other modes, the rest of the arguments if any; otherwise write one short question (at most 12 words: it becomes the map's title), in the user's own words, saying what this conversation is deciding, investigating or learning. The map reads the whole conversation, so leave details out. If the conversation is brand new and there are no arguments, ask the user in one short question what to map, then continue.
+- **View**: the first argument if it is `explore`, `learn` or `design`; otherwise leave it out (send `""`): the map reads the conversation first and opens the view it needs. Explore is for "lay out my options"; Learn is for "teach me" / "help me understand"; Design is for practising a system design.
+- **Question**: the rest of the arguments if any; otherwise leave it out (send `""`): the map works it out from the conversation. If the conversation is brand new and there are no arguments, ask the user in one short question what to map, then send that.
 - **cwd**: the folder this conversation started in (your primary working directory), not a subfolder you moved into.
 
 Send it, building the JSON with a tool that escapes it (here Python):
 
 ```bash
 python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "cwd": sys.argv[2], "purpose": sys.argv[3], "question": sys.argv[4]}))' \
-  "${CLAUDE_SESSION_ID}" "$PWD" "chat" "" \
+  "${CLAUDE_SESSION_ID}" "$PWD" "" "" \
   | curl -s -X POST localhost:{{PORT}}/api/link -H 'content-type: application/json' -d @-
 ```
 
@@ -52,8 +52,8 @@ Then reply in one or two lines: the link, and what the map is drawing. Do not de
 
 ## 4. Working together
 
-- A Chat map follows this conversation by itself: each time you or the user write here, it files the new turns a few seconds later (a quick, separate call that reads only those turns). You never need to tell it what happened.
-- **Side chats come back to you.** When the user asks a side chat on the map, or ticks a task there, it waits for this conversation. With the living-map hook installed (`npm run skill -- --hook` in `{{APP_DIR}}`), it arrives with the user's next message as a `LIVING MAP:` note: take it into account, as a colleague's answer the user asked for. Without the hook, read it yourself when the user mentions the map or a side chat:
+- The rail follows this conversation by itself: each time you or the user write here, it files the new turns a few seconds later (a quick, separate call that reads only those turns). You never need to tell it what happened.
+- **What the user does on the map comes back to you.** A side chat's answer, a task ticked, an option picked on the rail, a choice made on a view: it waits for this conversation. With the living-map hook installed (`npm run skill -- --hook` in `{{APP_DIR}}`), it arrives with the user's next message as a `LIVING MAP:` note: take it into account, as a colleague's answer the user asked for. Without the hook, read it yourself when the user mentions the map or a side chat:
 
   ```bash
   python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1]}))' "${CLAUDE_SESSION_ID}" \
@@ -70,7 +70,7 @@ Then reply in one or two lines: the link, and what the map is drawing. Do not de
 
   It ends with the conversation's other maps, if any; read one with `curl -s "localhost:{{PORT}}/api/outline?id=<id>"`.
 
-- To put something from this chat onto an Explore, Learn or Design map ("add this to the map", "we decided X, update the map"), send it as a message on the linked map; it runs as a move there while you keep talking here (a Chat map needs none: it follows):
+- The rail is always current; a view is redrawn only when asked. To bring something from this chat onto the open view ("add this to the map", "we decided X, update the map"), send it as a message on the linked map; it runs as a move there while you keep talking here:
 
   ```bash
   python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "cwd": sys.argv[2], "message": sys.argv[3]}))' \

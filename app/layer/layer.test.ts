@@ -4,28 +4,30 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  applyLayerOp,
   batchEnd,
   BATCH_TURNS,
-  canvasOf,
-  cleanItemOp,
+  claudeTodo,
   cleanUserText,
   contextPage,
+  decided,
   digest,
+  needsYou,
   newState,
+  outlineOf,
   post,
+  postFromView,
   readTurns,
-  setTask,
+  setState,
   shouldFollow,
+  stillOpen,
   takeUnsent,
 } from "./core.ts";
-import { chatState, readNew } from "./follow.ts";
-import { chat } from "./server.ts";
+import { layerFor, readNew } from "./follow.ts";
 import type { Turn } from "./shared.ts";
-import { applyOps, makeNode } from "../../server/core/canvas.ts";
-import type { Raw } from "../../server/core/types.ts";
-import { successor } from "../../server/providers/claude-sessions.ts";
-import { newMap } from "../../server/store.ts";
-import { hookCommand, installHook } from "../../skill/install.ts";
+import { successor } from "../server/providers/claude-sessions.ts";
+import { newMap } from "../server/store.ts";
+import { hookCommand, installHook } from "../skill/install.ts";
 
 const line = (o: object) => JSON.stringify(o);
 const you = (uuid: string, content: unknown, extra = {}) =>
@@ -162,26 +164,12 @@ describe("following", () => {
 });
 
 describe("items", () => {
-  const mapWithRoot = () => {
-    const m = newMap("Teleport", "chat");
-    makeNode(m.nodes, { id: "root", parent: null, kind: "fact", title: "c" });
-    return m;
-  };
-
-  it("files the model's ops with their type and state", () => {
-    const m = mapWithRoot();
-    const s = newState();
-    const ops = [
+  const filed = () => {
+    const s = newState("c1", "Teleport");
+    for (const op of [
+      { op: "item", id: "setup", type: "topic", title: "Setup", turn: 1 },
       {
-        op: "add",
-        id: "setup",
-        parent: "root",
-        type: "topic",
-        title: "Setup",
-        turn: 1,
-      },
-      {
-        op: "add",
+        op: "item",
         id: "skill",
         parent: "setup",
         type: "task",
@@ -190,106 +178,140 @@ describe("items", () => {
         turn: 5,
       },
       {
-        op: "add",
-        id: "why",
+        op: "item",
+        id: "trust",
+        parent: "setup",
+        type: "task",
+        owner: "you",
+        title: "Answer the prompt",
+      },
+      {
+        op: "item",
+        id: "which",
         parent: "setup",
         type: "question",
-        title: "Why weird?",
+        title: "Which view?",
       },
-      { op: "add", id: "root", parent: null, type: "topic", title: "no" },
-    ];
-    applyOps(m, ops, { clean: (op) => cleanItemOp(s, op) });
-    expect(m.nodes.skill.kind).toBe("question");
-    expect(m.nodes.skill.status).toBe("open");
-    expect(s.items.skill).toEqual({ type: "task", state: "pending", turn: 5 });
-    expect(s.items.why.state).toBe("open");
-    expect(m.nodes.root.title).toBe("c");
-    expect(canvasOf(m, s)).toContain(
-      "- [skill] task · pending · turn 5 · Install skill",
-    );
+      {
+        op: "item",
+        id: "a",
+        parent: "which",
+        type: "option",
+        title: "Explore",
+      },
+      { op: "item", id: "b", parent: "which", type: "option", title: "Learn" },
+      {
+        op: "item",
+        id: "how",
+        parent: "setup",
+        type: "question",
+        owner: "claude",
+        title: "How to detect?",
+      },
+    ])
+      applyLayerOp(s, op);
+    return s;
+  };
 
-    applyOps(m, [{ op: "update", id: "skill", state: "done" }], {
-      clean: (op) => cleanItemOp(s, op),
+  it("files the model's items with their type, state and owner", () => {
+    const s = filed();
+    expect(s.items.skill).toMatchObject({
+      parent: "setup",
+      type: "task",
+      state: "pending",
+      owner: "claude",
+      turn: 5,
     });
+    expect(s.items.trust.owner).toBe("you");
+    expect(s.items.which).toMatchObject({ state: "open", owner: "you" });
+    expect(s.items.a.parent).toBe("which");
+    expect(outlineOf(s)).toContain(
+      "- [skill] task · pending · on Claude · turn 5 · Install skill",
+    );
+    // an update names only what changes
+    applyLayerOp(s, { op: "item", id: "skill", state: "done" });
+    expect(s.items.skill).toMatchObject({
+      state: "done",
+      title: "Install skill",
+    });
+  });
+
+  it("says what is on whom", () => {
+    const s = filed();
+    const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
+    expect(ids(needsYou(s))).toEqual(["trust", "which"]);
+    expect(ids(claudeTodo(s))).toEqual(["skill"]);
+    expect(ids(stillOpen(s))).toEqual(["how"]);
+    setState(s, "a", "chosen");
+    expect(ids(needsYou(s))).toEqual(["trust"]);
+    expect(ids(decided(s))).toEqual(["a"]);
+  });
+
+  it("hangs items where they fit", () => {
+    const s = filed();
+    applyLayerOp(s, {
+      op: "item",
+      id: "t2",
+      type: "topic",
+      parent: "skill",
+      title: "T2",
+    });
+    applyLayerOp(s, {
+      op: "item",
+      id: "x",
+      type: "task",
+      parent: "nowhere",
+      title: "X",
+    });
+    applyLayerOp(s, {
+      op: "item",
+      id: "o",
+      type: "option",
+      parent: "setup",
+      title: "O",
+    });
+    expect(s.items.t2.parent).toBeNull();
+    // the newest topic takes what names no fitting parent
+    expect(s.items.x.parent).toBe("t2");
+    expect(s.items.o.parent).toBe("t2");
+    expect(applyLayerOp(s, { op: "item", id: "root", type: "topic" })).toBe(0);
+    expect(applyLayerOp(s, { op: "add", id: "n" })).toBeNull();
+  });
+
+  it("keeps your word over the model's", () => {
+    const s = filed();
+    expect(setState(s, "skill", "done")?.byYou).toBe(true);
+    applyLayerOp(s, { op: "item", id: "skill", state: "pending" });
     expect(s.items.skill.state).toBe("done");
-    expect(m.nodes.skill.status).toBe("answered");
-    // a question answered may become a decision
-    applyOps(m, [{ op: "update", id: "why", type: "decision" }], {
-      clean: (op) => cleanItemOp(s, op, m.nodes),
-    });
-    expect(s.items.why).toEqual({ type: "decision", turn: undefined });
-    expect(m.nodes.why.status).toBe("chosen");
+    expect(outlineOf(s)).toContain("(set by user)");
+    expect(setState(s, "skill", "answered")).toBeNull();
+    applyLayerOp(s, { op: "forget", id: "skill" });
+    expect(s.items.skill).toBeDefined();
   });
 
-  it("files what hangs from the conversation as a topic", () => {
-    const m = mapWithRoot();
-    const s = newState();
-    applyOps(
-      m,
-      [
-        { op: "add", id: "a", parent: "root", type: "task", title: "A" },
-        { op: "add", id: "b", type: "question", title: "B?" },
-        { op: "add", id: "c", parent: "a", type: "task", title: "C" },
-      ],
-      { clean: (op) => cleanItemOp(s, op, m.nodes) },
-    );
-    expect([s.items.a.type, s.items.b.type, s.items.c.type]).toEqual([
-      "topic",
-      "topic",
-      "task",
-    ]);
-  });
-
-  it("keeps your tick over the model's", () => {
-    const m = mapWithRoot();
-    const s = newState();
-    applyOps(
-      m,
-      [
-        { op: "add", id: "t", parent: "root", type: "topic", title: "T" },
-        { op: "add", id: "k", parent: "t", type: "task", title: "Do it" },
-      ],
-      { clean: (op) => cleanItemOp(s, op) },
-    );
-    expect(setTask(s, m.nodes, "k", "done")?.status).toBe("answered");
-    applyOps(m, [{ op: "update", id: "k", state: "pending" }], {
-      clean: (op) => cleanItemOp(s, op),
+  it("keeps the summary, Claude's now and the view it suggests", () => {
+    const s = filed();
+    applyLayerOp(s, { op: "summary", text: "Building.", now: "the rail" });
+    applyLayerOp(s, {
+      op: "view",
+      mode: "learn",
+      question: "How do CRDTs merge?",
     });
-    expect(s.items.k.state).toBe("done");
-    expect(canvasOf(m, s)).toContain("(ticked by user)");
-    expect(setTask(s, m.nodes, "k", "answered")).toBeNull();
+    applyLayerOp(s, { op: "view", mode: "chat" });
+    expect([s.summary, s.now]).toEqual(["Building.", "the rail"]);
+    expect(s.suggested).toEqual({
+      mode: "learn",
+      question: "How do CRDTs merge?",
+    });
   });
 
   it("writes the context page", () => {
-    const m = mapWithRoot();
-    const s = newState();
-    applyOps(
-      m,
-      [
-        { op: "add", id: "t", parent: "root", type: "topic", title: "T" },
-        {
-          op: "add",
-          id: "k",
-          parent: "t",
-          type: "task",
-          title: "Ship it",
-          summary: "open a PR",
-        },
-        {
-          op: "add",
-          id: "d",
-          parent: "t",
-          type: "decision",
-          title: "Use hooks",
-        },
-      ],
-      { clean: (op) => cleanItemOp(s, op) },
-    );
-    s.summary = "Building the chat map.";
-    const page = contextPage(m, s);
-    expect(page).toContain("## Where it stands\nBuilding the chat map.");
-    expect(page).toContain("## Pending\n- Ship it: open a PR");
-    expect(page).toContain("## Decided\n- Use hooks");
+    const s = filed();
+    s.summary = "Building the rail.";
+    const page = contextPage(s);
+    expect(page).toContain("## Where it stands\nBuilding the rail.");
+    expect(page).toContain("## Waiting on the user\n- Answer the prompt");
+    expect(page).toContain("## Claude still to do\n- Install skill");
   });
 });
 
@@ -314,9 +336,18 @@ describe("the main chat's inbox", () => {
     expect(takeUnsent(s)[0].text).toBe("n10");
   });
 
-  it("says nothing to the plugin's caller when nothing is new", () => {
-    const m = newMap("x", "chat");
-    expect(chat.unsent?.(m)).toBe("");
+  it("folds a run of moves on a view into one line", () => {
+    const s = newState();
+    postFromView(s, "Explore", "Chose B", 1000);
+    postFromView(s, "Explore", "Set aside C", 2000);
+    postFromView(s, "Design", "Added a cache", 3000);
+    expect(takeUnsent(s).map((o) => o.text)).toEqual([
+      "On the Explore view of the map, the user: Chose B; Set aside C",
+      "On the Design view of the map, the user: Added a cache",
+    ]);
+    // heard: the next move starts a line of its own
+    postFromView(s, "Design", "Added a queue", 4000);
+    expect(takeUnsent(s)).toHaveLength(1);
   });
 });
 
@@ -367,9 +398,9 @@ describe("reading the transcript as it grows", () => {
       fs.mkdirSync(a, { recursive: true });
       const file = path.join(a, "conv-1.jsonl");
       fs.writeFileSync(file, `${you("u1", "héllo ✓")}\n${claude("a1", "hi")}`);
-      const m = newMap("x", "chat");
+      const m = newMap("x", "explore");
       m.conversation = { id: "conv-1", cwd: "/a", title: "x" };
-      const s = chatState(m);
+      const s = layerFor(m)!;
       // the reply's line is not finished yet
       expect(readNew(m)).toBe(true);
       expect(s.turns.map((t) => t.text)).toEqual(["héllo ✓"]);
@@ -416,53 +447,40 @@ describe("what the review found", () => {
     expect(turns.map((t) => t.text)).toEqual(["carry on"]);
   });
 
-  it("keeps a side chat to its own node", () => {
-    const m = newMap("x", "chat");
-    makeNode(m.nodes, { id: "root", parent: null, kind: "fact", title: "c" });
+  it("keeps a side chat to its own item", () => {
     const s = newState();
-    const clean = (scope: string | null) => (op: Raw) =>
-      cleanItemOp(s, op, m.nodes, scope);
-    applyOps(
-      m,
-      [
-        { op: "add", id: "a", parent: "root", type: "topic", title: "A" },
-        { op: "add", id: "b", parent: "root", type: "topic", title: "B" },
-        { op: "add", id: "a1", parent: "a", type: "task", title: "A1" },
-        { op: "add", id: "b1", parent: "b", type: "task", title: "B1" },
-      ],
-      { clean: clean(null) },
+    for (const op of [
+      { op: "item", id: "a", type: "topic", title: "A" },
+      { op: "item", id: "b", type: "topic", title: "B" },
+      { op: "item", id: "a1", parent: "a", type: "task", title: "A1" },
+      { op: "item", id: "b1", parent: "b", type: "task", title: "B1" },
+    ])
+      applyLayerOp(s, op);
+    const side = { scope: "a" };
+    expect(applyLayerOp(s, { op: "item", id: "b1", state: "done" }, side)).toBe(
+      0,
     );
-    // a side chat on A tries to tick B's task and file a topic of its own
-    applyOps(
-      m,
-      [
-        { op: "update", id: "b1", state: "done" },
-        { op: "update", id: "a1", state: "done" },
-        { op: "add", id: "a2", parent: "root", type: "task", title: "A2" },
-      ],
-      { scope: "a", clean: clean("a") },
+    applyLayerOp(s, { op: "item", id: "a1", state: "done" }, side);
+    applyLayerOp(
+      s,
+      { op: "item", id: "a2", parent: "b", type: "task", title: "A2" },
+      side,
     );
     expect(s.items.b1.state).toBe("pending");
-    expect(m.nodes.b1.status).toBe("open");
     expect(s.items.a1.state).toBe("done");
-    expect(m.nodes.a2.parent).toBe("a");
-    expect(s.items.a2.type).toBe("task");
-  });
-
-  it("lets a side chat's summary go quietly", () => {
-    const m = newMap("x", "chat");
-    expect(
-      chat.applyOp?.(m, { op: "summary", text: "x" }, { scope: "a" }),
-    ).toBeNull();
-    expect(
-      chat.applyOp?.(m, { op: "summary", text: "x" }, { scope: null }),
-    ).toBe(1);
+    expect(s.items.a2.parent).toBe("a");
+    // the summary is the main chat's: a side chat's goes quietly
+    expect(applyLayerOp(s, { op: "summary", text: "x" }, side)).toBeNull();
+    expect(applyLayerOp(s, { op: "forget", id: "b" }, side)).toBe(0);
   });
 
   it("refuses ids that are not plain", () => {
     const s = newState();
-    expect(setTask(s, {}, "constructor", "done")).toBeNull();
-    expect(setTask(s, {}, "__proto__", "done")).toBeNull();
+    expect(setState(s, "constructor", "done")).toBeNull();
+    expect(setState(s, "__proto__", "done")).toBeNull();
+    expect(applyLayerOp(s, { op: "item", id: "__proto__", type: "task" })).toBe(
+      0,
+    );
   });
 
   it("files a long conversation a batch at a time", () => {

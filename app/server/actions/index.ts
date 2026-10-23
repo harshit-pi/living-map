@@ -7,6 +7,8 @@ import * as canvas from "./canvas.ts";
 import { makeCtx } from "./context.ts";
 import * as maps from "./maps.ts";
 import * as steps from "./steps.ts";
+import { LAYER_ACTIONS } from "../../layer/server.ts";
+import { LAYER_ID } from "../../layer/shared.ts";
 import type {
   ActionRequest,
   ActionResult,
@@ -84,6 +86,17 @@ export async function act(
     case "purpose":
       return maps.switchPurpose(ctx, req.purpose);
     case "plugin": {
+      // the conversation layer answers on any map linked to a conversation
+      if (req.plugin === LAYER_ID) {
+        const run =
+          typeof req.name === "string" && Object.hasOwn(LAYER_ACTIONS, req.name)
+            ? LAYER_ACTIONS[req.name]
+            : null;
+        if (!run || !map.conversation)
+          return { error: "That action is not available on this map." };
+        const args = req.args && typeof req.args === "object" ? req.args : {};
+        return run(ctx, args as Record<string, unknown>);
+      }
       // only the map's own plugin answers, and only with an action it declares
       const run =
         own.id === req.plugin &&

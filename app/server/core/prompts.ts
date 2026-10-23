@@ -41,7 +41,11 @@ export type Section =
 export function promptParts(
   _purpose: Purpose,
   sections: readonly Section[],
-  plugin: { prompt: string; sections?: Record<string, string> },
+  plugin: {
+    prompt: string;
+    sections?: Record<string, string>;
+    ownOps?: boolean;
+  },
 ): { system: string; move: string } {
   const extra: string[] = [];
   for (const s of sections)
@@ -49,7 +53,7 @@ export function promptParts(
   if (sections.includes("explain")) extra.push(EXPLAIN);
   if (sections.includes("threads")) extra.push(THREADS);
   return {
-    system: [plugin.prompt, OPS].join("\n\n"),
+    system: plugin.ownOps ? plugin.prompt : [plugin.prompt, OPS].join("\n\n"),
     move: extra.join("\n\n"),
   };
 }

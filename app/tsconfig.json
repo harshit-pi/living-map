@@ -25,6 +25,7 @@
     "server",
     "eval",
     "plugins",
+    "layer",
     "skill",
     "vite.config.ts"
   ],

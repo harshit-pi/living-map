@@ -3,6 +3,8 @@
 // one starts from the question the conversation is about. Every move on it
 // reads the conversation first, so what you said there needs no repeating.
 
+import { contextPage } from "../../layer/core.ts";
+import { autoStart } from "../../layer/server.ts";
 import type { ActionResult, Purpose } from "../../shared/model.ts";
 import { outline } from "../core/canvas.ts";
 import { str, type StoredMap } from "../core/types.ts";
@@ -13,6 +15,7 @@ import { message } from "./canvas.ts";
 import { makeCtx } from "./context.ts";
 import { cleanSettings } from "./index.ts";
 import { begin, open, switchPurpose } from "./maps.ts";
+import { layerOf } from "../../layer/store.ts";
 
 export type LinkResult = {
   error?: string;
@@ -47,7 +50,10 @@ export async function link(
       ? (body.settings as Record<string, string>)
       : {},
   );
-  const purpose = str(body.purpose, 40) || "";
+  // no mode (or "auto"): the view the conversation looks like it needs
+  const asked = str(body.purpose, 40);
+  const purpose = asked === "auto" ? "" : asked;
+  const suggested = layerOf(conversation).suggested?.mode ?? "";
   const question = str(body.question, 6000).trim();
   const say = str(body.message, 4000).trim();
 
@@ -66,7 +72,11 @@ export async function link(
         ...(current?.conversation?.id === conversation.id ? [current] : []),
         ...linkedMaps(conversation.id).filter((m) => m.id !== current?.id),
       ];
-  const known = linked.find(fits) ?? linked[0] ?? null;
+  const known =
+    (!purpose && linked.find((m) => m.purpose === suggested)) ||
+    linked.find(fits) ||
+    linked[0] ||
+    null;
 
   // a topic named with another mode ("learn how sync works") is a map of its
   // own; a mode named alone switches the map Explore and Learn share
@@ -78,8 +88,18 @@ export async function link(
       if (r.error) return { error: r.error };
     }
     const m = engine.state.map!;
-    // the title and file move as the conversation goes on
-    m.conversation = conversation;
+    // the title and file move as the conversation goes on; resumed under a
+    // new id, it keeps the ids it had (its layer is kept under the first)
+    const was = m.conversation;
+    m.conversation = {
+      ...conversation,
+      previous: [
+        ...new Set([
+          ...(was?.previous ?? []),
+          ...(was && was.id !== conversation.id ? [was.id] : []),
+        ]),
+      ],
+    };
     const ctx = makeCtx(engine, settings, m);
     if (purpose && m.purpose !== purpose) {
       const r = await switchPurpose(ctx, purpose);
@@ -97,19 +117,18 @@ export async function link(
     return reply(m, false);
   }
 
-  // a Chat map is of the conversation as a whole: its title is the
-  // conversation's own unless one is given
-  const follows = purpose === "chat";
-  if (!question && !follows)
-    return {
-      error:
-        "This conversation has no map yet: pass `question`, one line saying what to explore or learn.",
-    };
+  // its first map, with no view named: read the conversation, then draw
+  // the view it needs
+  if (!purpose && !question)
+    return reply(await autoStart(engine, settings, conversation), true);
   const { map, first } = await begin(
     engine,
     settings,
-    question || conversation.title || "This conversation",
-    purpose || "explore",
+    question ||
+      layerOf(conversation).suggested?.question ||
+      conversation.title ||
+      "This conversation",
+    purpose || suggested || "explore",
     conversation,
   );
   void drawFirst(engine, map, first);
@@ -151,6 +170,8 @@ const reply = (m: StoredMap, created: boolean): LinkResult => ({
 export function mapText(engine: Engine, m: StoredMap): string {
   const plugin = pluginFor(m.purpose);
   const board = plugin?.readout?.(m) ?? "";
+  // the conversation's rail, the same in every view
+  const rail = m.conversation ? contextPage(layerOf(m.conversation)) : "";
   const others = m.conversation
     ? linkedMaps(m.conversation.id)
         .filter((o) => o.id !== m.id)
@@ -173,6 +194,7 @@ export function mapText(engine: Engine, m: StoredMap): string {
       ? `CANVAS:\n${plugin?.canvas?.(m) ?? outline(m.nodes)}`
       : "",
     board,
+    rail,
     said.length ? `LATEST ON THE MAP:\n${said.join("\n")}` : "",
     others.length
       ? `OTHER MAPS OF THIS CONVERSATION:\n${others.join("\n")}`

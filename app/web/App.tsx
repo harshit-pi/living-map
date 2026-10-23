@@ -19,6 +19,8 @@ import type { Workspace } from "./lib/workspace.ts";
 import { modeOf, PLUGINS, pluginFor } from "./plugins.ts";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
 import { StartScreen } from "./screens/StartScreen.tsx";
+import { LAYER_ID } from "../layer/shared.ts";
+import { Frame } from "../layer/web/Rail.tsx";
 
 const DEFAULTS: Settings = { model: "", effort: "" };
 
@@ -181,9 +183,11 @@ export default function App() {
   // every mode is a plugin with its own screen
   const plugin = modeOf(map.purpose);
   const switching = live.busy || !!live.working || live.waiting.length > 0;
-  // the modes this map can switch between (Explore and Learn share their map)
+  // the modes this map can switch between (Explore and Learn share their
+  // map); a map of your conversation is one view of it, and offers them all
   const switches = PLUGINS.filter(
     (p) =>
+      !!map.linked ||
       p.id === map.purpose ||
       p.switchesWith?.includes(map.purpose) ||
       pluginFor(map.purpose)?.switchesWith?.includes(p.id),
@@ -246,7 +250,17 @@ export default function App() {
                   : undefined
               }
               onChange={(purpose) => {
-                if (!switching) void run({ type: "purpose", purpose });
+                if (switching) return;
+                void run(
+                  map.linked
+                    ? {
+                        type: "plugin",
+                        plugin: LAYER_ID,
+                        name: "view",
+                        args: { mode: purpose },
+                      }
+                    : { type: "purpose", purpose },
+                );
               }}
             />
           ) : (
@@ -304,7 +318,11 @@ export default function App() {
             </button>
           </div>
         )}
-        <plugin.Screen ws={ws} />
+        {/* a map of your conversation: the strip over the view and the
+            rail beside it, the same in every view */}
+        <Frame ws={ws}>
+          <plugin.Screen ws={ws} />
+        </Frame>
       </main>
     </div>
   );

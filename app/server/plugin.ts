@@ -17,8 +17,10 @@ export type ServerPlugin = {
   canvasName?: string;
   // other modes a map of this one may switch to and back, keeping the map
   switchesWith?: string[];
-  // the model's job on this canvas, sent on every move (with core's map ops)
+  // the model's job on this canvas, sent on every move (with core's map ops,
+  // unless it brings all its own: the conversation layer)
   prompt: string;
+  ownOps?: boolean;
   // extra instructions by name, sent only on moves that list them in `sections`
   sections?: Record<string, string>;
   // the job and sections for one map, when they depend on it (Learn's older
@@ -76,9 +78,6 @@ export type ServerPlugin = {
   // the state as text for your conversation to read the map back (the
   // living-map skill); like `view`, only what the browser may see
   readout?: (map: StoredMap) => string;
-  // what your conversation has not heard from the map since it last asked
-  // (Chat's side chats and ticks), marked heard; "" when nothing
-  unsent?: (map: StoredMap) => string;
   // one line for the maps list, e.g. "7 parts · 6 wires"
   summary?: (map: StoredMap) => string;
   // how many steps wait for review now, and when the next falls due
