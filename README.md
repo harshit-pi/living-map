@@ -46,7 +46,7 @@ Then, in any Claude Code conversation (the desktop app, the terminal, an IDE), s
 - Ask the chat "what does my map say?" and it reads the map back; say "we picked B, update the map" and the map moves.
 - Saying /living-map again in the same conversation reopens its map.
 
-A move on a linked map reads the whole conversation, so it uses more tokens than a move on a map started from the start screen (most of them cached).
+A move on a linked map costs what your next message in that conversation would: the conversation is read from the prompt cache your chat keeps warm, so a move is about $0.01–0.03. The first move after an hour away writes the cache again, as your chat would.
 
 ### Updates
 

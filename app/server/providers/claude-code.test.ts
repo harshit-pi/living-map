@@ -11,7 +11,7 @@ import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, test, vi } from "vitest";
 
-import { claudeCode, type Spawn } from "./claude-code.ts";
+import { childEnv, claudeCode, priceOf, type Spawn } from "./claude-code.ts";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -264,4 +264,53 @@ test("a spare that read your conversation before you said more there is not take
   assert.ok(procs[0].killed, "the stale spare is ended");
   procs[1].say(answer("Fresh."));
   assert.equal((await call.reply).warm, false);
+});
+
+test("a linked move is priced from its own tokens, not the resumed conversation's running total", async () => {
+  const { spawn, procs } = fakeSpawn();
+  const p = claudeCode({ home, cwd: home, spawn });
+  const call = p.run(
+    { ...req({}), conversation: { id: "abc-123", cwd: home, title: "T" } },
+    () => {},
+  );
+  // a move measured on a 46k-token conversation: everything read from cache
+  const usage = {
+    input_tokens: 2,
+    output_tokens: 4,
+    cache_read_input_tokens: 45810,
+    cache_creation_input_tokens: 541,
+    cache_creation: { ephemeral_1h_input_tokens: 541 },
+  };
+  procs[0].say([
+    ev({ type: "message_start", message: { model: "claude-sonnet-5-5" } }),
+    ev({ type: "content_block_delta", delta: { text: "ok" } }),
+    ev({ type: "message_delta", delta: { stop_reason: "end_turn" } }),
+    ev({ type: "message_stop" }),
+    {
+      type: "result",
+      result: "ok",
+      usage,
+      // the CLI counts the whole conversation's past cost in its total, and
+      // lists the models your chat used
+      total_cost_usd: 0.1551,
+      modelUsage: { "claude-opus-5-5": { outputTokens: 9000 } },
+    },
+  ]);
+  const u = await (await call.reply).usage;
+  assert.equal(u?.model, "claude-sonnet-5-5");
+  assert.ok(
+    Math.abs((u?.costUsd ?? 0) - priceOf("claude-sonnet-5-5", usage)) < 1e-9,
+  );
+  assert.ok(Math.abs((u?.costUsd ?? 0) - 0.0114) < 0.0005, `${u?.costUsd}`);
+});
+
+test("moves never run as part of the chat session that started the server", () => {
+  const env = childEnv({
+    PATH: "/bin",
+    HOME: "/h",
+    CLAUDECODE: "1",
+    CLAUDE_CODE_SESSION_ID: "chat",
+    CLAUDE_CODE_REMOTE_SESSION_ID: "cse_1",
+  });
+  assert.deepEqual(env, { PATH: "/bin", HOME: "/h" });
 });
