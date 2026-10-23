@@ -21,6 +21,7 @@ import type {
 } from "../shared/model.ts";
 import { applyOps, outline, pathTo } from "./core/canvas.ts";
 import {
+  LINKED,
   promptParts,
   QUIET_VIEW,
   viewLine,
@@ -108,8 +109,14 @@ export function createEngine({
       [],
       plugin.promptFor?.(m) ?? plugin,
     );
-    provider.warm({ system, ...settings });
+    provider.warm({ ...linkOf(m, system), ...settings });
   }
+
+  // a map linked to your conversation is worked with it as context
+  const linkOf = (m: StoredMap, system: string) =>
+    m.conversation
+      ? { system: `${system}\n\n${LINKED}`, conversation: m.conversation }
+      : { system };
 
   // What the browser sees: everything but notes, and scenes without their answers.
   const publicMap = (m: StoredMap | null): MapDoc | null =>
@@ -124,6 +131,7 @@ export function createEngine({
       diagramAt: m.diagramAt,
       fills: m.fills,
       usage: m.usage,
+      ...(m.conversation ? { linked: { title: m.conversation.title } } : {}),
       scenes: Object.fromEntries(
         Object.entries(m.scenes).map(([id, sc]) => [
           id,
@@ -328,7 +336,7 @@ export function createEngine({
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          system: prompt.system,
+          ...linkOf(m, prompt.system),
           message: text,
           ...settings,
         },
@@ -518,6 +526,7 @@ export function createEngine({
   return {
     state,
     provider,
+    publicMap,
     push,
     snapshot,
     turn,

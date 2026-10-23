@@ -6,11 +6,16 @@
 // message as a stream-json line, so it waits for one instead of giving up as
 // a plain `-p` does when no stdin comes within 3s. A move whose system prompt,
 // model and effort match the spare takes it; any other move starts its own.
+//
+// A map linked to one of your conversations resumes it on every move, forked
+// and never saved (`--fork-session --no-session-persistence`): the model
+// reads all of it first, and your conversation is left exactly as it was.
 
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { conversationStamp, findConversation } from "./claude-sessions.ts";
 import type {
   ModelCall,
   ModelProvider,
@@ -88,9 +93,15 @@ export function claudeCode({
   const effortOf = (req: WarmRequest) => req.effort || DEFAULT_EFFORT;
   // everything fixed when the process starts
   const keyOf = (req: WarmRequest) =>
-    JSON.stringify([req.system, req.model ?? "", effortOf(req)]);
+    JSON.stringify([
+      req.system,
+      req.model ?? "",
+      effortOf(req),
+      req.conversation?.id ?? "",
+    ]);
 
   function launch(req: WarmRequest): ChildProcess {
+    const linked = req.conversation;
     const args = [
       "-p",
       "--input-format",
@@ -115,7 +126,10 @@ export function claudeCode({
       effortOf(req),
     ];
     if (req.model) args.push("--model", req.model);
-    const proc = spawn("claude", args, { cwd });
+    if (linked) args.push("--resume", linked.id, "--fork-session");
+    // a conversation is found again from the folder it started in
+    const where = linked && fs.existsSync(linked.cwd) ? linked.cwd : cwd;
+    const proc = spawn("claude", args, { cwd: where });
     // a missing `claude` is reported by the move as no result, never thrown
     proc.on("error", () => {});
     proc.stderr?.on("data", () => {});
@@ -125,6 +139,7 @@ export function claudeCode({
   // at most one, ever
   let spare: {
     key: string;
+    stamp: string; // the linked conversation as the spare read it
     proc: ChildProcess;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
@@ -137,9 +152,15 @@ export function claudeCode({
     proc.kill("SIGTERM");
   }
 
-  // the spare for this key, if there is a live one, taken out of reserve
-  function take(key: string): ChildProcess | null {
-    if (!spare || spare.key !== key || !alive(spare.proc)) {
+  // the spare for this request, if there is a live one, taken out of reserve:
+  // one that read its conversation before you said more there is not
+  function take(req: WarmRequest): ChildProcess | null {
+    if (
+      !spare ||
+      spare.key !== keyOf(req) ||
+      spare.stamp !== conversationStamp(req.conversation?.file) ||
+      !alive(spare.proc)
+    ) {
       release();
       return null;
     }
@@ -152,7 +173,13 @@ export function claudeCode({
 
   function warm(req: WarmRequest) {
     const key = keyOf(req);
-    if (spare && spare.key === key && alive(spare.proc)) {
+    const stamp = conversationStamp(req.conversation?.file);
+    if (
+      spare &&
+      spare.key === key &&
+      spare.stamp === stamp &&
+      alive(spare.proc)
+    ) {
       clearTimeout(spare.timer);
       spare.timer = setTimeout(release, idleMs);
       spare.timer.unref?.();
@@ -162,7 +189,7 @@ export function claudeCode({
     const proc = launch(req);
     const timer = setTimeout(release, idleMs);
     timer.unref?.();
-    spare = { key, proc, timer };
+    spare = { key, stamp, proc, timer };
     track(proc);
     proc.once("close", () => {
       if (spare?.proc === proc) {
@@ -191,10 +218,11 @@ export function claudeCode({
     ],
     warm,
     release,
+    findConversation: (hint) => findConversation(hint),
     run(req: ModelRequest, onText: (soFar: string) => void): ModelCall {
       const effort = effortOf(req);
       const started = Date.now();
-      const spareProc = take(keyOf(req));
+      const spareProc = take(req);
       let proc = spareProc ?? launch(req);
       let cancelled = false;
       let resolveUsage: (u: ModelUsage | null) => void = () => {};

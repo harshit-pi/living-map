@@ -5,11 +5,23 @@
 
 import type { Choice } from "../../shared/model.ts";
 
+// One of your own conversations with the model, outside Living Map. A map
+// linked to one is worked with that conversation as context: what you said
+// and decided there, and what the model already knows from it.
+export type Conversation = {
+  id: string;
+  cwd: string; // the folder it runs in
+  title: string;
+  file?: string; // where the provider keeps it, if on disk
+};
+
 export type ModelRequest = {
   system: string; // the instructions for this kind of canvas
   message: string; // the canvas, the thread, and the action, as text
   model?: string; // an id from `models`, or empty for the provider's default
   effort?: string; // an id from `efforts`, or empty for the provider's default
+  // the conversation the map is linked to, read before the message
+  conversation?: Conversation;
 };
 
 // what a move is known by before its message is written: a provider may
@@ -53,4 +65,7 @@ export interface ModelProvider {
   warm?(request: WarmRequest): void;
   // let go of whatever warm holds (on Stop)
   release?(): void;
+  // Optional: find one of your conversations to link a map to, by its id or
+  // else the newest one in a folder. A provider without it links nothing.
+  findConversation?(hint: { id?: string; cwd?: string }): Conversation | null;
 }

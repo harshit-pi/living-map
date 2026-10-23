@@ -215,6 +215,20 @@ test("bad ids, unknown marks or weights, and over-long text are dropped or cut",
   );
 });
 
+test("a cell op whose mark is written as value still lands", () => {
+  const { map, s } = withWants(boardNodes());
+  assert.equal(
+    applyExploreOp(s, map.nodes, {
+      op: "cell",
+      option: "pg",
+      want: "w-cost",
+      value: "fails",
+    }),
+    1,
+  );
+  assert.equal(s.boards.q.cells["pg|w-cost"].claude!.mark, "fails");
+});
+
 test("a cell op in the short keys the prompt asks for lands as the long ones do", () => {
   const { map, s } = withWants(boardNodes());
   const op = (o: Raw) => applyExploreOp(s, map.nodes, o);

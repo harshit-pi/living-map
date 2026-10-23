@@ -107,6 +107,13 @@ export default function App() {
     sentHeld.current = heldFor;
     void run(heldFor.action);
   }, [heldFor, run]);
+  // a map opened from elsewhere (your conversation linked one, or another
+  // tab) replaces the start screen you had open
+  const [shownId, setShownId] = useState(map?.id ?? null);
+  if ((map?.id ?? null) !== shownId) {
+    setShownId(map?.id ?? null);
+    if (shownId !== null && map) setStarting(false);
+  }
   // a node that disappears (removed by Claude) closes its panel
   if (map && selection.some((id) => !map.nodes[id]))
     setSelection((s) => s.filter((id) => map.nodes[id]));
@@ -204,6 +211,15 @@ export default function App() {
           >
             {map.title}
           </div>
+          {map.linked && (
+            <span
+              title={`Linked to your conversation "${map.linked.title}": every move reads it first`}
+              // beside a chat the window is narrow: the title keeps the room
+              className="hidden shrink-0 rounded-full bg-panel px-2 py-0.5 text-[11px] text-muted md:inline-block"
+            >
+              From your chat
+            </span>
+          )}
         </div>
         <div className="flex min-w-0 justify-end">
           <WorkingPill

@@ -155,6 +155,8 @@ export type MapDoc = {
   usage: Usage;
   // each plugin's own state, by plugin id, as the plugin chooses to show it
   data?: Record<string, unknown>;
+  // the conversation of yours this map is linked to, by its title
+  linked?: { title: string };
 };
 
 export type MapSummary = {
@@ -170,6 +172,7 @@ export type MapSummary = {
   summary?: string;
   // review items due now, and when the next one falls due (Learn)
   due?: { now: number; next: number | null };
+  linked?: boolean; // linked to one of your conversations
 };
 
 // What Claude is doing now, and what waits its turn.

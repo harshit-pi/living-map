@@ -45,6 +45,7 @@ export function MapRows({
               </span>
               <span className="block text-[11px] text-muted">
                 {m.summary ?? `${m.nodes} nodes · ${m.open} open`}
+                {m.linked && " · from your chat"}
               </span>
             </span>
             {!!m.due?.now && (

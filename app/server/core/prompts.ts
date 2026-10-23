@@ -66,6 +66,12 @@ export function systemPrompt(
 
 export const viewLine = (view: View): string => VIEW[view] ?? VIEW.visual;
 
+// Added to the system prompt of a map linked to one of the user's own
+// conversations, which the model reads before the move's message: the map is
+// of that conversation, and the move works only the canvas, never the
+// conversation's own unfinished work.
+export const LINKED = `THE USER'S CONVERSATION: everything before this message is the user's own conversation with you, outside this canvas. The canvas is a living map of it. Work the canvas from what was said, found and decided there: never ask what it already answers, and when you use something from it, say so briefly ("you said earlier …"). Do not carry on that conversation's own work: do not answer its last message, change files or run commands. In this reply you only work the canvas, in the format these instructions give.`;
+
 // a move whose words are neither shown nor kept (TurnOptions.quiet): words
 // written outside the map block would be paid for and thrown away
 export const QUIET_VIEW =

@@ -14,7 +14,10 @@ import type {
 } from "../../shared/model.ts";
 
 // Only model and effort ids the provider offers get through.
-function cleanSettings(engine: Engine, raw: Partial<Settings> = {}): Settings {
+export function cleanSettings(
+  engine: Engine,
+  raw: Partial<Settings> = {},
+): Settings {
   const { models, efforts } = engine.provider;
   return {
     model: models.some((m) => m.id === raw.model) ? (raw.model ?? "") : "",

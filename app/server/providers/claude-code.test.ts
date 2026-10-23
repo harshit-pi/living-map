@@ -19,6 +19,7 @@ afterEach(() => {
 
 type Fake = ChildProcess & {
   args: string[];
+  cwd: string;
   sent: string;
   say: (events: unknown[]) => void;
   end: () => void;
@@ -26,8 +27,9 @@ type Fake = ChildProcess & {
 
 function fakeSpawn() {
   const procs: Fake[] = [];
-  const spawn: Spawn = (_cmd, args) => {
+  const spawn: Spawn = (_cmd, args, opts) => {
     const p = new EventEmitter() as Fake;
+    p.cwd = opts.cwd;
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     p.sent = "";
@@ -229,4 +231,37 @@ test("the reply is complete at message_stop, before the CLI's result arrives", a
   assert.equal(streamed, "Done.");
   procs[0].say(answer("Done.").slice(4));
   assert.equal((await r.usage)?.output, 4);
+});
+
+test("a move on a linked map resumes your conversation, forked and unsaved, from the folder it started in", async () => {
+  const { spawn, procs } = fakeSpawn();
+  const p = claudeCode({ home, cwd: home, spawn });
+  const where = fs.mkdtempSync(path.join(os.tmpdir(), "lm-project-"));
+  const call = p.run(
+    { ...req({}), conversation: { id: "abc-123", cwd: where, title: "T" } },
+    () => {},
+  );
+  const args = procs[0].args;
+  assert.equal(args[args.indexOf("--resume") + 1], "abc-123");
+  assert.ok(args.includes("--fork-session"));
+  assert.ok(args.includes("--no-session-persistence"));
+  assert.equal(procs[0].cwd, where);
+  procs[0].say(answer("Linked."));
+  assert.equal((await call.reply).final, "Linked.");
+});
+
+test("a spare that read your conversation before you said more there is not taken", async () => {
+  const { spawn, procs } = fakeSpawn();
+  const p = claudeCode({ home, cwd: home, spawn });
+  const file = path.join(home, "conv.jsonl");
+  fs.writeFileSync(file, "{}\n");
+  const conversation = { id: "abc-123", cwd: home, title: "T", file };
+  p.warm!({ system: "SYS", model: "", effort: "", conversation });
+  assert.equal(procs.length, 1);
+  fs.appendFileSync(file, '{"type":"user"}\n');
+  const call = p.run({ ...req({}), conversation }, () => {});
+  assert.equal(procs.length, 2, "a fresh process reads what you said since");
+  assert.ok(procs[0].killed, "the stale spare is ended");
+  procs[1].say(answer("Fresh."));
+  assert.equal((await call.reply).warm, false);
 });

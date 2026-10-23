@@ -66,6 +66,9 @@ export type ServerPlugin = {
   core: readonly string[];
   // the state the browser may see; leave out anything the user should work out
   view?: (map: StoredMap) => unknown;
+  // the state as text for your conversation to read the map back (the
+  // living-map skill); like `view`, only what the browser may see
+  readout?: (map: StoredMap) => string;
   // one line for the maps list, e.g. "7 parts · 6 wires"
   summary?: (map: StoredMap) => string;
   // how many steps wait for review now, and when the next falls due

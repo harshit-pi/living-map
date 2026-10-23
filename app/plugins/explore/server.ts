@@ -652,6 +652,8 @@ export const explore: ServerPlugin = {
   prompt: PROMPT,
   sections: { start: START, fill: FILL, wrap: WRAP, suggest: SUGGEST },
   outline: (map) => outlineOf(peek(map), map.nodes),
+  // nothing on an Explore board is hidden from you: the model's own outline
+  readout: (map) => outlineOf(peek(map), map.nodes),
   keepUserNodes: true,
   // the node actions its screen sends; Learn's own (blanks, hints, scenes) are
   // not offered on an exploration map. choose, restore, challenge, next and

@@ -19,7 +19,15 @@
     "types": ["vite/client", "node"],
     "paths": { "@shared/*": ["./shared/*"] }
   },
-  "include": ["web", "shared", "server", "eval", "plugins", "vite.config.ts"],
+  "include": [
+    "web",
+    "shared",
+    "server",
+    "eval",
+    "plugins",
+    "skill",
+    "vite.config.ts"
+  ],
   "exclude": [
     "server/legacy-server.mjs",
     "server/core/legacy-lib.mjs",
