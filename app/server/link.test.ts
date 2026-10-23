@@ -228,3 +228,50 @@ test("what you write on a view, and its answer, reach the main chat; switching v
   assert.doesNotMatch(heard, /Switched the canvas/);
   assert.equal(unsentFor("older"), "");
 });
+
+test("a listener in the main chat is woken by what you tell it on the map, not by a tick", async () => {
+  const { engine } = setup();
+  await link(engine, { session: "older", question: "Which DB?" });
+  await settle();
+  const { act } = await import("./actions/index.ts");
+  const { unsentFor, wakesFor } = await import("../layer/view.ts");
+  const { layerOf } = await import("../layer/store.ts");
+  unsentFor("older");
+  const s = layerOf(engine.state.map!.conversation!);
+  s.items.k = {
+    id: "k",
+    parent: null,
+    type: "task",
+    state: "pending",
+    owner: "you",
+    title: "Run it",
+    summary: "",
+    updatedAt: 0,
+    order: 0,
+  };
+  await act(engine, {
+    type: "plugin",
+    plugin: "follow",
+    name: "mark",
+    args: { id: "k", state: "done" },
+  });
+  // a tick waits for your next message
+  assert.equal(wakesFor("older"), false);
+  await act(engine, {
+    type: "plugin",
+    plugin: "follow",
+    name: "tell",
+    args: { text: "Go ahead and push" },
+  });
+  assert.equal(wakesFor("older"), true);
+  const heard = unsentFor("older");
+  assert.match(heard, /"Run it": the user marked it done/);
+  assert.match(heard, /wrote to you from the map: "Go ahead and push"/);
+  const view = engine.publicMap(engine.state.map)!.data!.follow as {
+    told: { text: string; heard: boolean }[];
+  };
+  assert.deepEqual(
+    view.told.map((t) => [t.text, t.heard]),
+    [["Go ahead and push", true]],
+  );
+});

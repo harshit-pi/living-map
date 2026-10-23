@@ -99,4 +99,8 @@ export type LayerView = {
   fresh: string[];
   // why following stopped by itself, if it did
   pausedWhy?: string;
+  // a listener in the main chat is waiting: what you send wakes it now
+  listening: boolean;
+  // what you wrote to the main chat from the map, and whether it has heard
+  told: { text: string; ts: number; heard: boolean }[];
 };

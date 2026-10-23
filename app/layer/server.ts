@@ -141,7 +141,13 @@ export const LAYER_ACTIONS: Record<
             : state === "dropped"
               ? "marked it not to do"
               : "marked it still to do";
-    post(s, `On the map's rail, "${item.title}": the user ${said}.`);
+    // a pick is a decision the main chat acts on; a tick can wait for you
+    post(
+      s,
+      `On the map's rail, "${item.title}": the user ${said}.`,
+      Date.now(),
+      item.type === "option" || item.type === "question",
+    );
     return done(ctx, s);
   },
   following(ctx, a) {
@@ -239,6 +245,17 @@ export const LAYER_ACTIONS: Record<
     saveLayer(s);
     ctx.engine.push();
     return { ...r, threadId: t.id };
+  },
+  // a message to the main chat itself, from the map: it wakes a listener
+  // there (or waits for your next message in it)
+  tell(ctx, a) {
+    const s = layerOfCtx(ctx);
+    if (!s) return { error: "This map is not linked to a conversation." };
+    const text = str(a.text, 4000).trim();
+    if (!text) return { error: "Say something first." };
+    post(s, `The user wrote to you from the map: "${text}"`, Date.now(), true);
+    s.told = [...(s.told ?? []), { text, ts: Date.now() }].slice(-20);
+    return done(ctx, s);
   },
   // another view of the same conversation
   async view(ctx, a) {

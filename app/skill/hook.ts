@@ -46,3 +46,6 @@ async function main() {
 }
 
 void main();
+
+// a module of its own, so its names stay its own
+export {};

@@ -50,7 +50,22 @@ The map is http://localhost:{{PORT}}/ . It is the same in every tab and every br
 
 Then reply in one or two lines: the link, and what the map is drawing. Do not describe the map in the chat; it is on the canvas.
 
-## 4. Working together
+## 4. Listen to the map
+
+The map talks back: the user can write to you from it ("Tell Claude Code"), answer on a view, or pick an option, and expects you to act without having to type here. Start the listener in the background (with `run_in_background`, never in the foreground), unless one is already running in this conversation:
+
+```bash
+node "{{APP_DIR}}/skill/wait.ts" {{PORT}} "${CLAUDE_SESSION_ID}"
+```
+
+It ends the moment the map has something for you, printing it after `FROM YOUR LIVING MAP:`, and its ending wakes you. Then:
+
+- Read it as the user's own words, written on their map: act on what they ask as if they had typed it here. A one-word answer ("yes", "go with B") answers what the map asked them; the lines it comes with say what.
+- Work that leaves this machine or cannot be undone (pushing, opening a PR, sending, deleting) you do when the message clearly asks for that exact thing; when it is unclear, ask here in one line.
+- Start the listener again right away, the same way, so the next one reaches you too.
+- If the server was not running or the session id is not filled in, it says so and ends; start the map (step 1) and try once more.
+
+## 5. Working together
 
 - The rail follows this conversation by itself: each time you or the user write here, it files the new turns a few seconds later (a quick, separate call that reads only those turns). You never need to tell it what happened.
 - **What the user does on the map comes back to you.** A side chat's answer, a task ticked, an option picked on the rail, a choice made on a view: it waits for this conversation. With the living-map hook installed (`npm run skill -- --hook` in `{{APP_DIR}}`), it arrives with the user's next message as a `LIVING MAP:` note: take it into account, as a colleague's answer the user asked for. Without the hook, read it yourself when the user mentions the map or a side chat:

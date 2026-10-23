@@ -28,7 +28,15 @@ export const BATCH_TURNS = Math.floor(DIGEST_CHARS / TURN_FLOOR);
 // the outbox keeps this many lines; older ones were long since read
 const OUTBOX_KEEP = 40;
 
-export type Outgoing = { ts: number; text: string; view?: string };
+// `wake`: the main chat should hear it now, not with your next message there
+// (a message to it, a reply on a view, an option you picked); a listener in
+// the chat is woken for it
+export type Outgoing = {
+  ts: number;
+  text: string;
+  view?: string;
+  wake?: boolean;
+};
 
 export type LayerState = {
   // the conversation's first id (it gets a new one when resumed)
@@ -62,6 +70,10 @@ export type LayerState = {
   suggested: { mode: Mode; question: string } | null;
   // why following stopped by itself, if it did
   pausedWhy?: string;
+  // what you wrote to the main chat from the map, newest last, and when the
+  // main chat last took what was waiting
+  told?: { text: string; ts: number }[];
+  heardAt?: number;
   outbox: Outgoing[];
   sent: number; // outbox lines the main conversation has had
 };
@@ -518,14 +530,23 @@ export function postFromView(
   s.outbox.at(-1)!.view = view;
 }
 
-export function post(s: LayerState, text: string, now = Date.now()) {
-  s.outbox.push({ ts: now, text: cut(text, 1500) });
+export function post(
+  s: LayerState,
+  text: string,
+  now = Date.now(),
+  wake = false,
+) {
+  s.outbox.push({ ts: now, text: cut(text, 1500), ...(wake ? { wake } : {}) });
   const extra = s.outbox.length - OUTBOX_KEEP;
   if (extra > 0) {
     s.outbox.splice(0, extra);
     s.sent = Math.max(0, s.sent - extra);
   }
 }
+
+// something the main chat should hear now is waiting
+export const wakes = (s: LayerState) =>
+  s.outbox.slice(s.sent).some((o) => o.wake);
 
 // what is new since the main conversation last asked, and it is marked heard
 export function takeUnsent(s: LayerState): Outgoing[] {

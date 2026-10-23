@@ -10,6 +10,7 @@ import {
   postFromView,
   stillOpen,
   takeUnsent,
+  wakes,
 } from "./core.ts";
 import { layerFor } from "./follow.ts";
 import { LAYER_ID, type LayerView } from "./shared.ts";
@@ -51,6 +52,11 @@ function viewOf(map: StoredMap): LayerView | undefined {
     suggested: s.suggested,
     behind: s.turns.filter((t) => t.who === "you" && t.ts > since).length,
     unsent: s.outbox.length - s.sent,
+    listening: listening.has(s.id),
+    told: (s.told ?? []).slice(-5).map((t) => ({
+      ...t,
+      heard: !!s.heardAt && s.heardAt >= t.ts,
+    })),
     fresh: Object.values(s.items)
       .filter((i) => !i.byYou && now - i.updatedAt < 3 * 60_000)
       .map((i) => i.id),
@@ -70,6 +76,8 @@ function heard(
   post(
     s,
     `The user wrote ${where}: "${move.said}"${move.answer ? `\nThe map answered: ${move.answer}` : ""}`,
+    Date.now(),
+    true,
   );
   saveLayer(s);
 }
@@ -96,11 +104,29 @@ export function fromView(map: StoredMap, text: string) {
 
 // What the main chat has not heard from its maps (side chats, ticks, what
 // you did on its views), marked heard. "" when nothing, or no layer.
+// listeners waiting in each conversation's main chat, by layer id: the rail
+// says whether what you send wakes it now or waits for your next message
+const listening = new Map<string, number>();
+export function listen(sessionId: string, delta: 1 | -1) {
+  const s = layerForSession(sessionId);
+  if (!s) return;
+  const n = (listening.get(s.id) ?? 0) + delta;
+  if (n > 0) listening.set(s.id, n);
+  else listening.delete(s.id);
+}
+
+// something for the main chat to hear now: the listener's wait ends
+export function wakesFor(sessionId: string): boolean {
+  const s = layerForSession(sessionId);
+  return !!s && wakes(s);
+}
+
 export function unsentFor(sessionId: string): string {
   const s = layerForSession(sessionId);
   if (!s) return "";
   const out = takeUnsent(s);
   if (!out.length) return "";
+  s.heardAt = Date.now();
   saveLayer(s);
   return [
     ...out.map((o) => `- ${o.text}`),

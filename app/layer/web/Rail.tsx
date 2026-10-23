@@ -234,6 +234,7 @@ function Drawer({
         </button>
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
+        <Tell here={here} />
         {view.pausedWhy && (
           <Banner tone="warning">
             {view.pausedWhy}{" "}
@@ -855,5 +856,54 @@ function Strip({
         </span>
       )}
     </div>
+  );
+}
+
+// Writing to the main chat itself, from the map. With a listener running in
+// it (the living-map skill starts one), Claude Code wakes and acts at once;
+// without, it hears this with your next message there.
+function Tell({ here }: { here: Here }) {
+  const { view, ws } = here;
+  const told = view.told;
+  return (
+    <section className="rounded-xl border border-primary-line bg-primary-soft/40 p-2">
+      <div className="mb-1 flex items-center gap-1.5 px-1 text-[11.5px]">
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${view.listening ? "bg-success" : "bg-faint"}`}
+        />
+        <span className={view.listening ? "text-success-strong" : "text-muted"}>
+          {view.listening
+            ? "Claude Code is listening: it acts as soon as you send"
+            : "Claude Code hears this with your next message there"}
+        </span>
+      </div>
+      {told.length > 0 && (
+        <div className="mb-1.5 space-y-1 px-1">
+          {told.map((t) => (
+            <div key={t.ts} className="flex items-start gap-1.5 text-[12px]">
+              <span
+                title={
+                  t.heard ? "Claude Code has it" : "Waiting for Claude Code"
+                }
+                className={t.heard ? "text-success-strong" : "text-faint"}
+              >
+                {t.heard ? "✓" : "…"}
+              </span>
+              <span className="min-w-0 flex-1 text-body">{t.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <Composer
+        compact
+        foldSettings
+        rows={1}
+        busy={false}
+        settings={ws.settings}
+        onSettings={ws.onSettings}
+        placeholder="Tell Claude Code… (e.g. go ahead and push)"
+        onSend={(text) => void here.run("tell", { text })}
+      />
+    </section>
   );
 }
