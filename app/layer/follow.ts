@@ -6,7 +6,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { batchEnd, readTurns, shouldFollow, type LayerState } from "./core.ts";
+import {
+  batchEnd,
+  readTurns,
+  shouldFollow,
+  viewDue,
+  type LayerState,
+} from "./core.ts";
 import { LAYER } from "./prompt.ts";
 import { layerOf, saveLayer } from "./store.ts";
 import type { StoredMap } from "../server/core/types.ts";
@@ -165,8 +171,17 @@ const backoff = (failures: number) =>
 
 // Watches the open map's conversation: new turns show at once (the rail's
 // latest line), and the layer catches up when it is time.
-export function follow(engine: Engine, everyMs = 2000) {
+export function follow(
+  engine: Engine,
+  {
+    everyMs = 2000,
+    // brings the open view up to date (the rail's Update), when it is due
+    refreshView = undefined as
+      ((engine: Engine, map: StoredMap) => Promise<unknown>) | undefined,
+  } = {},
+) {
   let running = false;
+  const lastAuto = new WeakMap<StoredMap, number>();
   let failures = 0;
   let failedAt = 0;
   const tick = async () => {
@@ -200,6 +215,17 @@ export function follow(engine: Engine, everyMs = 2000) {
             engine.push();
           }
         }
+      }
+      // the view, once the rail has it all and the chat has paused
+      const now = Date.now();
+      if (
+        refreshView &&
+        !engine.state.busy &&
+        !engine.state.waiting.length &&
+        viewDue(s, m, now, lastAuto.get(m) ?? 0)
+      ) {
+        lastAuto.set(m, now);
+        await refreshView(engine, m);
       }
     } catch (e) {
       console.error("[layer] following the conversation failed:", e);

@@ -103,6 +103,14 @@ export async function autoStart(
   return map;
 }
 
+// The open view brought up to date by itself (the follow loop calls this when
+// it is due), on the view's default model: what Update does, unasked.
+export async function refreshView(engine: Engine, map: StoredMap) {
+  const ctx = makeCtx(engine, { model: "", effort: "" }, map);
+  const r = await LAYER_ACTIONS.refresh(ctx, {});
+  if (r.error && !r.stopped) console.error("[layer] view update:", r.error);
+}
+
 // ---- the rail's actions ------------------------------------------------------------
 
 const layerOfCtx = (ctx: Ctx): LayerState | null => layerFor(ctx.map);
@@ -266,6 +274,12 @@ export const LAYER_ACTIONS: Record<
     return showView(ctx.engine, ctx.settings, ctx.map.conversation, mode);
   },
   // bring this view up to date with what the chat said since its last move
+  autoview(ctx, a) {
+    const s = layerOfCtx(ctx);
+    if (!s) return { error: "This map is not linked to a conversation." };
+    s.autoView = !!a.on;
+    return done(ctx, s);
+  },
   async refresh(ctx) {
     const plugin = pluginFor(ctx.map.purpose);
     const act = plugin?.actions?.message;

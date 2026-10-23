@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyLayerOp,
+  behind,
+  VIEW_EVERY_MS,
+  VIEW_QUIET_MS,
+  viewDue,
   batchEnd,
   BATCH_TURNS,
   claudeTodo,
@@ -538,5 +542,46 @@ describe("what the review found", () => {
     );
     expect(successor(old, "old-id")).toBe(next);
     expect(successor(next, "new-id")).toBeNull();
+  });
+});
+
+describe("a view keeping itself current", () => {
+  const at = (now: number) => {
+    const s = newState("c");
+    const m = newMap("Board", "explore");
+    m.createdAt = 0;
+    m.chat.push({ role: "claude", text: "drawn", ts: 1000 });
+    s.turns = [
+      { n: 1, who: "you", text: "old", ts: 500 },
+      { n: 2, who: "you", text: "new", ts: 2000 },
+    ];
+    s.mapped = 2;
+    s.activeAt = now - VIEW_QUIET_MS;
+    return { s, m };
+  };
+
+  it("updates once the chat has moved on, been filed, and paused", () => {
+    const now = 1_000_000;
+    const { s, m } = at(now);
+    expect(behind(s, m)).toBe(1);
+    expect(viewDue(s, m, now, 0)).toBe(true);
+    // not again within a couple of minutes
+    expect(viewDue(s, m, now, now - VIEW_EVERY_MS + 1)).toBe(false);
+  });
+
+  it("waits while the chat is busy, the rail is behind, or you turned it off", () => {
+    const now = 1_000_000;
+    const busy = at(now);
+    busy.s.activeAt = now - 1000;
+    expect(viewDue(busy.s, busy.m, now, 0)).toBe(false);
+    const filing = at(now);
+    filing.s.mapped = 1;
+    expect(viewDue(filing.s, filing.m, now, 0)).toBe(false);
+    const off = at(now);
+    off.s.autoView = false;
+    expect(viewDue(off.s, off.m, now, 0)).toBe(false);
+    const current = at(now);
+    current.m.chat.push({ role: "claude", text: "again", ts: 3000 });
+    expect(viewDue(current.s, current.m, now, 0)).toBe(false);
   });
 });

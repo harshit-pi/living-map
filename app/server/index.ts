@@ -15,6 +15,7 @@ import { createApp } from "./http.ts";
 import { pickProvider } from "./providers/index.ts";
 import { loadCurrent, saveMap } from "./store.ts";
 import { follow } from "../layer/follow.ts";
+import { refreshView } from "../layer/server.ts";
 import { installSkill } from "../skill/install.ts";
 
 const provider = pickProvider(PROVIDER, { home: HOME, cwd: MODEL_CWD });
@@ -27,7 +28,7 @@ const engine = createEngine({
 });
 
 // a map linked to a conversation follows it while it is open
-follow(engine);
+follow(engine, { refreshView });
 
 // the living-map skill, if you installed it, follows this copy of the app
 try {
