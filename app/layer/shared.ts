@@ -70,6 +70,11 @@ export type SideChat = {
   lines: SideLine[];
 };
 
+// what a view is asked when you bring it up to date from the chat: the
+// map's words, not yours, so the main chat is not told them
+export const REFRESH =
+  "Bring this canvas up to date with what the conversation said since your last move: add what is new, settle what it settled, and leave the rest.";
+
 export type Mode = "explore" | "learn" | "design";
 export const MODES: readonly Mode[] = ["explore", "learn", "design"];
 

@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { post, setState, type LayerState } from "./core.ts";
 import { catchUp, FOLLOWING, layerFor, readNew } from "./follow.ts";
 import { LAYER } from "./prompt.ts";
+import { REFRESH } from "./shared.ts";
 import { MODES, type ItemState, type Mode } from "./shared.ts";
 import { layerOf, saveLayer } from "./store.ts";
 import { message } from "../server/actions/canvas.ts";
@@ -270,8 +271,7 @@ export const LAYER_ACTIONS: Record<
     const act = plugin?.actions?.message;
     if (!plugin?.core.includes("message") && !act)
       return { error: "This view cannot be brought up to date from here." };
-    const text =
-      "Bring this canvas up to date with what the conversation said since your last move: add what is new, settle what it settled, and leave the rest.";
+    const text = REFRESH;
     if (act) return act(ctx, { text });
     return message(ctx, text, []);
   },

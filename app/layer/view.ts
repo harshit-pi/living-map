@@ -13,7 +13,7 @@ import {
   wakes,
 } from "./core.ts";
 import { layerFor } from "./follow.ts";
-import { LAYER_ID, type LayerView } from "./shared.ts";
+import { LAYER_ID, REFRESH, type LayerView } from "./shared.ts";
 import { layerForSession, pageOf, saveLayer } from "./store.ts";
 import type { StoredMap } from "../server/core/types.ts";
 
@@ -70,6 +70,7 @@ function heard(
   map: StoredMap,
   move: { said: string; answer: string; on: string | null },
 ) {
+  if (move.said === REFRESH) return;
   const s = layerFor(map);
   if (!s) return;
   const where = `${move.on ? `in the thread on "${move.on}" ` : ""}on the ${labelOf(map.purpose)} view of the map`;
