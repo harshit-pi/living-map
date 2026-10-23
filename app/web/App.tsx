@@ -202,8 +202,10 @@ export default function App() {
     <div className="flex h-full flex-col bg-canvas">
       {/* the title keeps some room while the working pill shows: the pill
           truncates first */}
-      <header className="grid grid-cols-[minmax(min(160px,20%),1fr)_minmax(0,auto)_auto] items-center gap-3 border-b border-line px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
+      {/* in a narrow window (a pane beside your chat) the title takes a row
+          of its own, above the controls */}
+      <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-b border-line px-4 py-2 sm:grid-cols-[minmax(min(160px,20%),1fr)_minmax(0,auto)_auto]">
+        <div className="col-span-2 flex min-w-0 items-center gap-2 sm:col-span-1">
           <Mark size={22} className="shrink-0" />
           <div
             className="truncate text-[15px] font-semibold text-ink"
