@@ -4,6 +4,27 @@
 // Claude with your message. Quiet and quick when there is nothing, or when
 // Living Map is not running. `npm run skill -- --hook` installs it.
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+// the local API's token (see server/auth.ts), written by the server on start
+const token = (() => {
+  try {
+    return fs
+      .readFileSync(
+        path.join(
+          process.env.LIVING_MAP_HOME ?? path.join(os.homedir(), ".living-map"),
+          "token",
+        ),
+        "utf8",
+      )
+      .trim();
+  } catch {
+    return "";
+  }
+})();
+
 const port = Number(process.argv[2] ?? process.env.PORT ?? 4317);
 
 async function stdin(): Promise<string> {
@@ -24,7 +45,7 @@ async function main() {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/api/inbox`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-lm-token": token },
       body: JSON.stringify({ session }),
       // the server marks what it sends as heard: given up on too early, it
       // would be lost

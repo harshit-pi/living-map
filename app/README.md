@@ -20,7 +20,7 @@ npm start          # builds, then serves http://localhost:4317 (restarts itself 
 
 Maps are saved in `~/.living-map/maps/`; reopen any of them from **Maps ▾**.
 
-`npm run skill` installs the `living-map` skill into `~/.claude/skills/`: in any Claude Code conversation, `/living-map` starts the server (`skill/start.ts`, detached, so it outlives the conversation) and opens a map of that conversation. Each move on such a map resumes the conversation, forked and unsaved. The skill talks to the server over `POST /api/link` (open or start a conversation's map, or run a message on it) and `GET /api/outline` (the map as text).
+`npm run skill` installs the `living-map` skill into `~/.claude/skills/`: in any Claude Code conversation, `/living-map` starts the server (`skill/start.ts`, detached, so it outlives the conversation) and opens a map of that conversation. Each move on such a map resumes the conversation, forked and unsaved. The skill talks to the server over `POST /api/link` (open or start a conversation's map, or run a message on it) and `GET /api/outline` (the map as text). Both, like every `/api` route, need the token the server keeps in `~/.living-map/token`; the page signs in through the one-time link `/api/link` answers.
 
 ## The model
 

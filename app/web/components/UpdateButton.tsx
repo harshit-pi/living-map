@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 
 import type { UpdateInfo, UpdateStep } from "../../shared/model.ts";
 import type { useUpdate } from "../lib/api.ts";
+import { api } from "../lib/session.ts";
 
 type Update = ReturnType<typeof useUpdate>;
 
@@ -54,7 +55,7 @@ export function UpdateButton({
       started={started}
       onUpdate={async () => {
         setStarted(info.current.sha);
-        await fetch("/api/update", { method: "POST" });
+        await api("/api/update", { method: "POST" });
       }}
     />
   );

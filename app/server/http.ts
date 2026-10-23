@@ -7,15 +7,21 @@ import path from "node:path";
 import type { ActionRequest, ProviderInfo } from "../shared/model.ts";
 import { act } from "./actions/index.ts";
 import { link, mapText } from "./actions/link.ts";
+import { authRoutes, type Auth } from "./auth.ts";
 import { STATIC_DIR } from "./config.ts";
 import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
+import { experimental } from "./flags.ts";
 import { listMaps, readMap } from "./store.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
 import { listen, unsentFor, wakesFor } from "../layer/view.ts";
 
-export function createApp(engine: Engine, hub: Hub) {
+export function createApp(engine: Engine, hub: Hub, auth: Auth) {
   const app = express();
+  app.disable("x-powered-by");
+  // before anything else: who may ask (see auth.ts)
+  app.use(auth.guard);
+  authRoutes(app, auth);
   app.use(express.json({ limit: "1mb" }));
   // a body that is not JSON gets a plain error, never a stack trace
   app.use(
@@ -58,12 +64,8 @@ export function createApp(engine: Engine, hub: Hub) {
 
   // for the living-map skill: is the server up, and is it this app
   app.get("/api/health", (_req, res) => {
-    res.json({
-      app: "living-map",
-      ok: true,
-      map: engine.state.map?.id ?? null,
-      provider: engine.provider.name,
-    });
+    // open to anyone on the machine, so it says nothing about your maps
+    res.json({ app: "living-map", ok: true });
   });
 
   // open (or start) the map of one of your conversations, from that
@@ -71,7 +73,10 @@ export function createApp(engine: Engine, hub: Hub) {
   app.post("/api/link", async (req, res) => {
     try {
       const r = await link(engine, (req.body ?? {}) as Record<string, unknown>);
-      res.status(r.error ? 400 : 200).json(r);
+      // the page to open: signed in by a one-time link
+      res
+        .status(r.error ? 400 : 200)
+        .json(r.error ? r : { ...r, url: `/auth?n=${auth.signInCode()}` });
     } catch (e) {
       console.error("[link] failed:", e);
       res
@@ -101,7 +106,7 @@ export function createApp(engine: Engine, hub: Hub) {
       typeof req.body?.session === "string"
         ? req.body.session.slice(0, 100)
         : "";
-    if (!id) {
+    if (!id || !experimental()) {
       res.json({ text: "" });
       return;
     }
@@ -120,6 +125,11 @@ export function createApp(engine: Engine, hub: Hub) {
         ? req.query.session.slice(0, 100)
         : "";
     const secs = Math.min(1500, Math.max(1, Number(req.query.timeout) || 600));
+    // the conversation layer is off: nothing will come, so the listener stops
+    if (!experimental()) {
+      res.json({ text: "", off: true });
+      return;
+    }
     if (!id) {
       res.json({ text: "" });
       return;

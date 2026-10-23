@@ -31,10 +31,10 @@ Send it, building the JSON with a tool that escapes it (here Python):
 ```bash
 python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "cwd": sys.argv[2], "purpose": sys.argv[3], "question": sys.argv[4]}))' \
   "${CLAUDE_SESSION_ID}" "$PWD" "" "" \
-  | curl -s -X POST localhost:{{PORT}}/api/link -H 'content-type: application/json' -d @-
+  | curl -s -X POST localhost:{{PORT}}/api/link -H 'content-type: application/json' -H "X-LM-Token: $(cat ~/.living-map/token)" -d @-
 ```
 
-The answer is `{"mapId", "title", "purpose", "created", "conversation"}` or `{"error"}`.
+The answer is `{"mapId", "title", "purpose", "created", "conversation", "url"}` or `{"error"}`. `url` is a one-time sign-in link to the page (valid for 60 seconds): open `http://localhost:{{PORT}}` followed by it.
 
 - A conversation that already has a map opens its latest map again (the question is ignored), in every open tab. `"created": true` means a new map is drawing its first move now.
 - A topic in another mode ("/living-map learn how CRDTs work" while the map is Explore) starts a map of its own. A mode with no topic ("/living-map learn") switches the open map instead: send `purpose` and leave `question` out (Explore and Learn share one map). If the answer asks for `question` (there is no map yet), send again with one.
@@ -43,7 +43,7 @@ The answer is `{"mapId", "title", "purpose", "created", "conversation"}` or `{"e
 
 ## 3. Open it beside the chat
 
-The map is http://localhost:{{PORT}}/ . It is the same in every tab and every browser, live, so the user can move between this app and Chrome freely.
+Open `http://localhost:{{PORT}}<url>` with the `url` from step 2: it signs the page in and shows the map. The page stays signed in, live, in that browser; another browser needs its own link, so link again (step 2) for it. The bare address without the link shows only how to open it.
 
 - If you have a built-in browser pane (tools named `mcp__Claude_Browser__*` or `mcp__remote-devices__Claude_Browser__*`), read its skill and open the URL there, so the map sits next to this chat.
 - Otherwise give the user the link to open. Run `open` (macOS) or `xdg-open` (Linux) on it only if they ask you to.
@@ -52,7 +52,7 @@ Then reply in one or two lines: the link, and what the map is drawing. Do not de
 
 ## 4. Listen to the map
 
-The map talks back: the user can write to you from it ("Tell Claude Code"), answer on a view, or pick an option, and expects you to act without having to type here. Start the listener in the background (with `run_in_background`, never in the foreground), unless one is already running in this conversation:
+Only when the answer in step 2 has `"listen": true`; otherwise skip this step. The map talks back: the user can write to you from it ("Tell Claude Code"), answer on a view, or pick an option, and expects you to act without having to type here. Start the listener in the background (with `run_in_background`, never in the foreground), unless one is already running in this conversation:
 
 ```bash
 node "{{APP_DIR}}/skill/wait.ts" {{PORT}} "${CLAUDE_SESSION_ID}"
@@ -72,7 +72,7 @@ It ends the moment the map has something for you, printing it after `FROM YOUR L
 
   ```bash
   python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1]}))' "${CLAUDE_SESSION_ID}" \
-    | curl -s -X POST localhost:{{PORT}}/api/inbox -H 'content-type: application/json' -d @-
+    | curl -s -X POST localhost:{{PORT}}/api/inbox -H 'content-type: application/json' -H "X-LM-Token: $(cat ~/.living-map/token)" -d @-
   ```
 
   Everything the map holds (where things stand, what is pending, what was decided, every side chat's answer) is also kept as a page at `~/.living-map/conversations/<this conversation's id>.md`, for you or a new conversation picking up the work.
@@ -80,17 +80,17 @@ It ends the moment the map has something for you, printing it after `FROM YOUR L
 - When the user refers to the map ("what does my map say", "what did I pick", "where did we land"), read it first, then answer:
 
   ```bash
-  curl -s localhost:{{PORT}}/api/outline
+  curl -s localhost:{{PORT}}/api/outline -H "X-LM-Token: $(cat ~/.living-map/token)"
   ```
 
-  It ends with the conversation's other maps, if any; read one with `curl -s "localhost:{{PORT}}/api/outline?id=<id>"`.
+  It ends with the conversation's other maps, if any; read one with `curl -s "localhost:{{PORT}}/api/outline?id=<id>" -H "X-LM-Token: $(cat ~/.living-map/token)"`.
 
 - The rail is always current; a view is redrawn only when asked. To bring something from this chat onto the open view ("add this to the map", "we decided X, update the map"), send it as a message on the linked map; it runs as a move there while you keep talking here:
 
   ```bash
   python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "cwd": sys.argv[2], "message": sys.argv[3]}))' \
     "${CLAUDE_SESSION_ID}" "$PWD" "We went with option B; bring that in." \
-    | curl -s -X POST localhost:{{PORT}}/api/link -H 'content-type: application/json' -d @-
+    | curl -s -X POST localhost:{{PORT}}/api/link -H 'content-type: application/json' -H "X-LM-Token: $(cat ~/.living-map/token)" -d @-
   ```
 
 - Moves on the map are paid model calls; a side chat reads this whole conversation. Do not start them unless the user asks for a map or an update.

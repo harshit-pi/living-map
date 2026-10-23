@@ -9,6 +9,7 @@ import type { ActionResult, Purpose } from "../../shared/model.ts";
 import { outline } from "../core/canvas.ts";
 import { str, type StoredMap } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
+import { experimental } from "../flags.ts";
 import { modeOf, pluginFor } from "../plugins.ts";
 import { linkedMaps } from "../store.ts";
 import { message } from "./canvas.ts";
@@ -24,6 +25,7 @@ export type LinkResult = {
   purpose?: Purpose;
   created?: boolean; // a new map, its first move drawing now
   conversation?: string; // the linked conversation's title
+  listen?: boolean; // the main chat should start its listener
 };
 
 export async function link(
@@ -119,7 +121,7 @@ export async function link(
 
   // its first map, with no view named: read the conversation, then draw
   // the view it needs
-  if (!purpose && !question)
+  if (!purpose && !question && experimental())
     return reply(await autoStart(engine, settings, conversation), true);
   const { map, first } = await begin(
     engine,
@@ -163,6 +165,9 @@ const reply = (m: StoredMap, created: boolean): LinkResult => ({
   purpose: m.purpose,
   created,
   conversation: m.conversation?.title ?? "",
+  // the main chat listens to the map (skill/wait.ts) only with the
+  // conversation layer on
+  listen: experimental(),
 });
 
 // The map as text, for the conversation to read back ("what is on my map?"):

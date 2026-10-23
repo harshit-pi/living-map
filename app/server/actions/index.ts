@@ -2,6 +2,7 @@
 
 import { safeId } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
+import { experimental } from "../flags.ts";
 import { modeOf } from "../plugins.ts";
 import * as canvas from "./canvas.ts";
 import { makeCtx } from "./context.ts";
@@ -92,7 +93,7 @@ export async function act(
           typeof req.name === "string" && Object.hasOwn(LAYER_ACTIONS, req.name)
             ? LAYER_ACTIONS[req.name]
             : null;
-        if (!run || !map.conversation)
+        if (!run || !map.conversation || !experimental())
           return { error: "That action is not available on this map." };
         const args = req.args && typeof req.args === "object" ? req.args : {};
         return run(ctx, args as Record<string, unknown>);
