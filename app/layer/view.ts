@@ -6,6 +6,7 @@ import {
   claudeTodo,
   decided,
   needsYou,
+  post,
   postFromView,
   stillOpen,
   takeUnsent,
@@ -57,7 +58,23 @@ function viewOf(map: StoredMap): LayerView | undefined {
   };
 }
 
-export const follow = { id: LAYER_ID, view: viewOf };
+// What you wrote on a view and what it answered, for the main chat: an
+// answer given there ("yes, push it") is meant for it as much as for the view.
+function heard(
+  map: StoredMap,
+  move: { said: string; answer: string; on: string | null },
+) {
+  const s = layerFor(map);
+  if (!s) return;
+  const where = `${move.on ? `in the thread on "${move.on}" ` : ""}on the ${labelOf(map.purpose)} view of the map`;
+  post(
+    s,
+    `The user wrote ${where}: "${move.said}"${move.answer ? `\nThe map answered: ${move.answer}` : ""}`,
+  );
+  saveLayer(s);
+}
+
+export const follow = { id: LAYER_ID, view: viewOf, heard };
 
 // the view's name as you see it (a mode a plugin adds keeps its id)
 const VIEW_NAME: Record<string, string> = {
@@ -69,6 +86,8 @@ const labelOf = (mode: string) => VIEW_NAME[mode] ?? mode;
 
 // What you did on a view of a linked map, for the main chat to hear.
 export function fromView(map: StoredMap, text: string) {
+  // switching views is how you look, not something you did
+  if (/^Switched the canvas to /.test(text)) return;
   const s = layerFor(map);
   if (!s) return;
   postFromView(s, labelOf(map.purpose), text);

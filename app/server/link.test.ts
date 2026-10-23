@@ -211,3 +211,20 @@ test("a first move that draws nothing is asked once more, without anyone waiting
   assert.equal(calls.length, 2);
   assert.ok(Object.keys(engine.state.map!.nodes).length);
 });
+
+test("what you write on a view, and its answer, reach the main chat; switching views does not", async () => {
+  const { engine } = setup();
+  await link(engine, { session: "older", question: "Which DB?" });
+  await settle();
+  const { act } = await import("./actions/index.ts");
+  const { unsentFor } = await import("../layer/view.ts");
+  unsentFor("older"); // what came before is not this test's
+  await act(engine, { type: "thread", nodeId: "pg", text: "Yes, go with it" });
+  await act(engine, { type: "purpose", purpose: "learn" });
+  const heard = unsentFor("older");
+  assert.match(heard, /in the thread on "Postgres" on the Explore view/);
+  assert.match(heard, /"Yes, go with it"/);
+  assert.match(heard, /The map answered: Laid out\./);
+  assert.doesNotMatch(heard, /Switched the canvas/);
+  assert.equal(unsentFor("older"), "");
+});

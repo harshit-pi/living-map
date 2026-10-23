@@ -16,6 +16,11 @@ export const PLUGINS: readonly ServerPlugin[] = [explore, learn, design];
 export type Layer = {
   id: string;
   view: (map: StoredMap) => unknown;
+  // you wrote on a view (in a node's thread, or its main box) and it answered
+  heard?: (
+    map: StoredMap,
+    move: { said: string; answer: string; on: string | null },
+  ) => void;
 };
 export const LAYERS: readonly Layer[] = [follow];
 

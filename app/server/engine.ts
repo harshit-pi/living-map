@@ -446,15 +446,26 @@ export function createEngine({
           text: "Claude replied without changing the canvas.",
           ts: Date.now(),
         });
+      const answer = visiblePart(reply.final).trim();
       if (!opts.quiet)
         messages.push({
           role: "claude",
-          text: visiblePart(reply.final).trim() || "(updated the canvas)",
+          text: answer || "(updated the canvas)",
           ts: Date.now(),
           view,
           ...(opts.blankId ? { blankId: opts.blankId } : {}),
           ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
         });
+      // what you wrote on a view and what it answered: a layer passes it on
+      // (the conversation's main chat hears it); a move on the layer itself
+      // says its own
+      if (opts.text && !opts.quiet && !opts.as)
+        for (const layer of LAYERS)
+          layer.heard?.(m, {
+            said: opts.text,
+            answer,
+            on: scope ? (m.nodes[scope]?.title ?? null) : null,
+          });
       // it says how to have them made: told only that they were not, you
       // were left with a reply naming changes the map did not show
       if (refused)
