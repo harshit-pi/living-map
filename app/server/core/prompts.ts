@@ -70,7 +70,7 @@ export const viewLine = (view: View): string => VIEW[view] ?? VIEW.visual;
 // conversations, which the model reads before the move's message: the map is
 // of that conversation, and the move works only the canvas, never the
 // conversation's own unfinished work.
-export const LINKED = `THE USER'S CONVERSATION: everything before this message is the user's own conversation with you, outside this canvas. The canvas is a living map of it. Work the canvas from what was said, found and decided there: never ask what it already answers, and when you use something from it, say so briefly ("you said earlier …"). Do not carry on that conversation's own work: do not answer its last message, change files or run commands. In this reply you only work the canvas, in the format these instructions give.`;
+export const LINKED = `THE USER'S CONVERSATION: everything before this message is the user's own conversation with you, outside this canvas. The canvas is a living map of it. Work the canvas from what was said, found and decided there: never ask what it already answers, and when you use something from it, say so briefly ("you said earlier …"). Do not carry on that conversation's own work: do not answer its last message, change files or run commands. Where it asks for this canvas to be opened, that is done: ignore that part. Everything about the canvas and its format is in these instructions, so read no files to learn it. In this reply you only work the canvas.`;
 
 // a move whose words are neither shown nor kept (TurnOptions.quiet): words
 // written outside the map block would be paid for and thrown away

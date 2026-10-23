@@ -21,6 +21,7 @@ npm run dev            # server with --watch, plus Vite on :5173
 LIVING_MAP_CLOCK_SKEW_DAYS=8 npm start   # testing only: Learn's review clock runs 8 days ahead (server/clock.ts)
 npm run check          # ESLint, tsc, Prettier, Vitest: the same as the pre-commit hook
 npm test               # Vitest only
+npm run skill          # install the living-map skill into ~/.claude/skills (writes outside the repo; only when asked)
 npm run eval           # does Learn pick a fitting diagram, and how fast (calls the model, costs ~$1; only when asked)
 LIVING_MAP_HOME=<test home> npm run eval:moves -- <label>   # tokens, time and quality per move on fixed topics (~$0.75; only when asked)
 node eval/moves-compare.ts <label> <label>                  # those runs side by side → eval/moves-results.md
@@ -42,6 +43,8 @@ For a UI change, also run `npm start` and try it in the browser: Explore and Lea
 - `app/server/core/`: pure logic, no I/O: prompts, reading the model's reply, the map, the topic diagram, scenes. Tested in `app/server/core/core.test.ts`.
 - `app/server/providers/`: the model. `types.ts` is the only seam; `claude-code.ts` implements it with `claude -p`, keeping one spare process started for the next move (`warm`): a mode's system prompt is the same on every move, and a move's own sections go in its message (`promptParts` in `app/server/core/prompts.ts`). To add a model, implement `ModelProvider` and register it in `index.ts`; pick it with `LIVING_MAP_PROVIDER`.
 - `app/server/engine.ts`: one move at a time (queue, Stop), what the model is sent, streaming ops onto the canvas. `app/server/actions/`: one function per action. `app/server/store.ts`: maps on disk (`~/.living-map/maps/`). `app/server/http.ts`: routes.
+- Linked maps: `map.conversation` names one of your Claude Code conversations; every move resumes it, forked and unsaved (`--resume <id> --fork-session`), with `LINKED` (`app/server/core/prompts.ts`) added to the system prompt. Conversations are found on disk by `app/server/providers/claude-sessions.ts`; `app/server/actions/link.ts` answers `POST /api/link` (open or start a conversation's map, or run a message on it) and `GET /api/outline` (the map as text, only what the browser sees; a plugin adds its part with `readout`).
+- `app/skill/`: the `living-map` skill for users' own Claude Code. `SKILL.md` is a template (`{{APP_DIR}}`, `{{PORT}}`), `install.ts` writes it to `~/.claude/skills/living-map/` (the server rewrites an installed copy on start), `start.ts` starts the server detached so it outlives the conversation that asked.
 - `app/server/update.ts` and `app/server/launcher.ts`: the one-click update (compare with the latest GitHub release, pull, `npm ci`, build, restart).
 - `app/web/`: `App.tsx` is the shell; `screens/` (Start, Loading), `components/`, `hooks/`, `lib/` (live connection, API client, storage).
 - `app/eval/forms.ts`: the diagram-fit eval, through the same provider. `app/eval/moves.ts`: real moves through the engine (Learn, Explore), with output tokens, first word, total time and the quality signals the code has.

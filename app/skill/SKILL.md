@@ -36,7 +36,8 @@ python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "cwd": sy
 
 The answer is `{"mapId", "title", "purpose", "created", "conversation"}` or `{"error"}`.
 
-- A conversation that already has a map opens that map again (the question is ignored), in every open tab. `"created": true` means a new map is drawing its first move now.
+- A conversation that already has a map opens its latest map again (the question is ignored), in every open tab. `"created": true` means a new map is drawing its first move now.
+- A topic in another mode ("/living-map learn how CRDTs work" while the map is Explore) starts a map of its own. A mode with no topic ("/living-map learn") switches the open map instead: send `purpose` and leave `question` out (Explore and Learn share one map). If the answer asks for `question` (there is no map yet), send again with one.
 - Add `"new": true` for a second map of the same conversation.
 - If the session id is not filled in above, leave it as is: the server then links the newest conversation in `cwd`, which is this one.
 
@@ -56,6 +57,8 @@ Then reply in one or two lines: the link, and what the map is drawing. Do not de
   ```bash
   curl -s localhost:{{PORT}}/api/outline
   ```
+
+  It ends with the conversation's other maps, if any; read one with `curl -s "localhost:{{PORT}}/api/outline?id=<id>"`.
 
 - To put something from this chat onto the map ("add this to the map", "we decided X, update the map"), send it as a message on the linked map; it runs as a move there while you keep talking here:
 

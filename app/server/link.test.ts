@@ -164,3 +164,42 @@ test("a linked map left empty is drawn again when it is linked again", async () 
   assert.equal(calls.length, 2, "its first move again");
   assert.ok(Object.keys(engine.state.map!.nodes).length);
 });
+
+test("a topic named in another mode starts its own map; the mode named alone switches the shared one", async () => {
+  const { engine } = setup();
+  const r = await link(engine, { session: "older", question: "Which DB?" });
+  await settle();
+  const learn = await link(engine, {
+    session: "older",
+    purpose: "learn",
+    question: "How do database indexes work?",
+  });
+  assert.equal(learn.created, true);
+  assert.notEqual(learn.mapId, r.mapId);
+  assert.equal(engine.state.map!.purpose, "learn");
+  assert.equal(engine.state.map!.conversation?.id, "older");
+});
+
+test("a first move that draws nothing is asked once more, without anyone waiting on it", async () => {
+  const { engine, calls } = setup();
+  let blank = 1;
+  const run = engine.provider.run;
+  engine.provider.run = (req, onText) => {
+    if (blank-- > 0) {
+      calls.push(req);
+      const reply: ModelReply = {
+        ok: true,
+        final: "Nothing.",
+        firstMs: 1,
+        endMs: 2,
+        usage: Promise.resolve(null),
+      };
+      return { reply: Promise.resolve(reply), cancel: () => {} };
+    }
+    return run(req, onText);
+  };
+  await link(engine, { session: "older", question: "Q?", new: true });
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.ok(Object.keys(engine.state.map!.nodes).length);
+});

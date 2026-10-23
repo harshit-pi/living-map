@@ -3,12 +3,12 @@
 // one starts from the question the conversation is about. Every move on it
 // reads the conversation first, so what you said there needs no repeating.
 
-import type { Purpose } from "../../shared/model.ts";
+import type { ActionResult, Purpose } from "../../shared/model.ts";
 import { outline } from "../core/canvas.ts";
 import { str, type StoredMap } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
 import { modeOf, pluginFor } from "../plugins.ts";
-import { findLinked } from "../store.ts";
+import { linkedMaps } from "../store.ts";
 import { message } from "./canvas.ts";
 import { makeCtx } from "./context.ts";
 import { cleanSettings } from "./index.ts";
@@ -57,7 +57,7 @@ export async function link(
     ? null
     : current?.conversation?.id === conversation.id
       ? current
-      : findLinked(conversation.id);
+      : (linkedMaps(conversation.id)[0] ?? null);
   // one in another mode it cannot switch to is not the map asked for
   const fits = (m: StoredMap) =>
     !purpose ||
@@ -65,7 +65,11 @@ export async function link(
     !!pluginFor(m.purpose)?.switchesWith?.includes(purpose) ||
     !!pluginFor(purpose)?.switchesWith?.includes(m.purpose);
 
-  if (known && fits(known)) {
+  // a topic named with another mode ("learn how sync works") is a map of its
+  // own; a mode named alone switches the map Explore and Learn share
+  const another =
+    !!known && !!purpose && purpose !== known.purpose && !!question;
+  if (known && fits(known) && !another) {
     if (engine.state.map?.id !== known.id) {
       const r = await open(engine, known.id, settings);
       if (r.error) return { error: r.error };
@@ -81,9 +85,7 @@ export async function link(
     const idle = !engine.state.busy && !engine.state.waiting.length;
     // left empty (the server stopped during its first move): drawn again
     if (!Object.keys(m.nodes).length && !m.diagram && idle)
-      void modeOf(m.purpose)
-        .start(ctx)
-        .catch((e) => console.error("[link] first move failed:", e));
+      void drawFirst(engine, m, () => modeOf(m.purpose).start(ctx));
     // said from the conversation ("bring in what we just decided"): a move
     // on the map, drawn while the conversation goes on
     else if (say && modeOf(m.purpose).core.includes("message"))
@@ -104,8 +106,30 @@ export async function link(
     purpose || "explore",
     conversation,
   );
-  void first().catch((e) => console.error("[link] first move failed:", e));
+  void drawFirst(engine, map, first);
   return reply(map, true);
+}
+
+// The first move of a map asked for from your conversation. Nobody waits on
+// it in the browser to see it fail, so one that drew nothing is asked once
+// more, and a second failure is said on the map.
+async function drawFirst(
+  engine: Engine,
+  m: StoredMap,
+  first: () => Promise<ActionResult>,
+) {
+  const empty = () => !Object.keys(m.nodes).length && !m.diagram;
+  try {
+    let r = await first();
+    if (r.stopped || engine.state.map !== m || !empty()) return;
+    r = await first();
+    if (r.error && !r.stopped && engine.state.map === m && empty()) {
+      m.chat.push({ role: "system", text: r.error, ts: Date.now() });
+      engine.push();
+    }
+  } catch (e) {
+    console.error("[link] first move failed:", e);
+  }
 }
 
 const reply = (m: StoredMap, created: boolean): LinkResult => ({
@@ -121,6 +145,14 @@ const reply = (m: StoredMap, created: boolean): LinkResult => ({
 export function mapText(engine: Engine, m: StoredMap): string {
   const plugin = pluginFor(m.purpose);
   const board = plugin?.readout?.(m) ?? "";
+  const others = m.conversation
+    ? linkedMaps(m.conversation.id)
+        .filter((o) => o.id !== m.id)
+        .map(
+          (o) =>
+            `- ${o.title} (${pluginFor(o.purpose)?.label ?? o.purpose}): /api/outline?id=${o.id}`,
+        )
+    : [];
   const said = m.chat
     .filter((c) => c.role !== "system")
     .slice(-6)
@@ -134,6 +166,9 @@ export function mapText(engine: Engine, m: StoredMap): string {
     Object.keys(m.nodes).length ? `CANVAS:\n${outline(m.nodes)}` : "",
     board,
     said.length ? `LATEST ON THE MAP:\n${said.join("\n")}` : "",
+    others.length
+      ? `OTHER MAPS OF THIS CONVERSATION:\n${others.join("\n")}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
