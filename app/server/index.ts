@@ -8,9 +8,11 @@
 //
 // Run with Node 23.6+ (types are stripped natively): node server/index.ts
 
+import { createAuth } from "./auth.ts";
 import { HOME, MODEL_CWD, PORT, PROVIDER } from "./config.ts";
 import { createEngine } from "./engine.ts";
 import { createHub } from "./events.ts";
+import { experimental } from "./flags.ts";
 import { createApp } from "./http.ts";
 import { pickProvider } from "./providers/index.ts";
 import { loadCurrent, saveMap } from "./store.ts";
@@ -27,8 +29,9 @@ const engine = createEngine({
   save: saveMap,
 });
 
-// a map linked to a conversation follows it while it is open
-follow(engine, { refreshView });
+// a map linked to a conversation follows it while it is open (still being
+// tried out: see flags.ts)
+follow(engine, { refreshView, on: experimental });
 
 // the living-map skill, if you installed it, follows this copy of the app
 try {
@@ -37,7 +40,9 @@ try {
   console.error("[skill] could not refresh the living-map skill:", e);
 }
 
-createApp(engine, hub).listen(PORT, "127.0.0.1", () =>
+const auth = createAuth({ home: HOME, port: PORT });
+
+createApp(engine, hub, auth).listen(PORT, "127.0.0.1", () =>
   console.log(
     `Living Map on http://localhost:${PORT}  (${provider.name}, working in ${MODEL_CWD})`,
   ),

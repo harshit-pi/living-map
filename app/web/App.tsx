@@ -14,6 +14,7 @@ import { UpdateButton } from "./components/UpdateButton.tsx";
 import { WorkingBar, WorkingPill } from "./components/WorkingBar.tsx";
 import { act, useUpdate } from "./lib/api.ts";
 import { useLiveMap } from "./lib/live.ts";
+import { useSignedIn } from "./lib/session.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
 import { modeOf, PLUGINS, pluginFor } from "./plugins.ts";
@@ -34,7 +35,33 @@ const onResize = (f: () => void) => {
 };
 const useRoomy = () => useSyncExternalStore(onResize, isRoomy, () => false);
 
+// Not signed in (the page was opened without the skill's one-time link):
+// nothing of your maps is shown, only how to open it.
 export default function App() {
+  const signedIn = useSignedIn();
+  if (signedIn === false) return <SignedOut />;
+  if (signedIn === null) return <div className="h-full bg-canvas" />;
+  return <MapApp />;
+}
+
+function SignedOut() {
+  return (
+    <div className="flex h-full items-center justify-center bg-canvas px-6">
+      <div className="max-w-sm text-center">
+        <Mark size={40} className="mx-auto" />
+        <h1 className="mt-4 text-lg font-semibold text-ink">
+          Open Living Map from Claude Code
+        </h1>
+        <p className="mt-2 text-sm text-body">
+          Say <code>/living-map</code> in your Claude Code chat. It opens this
+          page signed in, with the map of that chat.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MapApp() {
   const live = useLiveMap();
   const update = useUpdate();
   const { map } = live;

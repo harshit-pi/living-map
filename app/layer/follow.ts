@@ -178,6 +178,8 @@ export function follow(
     // brings the open view up to date (the rail's Update), when it is due
     refreshView = undefined as
       ((engine: Engine, map: StoredMap) => Promise<unknown>) | undefined,
+    // asked each tick: off, nothing is read or sent
+    on = (): boolean => true,
   } = {},
 ) {
   let running = false;
@@ -186,7 +188,7 @@ export function follow(
   let failedAt = 0;
   const tick = async () => {
     const m = engine.state.map;
-    if (!m?.conversation || running) return;
+    if (!m?.conversation || running || !on()) return;
     running = true;
     try {
       const s = layerOf(m.conversation);

@@ -36,6 +36,7 @@ import {
 import { sceneOutline, sceneView } from "./core/scene.ts";
 import type { Raw, StoredMap } from "./core/types.ts";
 import type { Hub } from "./events.ts";
+import { experimental } from "./flags.ts";
 import type { ServerPlugin } from "./plugin.ts";
 import { LAYERS, modeOf, pluginFor } from "./plugins.ts";
 import type {
@@ -160,7 +161,7 @@ export function createEngine({
     const v = pluginFor(m.purpose)?.view?.(m);
     if (v !== undefined) data[m.purpose] = v;
     // what a layer shares with every view of the map (the conversation's rail)
-    for (const layer of LAYERS) {
+    for (const layer of experimental() ? LAYERS : []) {
       const lv = layer.view(m);
       if (lv !== undefined) data[layer.id] = lv;
     }
@@ -460,7 +461,7 @@ export function createEngine({
       // (the conversation's main chat hears it); a move on the layer itself
       // says its own
       if (opts.text && !opts.quiet && !opts.as)
-        for (const layer of LAYERS)
+        for (const layer of experimental() ? LAYERS : [])
           layer.heard?.(m, {
             said: opts.text,
             answer,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { api } from "./session.ts";
 import type {
   Action,
   ActionResult,
@@ -14,7 +15,7 @@ export async function act(
   settings: Settings,
 ): Promise<ActionResult> {
   try {
-    const r = await fetch("/api/action", {
+    const r = await api("/api/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...action, settings }),
@@ -37,7 +38,7 @@ export function useMapList(when: unknown): MapSummary[] | null {
   const [maps, setMaps] = useState<MapSummary[] | null>(null);
   useEffect(() => {
     let live = true;
-    fetch("/api/maps")
+    api("/api/maps")
       .then((r) => r.json() as Promise<MapSummary[]>)
       .then((m) => {
         if (live) setMaps(m);
@@ -61,7 +62,7 @@ const FALLBACK: ProviderInfo = {
 export function useProvider(): ProviderInfo {
   const [info, setInfo] = useState<ProviderInfo>(FALLBACK);
   useEffect(() => {
-    providerInfo ??= fetch("/api/provider")
+    providerInfo ??= api("/api/provider")
       .then((r) => r.json() as Promise<ProviderInfo>)
       .catch(() => FALLBACK);
     let live = true;
@@ -85,7 +86,7 @@ export function useUpdate(): {
   useEffect(() => {
     let live = true;
     const ask = () =>
-      fetch("/api/update")
+      api("/api/update")
         .then((r) => r.json() as Promise<UpdateInfo>)
         .then((i) => {
           if (live) setInfo(i);
@@ -101,7 +102,7 @@ export function useUpdate(): {
   const refresh = useCallback(async () => {
     try {
       const i = (await (
-        await fetch("/api/update?refresh=1")
+        await api("/api/update?refresh=1")
       ).json()) as UpdateInfo;
       setInfo(i);
       return i;

@@ -18,6 +18,8 @@ import type {
 // maps and conversations in a throwaway home, set before the store loads
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lm-link-"));
 process.env.LIVING_MAP_HOME = path.join(tmp, "living-map");
+// the conversation layer is still behind its flag (server/flags.ts)
+process.env.LIVING_MAP_EXPERIMENTAL = "1";
 const claude = path.join(tmp, "claude");
 const cwd = path.join(tmp, "project");
 fs.mkdirSync(cwd, { recursive: true });

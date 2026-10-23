@@ -6,6 +6,27 @@
 //
 //   node skill/wait.ts <port> <session id>
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+// the local API's token (see server/auth.ts), written by the server on start
+const token = (() => {
+  try {
+    return fs
+      .readFileSync(
+        path.join(
+          process.env.LIVING_MAP_HOME ?? path.join(os.homedir(), ".living-map"),
+          "token",
+        ),
+        "utf8",
+      )
+      .trim();
+  } catch {
+    return "";
+  }
+})();
+
 const port = Number(process.argv[2] ?? 4317);
 const session = String(process.argv[3] ?? "");
 // a chat left alone for this long stops listening; asked again, it resumes
@@ -21,8 +42,18 @@ async function main() {
     try {
       const r = await fetch(
         `http://127.0.0.1:${port}/api/inbox/wait?session=${session}&timeout=600`,
+        { headers: { "x-lm-token": token } },
       );
-      const { text } = (await r.json()) as { text?: string };
+      const { text, off } = (await r.json()) as {
+        text?: string;
+        off?: boolean;
+      };
+      if (off) {
+        console.log(
+          "Living Map is not listening to this chat (the conversation layer is off). Do not start this again.",
+        );
+        return;
+      }
       if (text?.trim()) {
         console.log(`FROM YOUR LIVING MAP:\n${text}`);
         return;
