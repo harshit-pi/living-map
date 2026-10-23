@@ -59,6 +59,9 @@ export type TurnOptions = {
   // (Learn writing a later step's model while you build: its caption could
   // say what the hidden model holds)
   quiet?: boolean;
+  // not resumed from the conversation the map is linked to: the move's
+  // message carries what it needs of it (Chat's catch-up sends the new turns)
+  unlinked?: boolean;
   // what the working bar says once the move's ops show what it is doing
   // (null: keep the label): the first move's label is a guess from the
   // question's words until the model frames it
@@ -198,7 +201,7 @@ export function createEngine({
     const sceneId = scope ?? opts.nodeId;
     const plugin = modeOf(m.purpose);
     return [
-      `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${outline(m.nodes)}`,
+      `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${plugin.canvas?.(m) ?? outline(m.nodes)}`,
       plugin.outline?.(m, {
         sections: opts.sections ?? [],
         nodeId: scope ?? opts.nodeId ?? null,
@@ -282,7 +285,7 @@ export function createEngine({
         }
       : undefined;
     const opClean = plugin.cleanOp
-      ? (op: Raw) => plugin.cleanOp!(m, op)
+      ? (op: Raw) => plugin.cleanOp!(m, op, { scope })
       : undefined;
     state.busy = true;
     stopped = false;
@@ -336,7 +339,9 @@ export function createEngine({
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          ...linkOf(m, prompt.system),
+          ...(opts.unlinked
+            ? { system: prompt.system }
+            : linkOf(m, prompt.system)),
           message: text,
           ...settings,
         },
@@ -448,7 +453,7 @@ export function createEngine({
       void reply.usage.then((u) =>
         recordUsage(m, u, reply.firstMs, reply.endMs),
       );
-      return {};
+      return { ok: true };
     } finally {
       call = null;
       state.busy = false;
@@ -462,7 +467,9 @@ export function createEngine({
       push();
       // a move already waiting starts at once: a process started now would
       // be no further on than its own
-      if (!stopped && !state.waiting.length) warm(settings);
+      // a move that did not resume the conversation (Chat's catch-up) is not
+      // what comes next: a spare started on its settings would go unused
+      if (!stopped && !state.waiting.length && !opts.unlinked) warm(settings);
     }
   }
 

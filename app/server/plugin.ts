@@ -27,6 +27,9 @@ export type ServerPlugin = {
     prompt: string;
     sections?: Record<string, string>;
   };
+  // the canvas as the model reads it, in place of core's node outline (Chat
+  // says what each node stands for)
+  canvas?: (map: StoredMap) => string;
   // what the model is told about the plugin's state on every move; the
   // move's sections say what it is for (Learn shows a hidden model only to
   // the moves that work on it), and `nodeId` the node it is about (its
@@ -47,7 +50,11 @@ export type ServerPlugin = {
   // the plugin may clean its text in place (Learn leaves out what would say
   // the links of a step you are building), or return false to drop it (a
   // note Learn's screen never shows)
-  cleanOp?: (map: StoredMap, op: Raw) => void | false;
+  cleanOp?: (
+    map: StoredMap,
+    op: Raw,
+    opts?: { scope: string | null },
+  ) => void | false;
   // the model may not change or remove a node you made, chose or settled
   // (by: "you"), whatever its reply says
   keepUserNodes?: boolean;
@@ -69,6 +76,9 @@ export type ServerPlugin = {
   // the state as text for your conversation to read the map back (the
   // living-map skill); like `view`, only what the browser may see
   readout?: (map: StoredMap) => string;
+  // what your conversation has not heard from the map since it last asked
+  // (Chat's side chats and ticks), marked heard; "" when nothing
+  unsent?: (map: StoredMap) => string;
   // one line for the maps list, e.g. "7 parts · 6 wires"
   summary?: (map: StoredMap) => string;
   // how many steps wait for review now, and when the next falls due

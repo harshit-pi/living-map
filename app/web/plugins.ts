@@ -2,11 +2,17 @@
 // Adding one is a line here and one in server/plugins.ts.
 
 import type { WebPlugin } from "./plugin.ts";
+import { chatWeb } from "../plugins/chat/web/index.ts";
 import { designWeb } from "../plugins/design/web/index.ts";
 import { exploreWeb } from "../plugins/explore/web/index.ts";
 import { learnWeb } from "../plugins/learn/web/index.ts";
 
-export const PLUGINS: readonly WebPlugin[] = [exploreWeb, learnWeb, designWeb];
+export const PLUGINS: readonly WebPlugin[] = [
+  exploreWeb,
+  learnWeb,
+  designWeb,
+  chatWeb,
+];
 
 export const pluginFor = (purpose: string): WebPlugin | undefined =>
   PLUGINS.find((p) => p.id === purpose);

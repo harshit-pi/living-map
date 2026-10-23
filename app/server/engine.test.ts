@@ -203,7 +203,7 @@ test("moves asked while the model is busy wait their turn instead of being refus
   await settled(calls, 3);
   assert.match(calls[2].req.message, /USER SAYS: two/);
   calls[2].release("Second.");
-  assert.deepEqual(await b, {});
+  assert.deepEqual(await b, { ok: true });
 });
 
 test("a move that starts says what waits: a map pushed while its ticket was queued is not the last word", async () => {

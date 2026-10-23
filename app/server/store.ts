@@ -82,7 +82,10 @@ export function linkedMaps(conversationId: string): StoredMap[] {
   for (const f of fs.readdirSync(MAPS_DIR)) {
     if (!f.endsWith(".json")) continue;
     const m = readMap(f.slice(0, -5));
-    if (m?.conversation?.id !== conversationId) continue;
+    const c = m?.conversation;
+    if (!m || !c) continue;
+    if (c.id !== conversationId && !c.previous?.includes(conversationId))
+      continue;
     found.push({ m, at: fs.statSync(path.join(MAPS_DIR, f)).mtimeMs });
   }
   return found.sort((a, b) => b.at - a.at).map((x) => x.m);

@@ -9,6 +9,7 @@ https://github.com/user-attachments/assets/5310e726-ee2f-4876-9324-3dee512b2bd5
 
 Long AI answers are hard to hold in your head. Living Map turns the conversation into a picture you work on directly:
 
+- **Follow** a conversation you are having in Claude Code as a live map beside it: each topic in turn, what is still to do (ticked off as it gets done), what was decided and what is still open. Start a **side chat** from any part of it: it has read the whole conversation, and what it answers reaches your main chat with your next message there.
 - **Explore** a question as a decision board: the options as columns, what you want as rows, and Claude's judgement in each cell, marked as a guess when no fact backs it. One filled **Next** button names the step (Fill the board, Case against the lead, Decide…); mark your musts, rate any cell yourself, then decide in one sheet with your reasons, and get a pre-mortem. Questions about causes open as a tree instead, and every node has its own side thread.
 - **Learn** any subject (a protocol, a theory, a period of history, a coding problem) as a path of steps. Each step is a small model on one concrete case: you see it once, then build it back from memory, and the check, the hints and the misconceptions cost no model call. Days later it comes back for review with less help, in a mixed order. Older maps keep their diagram with blanks, and **Practise this as builds** turns one into steps.
 - **Play a step by hand** on a board, an array or a tree, move by move. Your clicks are checked instantly, with no model call. Coding problems end with **Write it**, where Claude traces your code on the example and tells you which line breaks.
@@ -39,9 +40,15 @@ cd living-map/app
 npm run skill
 ```
 
-Then, in any Claude Code conversation (the desktop app, the terminal, an IDE), say **/living-map** or "map this". Claude starts the server if it is not running, and opens a map of **that conversation**: the question you have been working on, what you want, and the options you named are already on the board. `/living-map learn <topic>` and `/living-map design <system>` open the other modes.
+Then, in any Claude Code conversation (the desktop app, the terminal, an IDE), say **/living-map** or "map this". Claude starts the server if it is not running, and opens a live map of **that conversation** that follows it as you go. `/living-map explore <question>`, `/living-map learn <topic>` and `/living-map design <system>` open the other modes.
 
-- Every move on the map resumes your conversation, forked and never saved, so the map knows everything said there and anything you say later. Your conversation itself is left exactly as it was.
+To have your conversation hear back from its map (side chats answered, tasks you ticked) with each message you send, also install the hook. It adds one `UserPromptSubmit` entry to `~/.claude/settings.json` and leaves the rest as it is:
+
+```bash
+npm run skill -- --hook
+```
+
+- A live map files your conversation's new turns a few seconds after each one, with a quick call that reads only those turns. Side chats, and every move on the other modes, resume your conversation, forked and never saved, so they know everything said there and anything you say later. Your conversation itself is left exactly as it was.
 - The map is one live page on http://localhost:4317: keep it in the desktop app's browser pane beside the chat, or in Chrome, and move between them freely.
 - Ask the chat "what does my map say?" and it reads the map back; say "we picked B, update the map" and the map moves.
 - Saying /living-map again in the same conversation reopens its map.

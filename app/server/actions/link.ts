@@ -51,19 +51,22 @@ export async function link(
   const question = str(body.question, 6000).trim();
   const say = str(body.message, 4000).trim();
 
-  // the map already linked to this conversation, unless a new one is asked for
-  const current = engine.state.map;
-  const known = body.new
-    ? null
-    : current?.conversation?.id === conversation.id
-      ? current
-      : (linkedMaps(conversation.id)[0] ?? null);
   // one in another mode it cannot switch to is not the map asked for
   const fits = (m: StoredMap) =>
     !purpose ||
     m.purpose === purpose ||
     !!pluginFor(m.purpose)?.switchesWith?.includes(purpose) ||
     !!pluginFor(purpose)?.switchesWith?.includes(m.purpose);
+  // the map already linked to this conversation, unless a new one is asked
+  // for: the open one first, then the newest, preferring one in the mode asked
+  const current = engine.state.map;
+  const linked = body.new
+    ? []
+    : [
+        ...(current?.conversation?.id === conversation.id ? [current] : []),
+        ...linkedMaps(conversation.id).filter((m) => m.id !== current?.id),
+      ];
+  const known = linked.find(fits) ?? linked[0] ?? null;
 
   // a topic named with another mode ("learn how sync works") is a map of its
   // own; a mode named alone switches the map Explore and Learn share
@@ -94,7 +97,10 @@ export async function link(
     return reply(m, false);
   }
 
-  if (!question)
+  // a Chat map is of the conversation as a whole: its title is the
+  // conversation's own unless one is given
+  const follows = purpose === "chat";
+  if (!question && !follows)
     return {
       error:
         "This conversation has no map yet: pass `question`, one line saying what to explore or learn.",
@@ -102,7 +108,7 @@ export async function link(
   const { map, first } = await begin(
     engine,
     settings,
-    question,
+    question || conversation.title || "This conversation",
     purpose || "explore",
     conversation,
   );
@@ -163,7 +169,9 @@ export function mapText(engine: Engine, m: StoredMap): string {
     engine.state.busy
       ? `Working now: ${engine.state.working?.label ?? "a move"}`
       : "",
-    Object.keys(m.nodes).length ? `CANVAS:\n${outline(m.nodes)}` : "",
+    Object.keys(m.nodes).length
+      ? `CANVAS:\n${plugin?.canvas?.(m) ?? outline(m.nodes)}`
+      : "",
     board,
     said.length ? `LATEST ON THE MAP:\n${said.join("\n")}` : "",
     others.length

@@ -14,6 +14,7 @@ import { createHub } from "./events.ts";
 import { createApp } from "./http.ts";
 import { pickProvider } from "./providers/index.ts";
 import { loadCurrent, saveMap } from "./store.ts";
+import { follow } from "../plugins/chat/follow.ts";
 import { installSkill } from "../skill/install.ts";
 
 const provider = pickProvider(PROVIDER, { home: HOME, cwd: MODEL_CWD });
@@ -24,6 +25,9 @@ const engine = createEngine({
   initial: loadCurrent(),
   save: saveMap,
 });
+
+// a Chat map follows its conversation while it is open
+follow(engine);
 
 // the living-map skill, if you installed it, follows this copy of the app
 try {
