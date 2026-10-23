@@ -235,6 +235,22 @@ function Drawer({
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
         <Tell here={here} />
+        <label className="flex items-center gap-2 px-1 text-[12px] text-body">
+          <input
+            type="checkbox"
+            checked={view.autoView}
+            onChange={(e) =>
+              void here.run("autoview", { on: e.target.checked })
+            }
+          />
+          Keep the view up to date with your chat
+          <span
+            className="text-faint"
+            title="Each update reads your whole chat: a paid model call"
+          >
+            (a model call each time)
+          </span>
+        </label>
         {view.pausedWhy && (
           <Banner tone="warning">
             {view.pausedWhy}{" "}
@@ -843,15 +859,19 @@ function Strip({
         <span className="text-muted">Nothing is waiting on you</span>
       )}
       {view.behind > 0 && (
-        <span className="ml-auto flex items-center gap-1.5 text-warning-strong">
-          This {noun} is {view.behind} message{view.behind === 1 ? "" : "s"}{" "}
-          behind your chat
+        // keeping itself current, it only says it will; left to you, it asks
+        <span
+          className={`ml-auto flex items-center gap-1.5 ${view.autoView ? "text-muted" : "text-warning-strong"}`}
+        >
+          {view.autoView
+            ? `Your chat moved on: this ${noun} catches up when it pauses`
+            : `This ${noun} is ${view.behind} message${view.behind === 1 ? "" : "s"} behind your chat`}
           <button
             disabled={busy}
             onClick={() => void here.run("refresh")}
-            className="rounded-full border border-warning-line bg-surface px-2 text-[11.5px] font-medium hover:bg-warning-soft disabled:opacity-50"
+            className="rounded-full border border-warning-line bg-surface px-2 text-[11.5px] font-medium text-warning-strong hover:bg-warning-soft disabled:opacity-50"
           >
-            Update {noun}
+            {view.autoView ? "Now" : `Update ${noun}`}
           </button>
         </span>
       )}

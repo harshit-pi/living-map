@@ -13,7 +13,13 @@ import {
   type SideChat,
   type Turn,
 } from "./shared.ts";
-import { own, safeId, str, type Raw } from "../server/core/types.ts";
+import {
+  own,
+  safeId,
+  str,
+  type Raw,
+  type StoredMap,
+} from "../server/core/types.ts";
 
 // a turn longer than this is kept as its start: the map needs what it is
 // about, not every line
@@ -74,6 +80,8 @@ export type LayerState = {
   // main chat last took what was waiting
   told?: { text: string; ts: number }[];
   heardAt?: number;
+  // false: views wait for "Update" instead of keeping themselves current
+  autoView?: boolean;
   outbox: Outgoing[];
   sent: number; // outbox lines the main conversation has had
 };
@@ -487,6 +495,47 @@ export const decided = (s: LayerState): Item[] =>
           !optionsOf(s, i.id).some((o) => o.state === "chosen")),
     )
     .sort((a, b) => b.updatedAt - a.updatedAt || b.order - a.order);
+
+// ---- how far a view is behind the chat ------------------------------------------
+
+// when a view last heard from the model: turns after it are what it has not
+// taken in
+export function lastMove(map: StoredMap): number {
+  let at = map.createdAt;
+  for (const c of map.chat) if (c.role === "claude") at = Math.max(at, c.ts);
+  for (const t of Object.values(map.threads))
+    for (const c of t.messages)
+      if (c.role === "claude") at = Math.max(at, c.ts);
+  return at;
+}
+
+// your turns since that view's last move
+export const behind = (s: LayerState, map: StoredMap) => {
+  const since = lastMove(map);
+  return s.turns.filter((t) => t.who === "you" && t.ts > since).length;
+};
+
+// A view keeps itself current (unless you turned that off): once the chat
+// has moved on, the rail has filed it, and the chat has gone quiet for a
+// while, at most every couple of minutes. Redrawing a view resumes the whole
+// conversation, so it waits for a pause rather than following every turn.
+export const VIEW_QUIET_MS = 20_000;
+export const VIEW_EVERY_MS = 2 * 60_000;
+export function viewDue(
+  s: LayerState,
+  map: StoredMap,
+  now: number,
+  lastAuto: number,
+): boolean {
+  return (
+    s.autoView !== false &&
+    s.following &&
+    s.mapped >= s.turns.length &&
+    now - s.activeAt >= VIEW_QUIET_MS &&
+    now - lastAuto >= VIEW_EVERY_MS &&
+    behind(s, map) > 0
+  );
+}
 
 // ---- the layer as the model reads it ---------------------------------------------
 

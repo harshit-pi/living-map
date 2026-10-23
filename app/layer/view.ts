@@ -3,6 +3,7 @@
 // actions: the plugins' own modules import this, and the actions import them.
 
 import {
+  behind,
   claudeTodo,
   decided,
   needsYou,
@@ -17,21 +18,9 @@ import { LAYER_ID, REFRESH, type LayerView } from "./shared.ts";
 import { layerForSession, pageOf, saveLayer } from "./store.ts";
 import type { StoredMap } from "../server/core/types.ts";
 
-// when this map's view last heard from the model: turns after it are what
-// the view has not taken in
-function lastMove(map: StoredMap): number {
-  let at = map.createdAt;
-  for (const c of map.chat) if (c.role === "claude") at = Math.max(at, c.ts);
-  for (const t of Object.values(map.threads))
-    for (const c of t.messages)
-      if (c.role === "claude") at = Math.max(at, c.ts);
-  return at;
-}
-
 function viewOf(map: StoredMap): LayerView | undefined {
   const s = layerFor(map);
   if (!s) return undefined;
-  const since = lastMove(map);
   const now = Date.now();
   return {
     items: s.items,
@@ -50,7 +39,8 @@ function viewOf(map: StoredMap): LayerView | undefined {
     summary: s.summary,
     now: s.now,
     suggested: s.suggested,
-    behind: s.turns.filter((t) => t.who === "you" && t.ts > since).length,
+    behind: behind(s, map),
+    autoView: s.autoView !== false,
     unsent: s.outbox.length - s.sent,
     listening: listening.has(s.id),
     told: (s.told ?? []).slice(-5).map((t) => ({
