@@ -14,6 +14,7 @@ import type {
   Thread,
   Usage,
 } from "../../shared/model.ts";
+import type { Conversation } from "../providers/types.ts";
 
 // Anything the model wrote: untrusted JSON, checked field by field before use.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,6 +67,8 @@ export type StoredMap = {
   usage: Usage;
   // each plugin's state, by plugin id; the plugin decides what reaches the browser
   data?: Record<string, unknown>;
+  // your own conversation this map is linked to: every move reads it first
+  conversation?: Conversation;
 };
 
 // The part of a map that Claude's ops change.

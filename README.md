@@ -30,6 +30,24 @@ npm start
 
 Then open http://localhost:4317.
 
+### Beside your Claude conversations
+
+Install the `living-map` skill into your own Claude Code once:
+
+```bash
+cd living-map/app
+npm run skill
+```
+
+Then, in any Claude Code conversation (the desktop app, the terminal, an IDE), say **/living-map** or "map this". Claude starts the server if it is not running, and opens a map of **that conversation**: the question you have been working on, what you want, and the options you named are already on the board. `/living-map learn <topic>` and `/living-map design <system>` open the other modes.
+
+- Every move on the map resumes your conversation, forked and never saved, so the map knows everything said there and anything you say later. Your conversation itself is left exactly as it was.
+- The map is one live page on http://localhost:4317: keep it in the desktop app's browser pane beside the chat, or in Chrome, and move between them freely.
+- Ask the chat "what does my map say?" and it reads the map back; say "we picked B, update the map" and the map moves.
+- Saying /living-map again in the same conversation reopens its map.
+
+A move on a linked map costs what your next message in that conversation would: the conversation is read from the prompt cache your chat keeps warm, so a move is about $0.01–0.03. The first move after an hour away writes the cache again, as your chat would.
+
 ### Updates
 
 Every push to `main` that passes CI publishes a release (`v0.1.<n>`).
@@ -46,7 +64,7 @@ browser ──actions──► server ──► engine (one move at a time) ─�
    └──────── live events ◄────────────┘   the canvas updates as the reply streams in
 ```
 
-- Each move sends the model the canvas and the one thread it belongs to, so the input stays flat as a conversation grows.
+- Each move sends the model the canvas and the one thread it belongs to, so the input stays flat as a conversation grows. A map opened from one of your conversations also resumes that conversation first (`claude -p --resume <id> --fork-session`).
 - The model answers with a short caption plus a block of small JSON changes. The server cleans every change before it reaches the canvas, and never sends the browser an answer you have yet to work out.
 - The model sits behind one interface (`app/server/providers/types.ts`). Claude Code is the default; another model is one new file.
 

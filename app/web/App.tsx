@@ -107,6 +107,13 @@ export default function App() {
     sentHeld.current = heldFor;
     void run(heldFor.action);
   }, [heldFor, run]);
+  // a map opened from elsewhere (your conversation linked one, or another
+  // tab) replaces the start screen you had open
+  const [shownId, setShownId] = useState(map?.id ?? null);
+  if ((map?.id ?? null) !== shownId) {
+    setShownId(map?.id ?? null);
+    if (shownId !== null && map) setStarting(false);
+  }
   // a node that disappears (removed by Claude) closes its panel
   if (map && selection.some((id) => !map.nodes[id]))
     setSelection((s) => s.filter((id) => map.nodes[id]));
@@ -195,8 +202,10 @@ export default function App() {
     <div className="flex h-full flex-col bg-canvas">
       {/* the title keeps some room while the working pill shows: the pill
           truncates first */}
-      <header className="grid grid-cols-[minmax(min(160px,20%),1fr)_minmax(0,auto)_auto] items-center gap-3 border-b border-line px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
+      {/* in a narrow window (a pane beside your chat) the title takes a row
+          of its own, above the controls */}
+      <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-b border-line px-4 py-2 sm:grid-cols-[minmax(min(160px,20%),1fr)_minmax(0,auto)_auto]">
+        <div className="col-span-2 flex min-w-0 items-center gap-2 sm:col-span-1">
           <Mark size={22} className="shrink-0" />
           <div
             className="truncate text-[15px] font-semibold text-ink"
@@ -204,6 +213,15 @@ export default function App() {
           >
             {map.title}
           </div>
+          {map.linked && (
+            <span
+              title={`Linked to your conversation "${map.linked.title}": every move reads it first`}
+              // beside a chat the window is narrow: the title keeps the room
+              className="hidden shrink-0 rounded-full bg-panel px-2 py-0.5 text-[11px] text-muted md:inline-block"
+            >
+              From your chat
+            </span>
+          )}
         </div>
         <div className="flex min-w-0 justify-end">
           <WorkingPill

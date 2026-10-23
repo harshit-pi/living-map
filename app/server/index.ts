@@ -14,6 +14,7 @@ import { createHub } from "./events.ts";
 import { createApp } from "./http.ts";
 import { pickProvider } from "./providers/index.ts";
 import { loadCurrent, saveMap } from "./store.ts";
+import { installSkill } from "../skill/install.ts";
 
 const provider = pickProvider(PROVIDER, { home: HOME, cwd: MODEL_CWD });
 const hub = createHub();
@@ -23,6 +24,13 @@ const engine = createEngine({
   initial: loadCurrent(),
   save: saveMap,
 });
+
+// the living-map skill, if you installed it, follows this copy of the app
+try {
+  installSkill(PORT);
+} catch (e) {
+  console.error("[skill] could not refresh the living-map skill:", e);
+}
 
 createApp(engine, hub).listen(PORT, "127.0.0.1", () =>
   console.log(

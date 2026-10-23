@@ -2,8 +2,10 @@
 
 import type { ActionResult, Purpose, Settings } from "../../shared/model.ts";
 import { splitStart } from "../core/start.ts";
+import type { StoredMap } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
 import { pluginFor } from "../plugins.ts";
+import type { Conversation } from "../providers/types.ts";
 import { newMap, readMap } from "../store.ts";
 import { makeCtx, type Ctx } from "./context.ts";
 
@@ -14,16 +16,33 @@ export async function start(
   text: string,
   purpose: Purpose,
 ): Promise<ActionResult> {
+  const { first } = await begin(engine, settings, text, purpose);
+  return first();
+}
+
+// The new map, open in every tab, and its first move, not yet asked (a map
+// linked to your conversation is answered at once and drawn as it comes).
+export async function begin(
+  engine: Engine,
+  settings: Settings,
+  text: string,
+  purpose: Purpose,
+  conversation?: Conversation,
+): Promise<{ map: StoredMap; first: () => Promise<ActionResult> }> {
   await engine.stop();
   // an unknown mode starts as Explore
   const plugin = pluginFor(purpose) ?? pluginFor("explore")!;
   const { title, source } = splitStart(text);
   const m = newMap(title, plugin.id);
   if (source) m.source = source;
+  if (conversation) m.conversation = conversation;
   m.chat.push({ role: "you", text: source || title, ts: Date.now() });
   engine.state.map = m;
   engine.push();
-  return plugin.start(makeCtx(engine, settings, m));
+  return {
+    map: m,
+    first: async () => plugin.start(makeCtx(engine, settings, m)),
+  };
 }
 
 // Reopen an earlier map; a move still running on the current one is stopped first.

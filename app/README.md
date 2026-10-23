@@ -20,6 +20,8 @@ npm start          # builds, then serves http://localhost:4317 (restarts itself 
 
 Maps are saved in `~/.living-map/maps/`; reopen any of them from **Maps ▾**.
 
+`npm run skill` installs the `living-map` skill into `~/.claude/skills/`: in any Claude Code conversation, `/living-map` starts the server (`skill/start.ts`, detached, so it outlives the conversation) and opens a map of that conversation. Each move on such a map resumes the conversation, forked and unsaved. The skill talks to the server over `POST /api/link` (open or start a conversation's map, or run a message on it) and `GET /api/outline` (the map as text).
+
 ## The model
 
 The canvas talks to the model through one interface, `server/providers/types.ts`. Claude Code (`claude -p`) is the default; another model is one new file implementing `ModelProvider`, chosen with `LIVING_MAP_PROVIDER`.
@@ -32,6 +34,7 @@ The canvas talks to the model through one interface, `server/providers/types.ts`
 | `server/core/`                        | pure logic: prompts, reply parsing, map, diagram, scenes  |
 | `server/providers/`                   | the model behind the canvas                               |
 | `server/engine.ts`, `server/actions/` | the move queue, and one function per action               |
+| `skill/`                              | the `living-map` skill, its installer and starter         |
 | `web/`                                | React app: `screens/`, `components/`, `hooks/`, `lib/`    |
 | `eval/forms.ts`                       | does Learn pick a fitting, concrete diagram, and how fast |
 | `REQUIREMENTS.md`, `research/`        | what v1 must do, and the evidence behind the design       |

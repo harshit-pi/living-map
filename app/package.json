@@ -31,6 +31,7 @@
     "lint": "eslint . --fix",
     "format": "prettier --write .",
     "check": "eslint . --max-warnings=0 && tsc --noEmit && prettier --check . && vitest run",
+    "skill": "node skill/install.ts",
     "eval": "node eval/forms.ts",
     "eval:moves": "node eval/moves.ts",
     "prepare": "cd .. && husky app/.husky"

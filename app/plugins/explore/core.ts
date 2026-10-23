@@ -1457,8 +1457,11 @@ function threadAllows(
 // One of the model's board ops, cleaned field by field: how many things it
 // changed, 0 when refused, or null when it is not a board op (core's then).
 // A cell op is written with short keys: a Fill writes a couple of dozen,
-// and the long keys were a third of its words. The long keys still read.
+// and the long keys were a third of its words. The long keys still read, and
+// so does "value" for the mark, which a model reading a long conversation
+// first writes now and then.
 const CELL_KEYS = {
+  value: "mark",
   o: "option",
   w: "want",
   m: "mark",

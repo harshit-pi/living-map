@@ -76,6 +76,18 @@ export function saveMap(m: StoredMap, { current = true } = {}) {
   if (current) fs.writeFileSync(CURRENT_FILE, m.id);
 }
 
+// Every map linked to this conversation of yours, newest first.
+export function linkedMaps(conversationId: string): StoredMap[] {
+  const found: { m: StoredMap; at: number }[] = [];
+  for (const f of fs.readdirSync(MAPS_DIR)) {
+    if (!f.endsWith(".json")) continue;
+    const m = readMap(f.slice(0, -5));
+    if (m?.conversation?.id !== conversationId) continue;
+    found.push({ m, at: fs.statSync(path.join(MAPS_DIR, f)).mtimeMs });
+  }
+  return found.sort((a, b) => b.at - a.at).map((x) => x.m);
+}
+
 // Every saved map, newest first, for the Maps list and the start screen.
 export function listMaps(currentId: string | null): MapSummary[] {
   const out: MapSummary[] = [];
@@ -99,6 +111,7 @@ export function listMaps(currentId: string | null): MapSummary[] {
       open: steps.filter((n) => n.status === "open").length,
       done: steps.filter((n) => n.status === "answered").length,
       current: m.id === currentId,
+      ...(m.conversation ? { linked: true } : {}),
       ...(summary ? { summary } : {}),
       ...(due ? { due } : {}),
     });

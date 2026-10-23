@@ -6,11 +6,18 @@
 // message as a stream-json line, so it waits for one instead of giving up as
 // a plain `-p` does when no stdin comes within 3s. A move whose system prompt,
 // model and effort match the spare takes it; any other move starts its own.
+//
+// A map linked to one of your conversations resumes it on every move, forked
+// and never saved (`--fork-session --no-session-persistence`): the model
+// reads all of it first, and your conversation is left exactly as it was.
+// It costs what your next message there would: the conversation is read from
+// the prompt cache your own chat keeps warm, and only the move is new.
 
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { conversationStamp, findConversation } from "./claude-sessions.ts";
 import type {
   ModelCall,
   ModelProvider,
@@ -33,22 +40,83 @@ export const SPARE_IDLE_MS = 5 * 60_000;
 export type Spawn = (
   command: string,
   args: string[],
-  opts: { cwd: string },
+  opts: { cwd: string; env?: NodeJS.ProcessEnv },
 ) => ChildProcess;
+
+type Tokens = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number;
+    ephemeral_1h_input_tokens?: number;
+  };
+};
 
 type CliResult = {
   is_error?: boolean;
   subtype?: string;
   result?: string;
   total_cost_usd?: number;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
+  usage?: Tokens & { iterations?: Tokens[] };
   modelUsage?: Record<string, { outputTokens?: number }>;
 };
+
+// What a Claude Code session started by your chat inherits that ties it to
+// that chat: started with them, every move ran as part of the chat's session.
+const SESSION_VARS = [
+  "CLAUDECODE",
+  "CLAUDE_PID",
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_REMOTE_SESSION_ID",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_SESSION_ATTENDED",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_WORKER_EPOCH",
+  "CLAUDE_AFTER_LAST_COMPACT",
+  "CLAUDE_EFFORT",
+];
+export function childEnv(env: NodeJS.ProcessEnv = process.env) {
+  const out = { ...env };
+  for (const k of SESSION_VARS) delete out[k];
+  return out;
+}
+
+// $ per million tokens (input, output) and a cache read's share of input. A
+// resumed conversation's CLI total also counts everything it cost before, so
+// a move on a linked map is priced from its own tokens.
+const PRICES: [RegExp, number, number, number][] = [
+  [/(fable|mythos)-5-1/, 10, 50, 0.025],
+  [/(fable|mythos)-5/, 10, 50, 0.1],
+  [/opus-5-5/, 4, 20, 0.05],
+  [/opus-(5|4)/, 5, 25, 0.1],
+  [/sonnet-5/, 2, 10, 0.1],
+  [/sonnet-4/, 3, 15, 0.1],
+  [/haiku-5/, 0.1, 0.5, 0.1],
+  [/haiku-4/, 1, 5, 0.1],
+];
+export function priceOf(model: string, usage: CliResult["usage"]): number {
+  const price = PRICES.find(([re]) => re.test(model));
+  if (!price || !usage) return 0;
+  const [, input, output, read] = price;
+  const parts = usage.iterations?.length ? usage.iterations : [usage];
+  let usd = 0;
+  for (const u of parts) {
+    const written = u.cache_creation_input_tokens ?? 0;
+    const hour = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+    usd +=
+      ((u.input_tokens ?? 0) * input +
+        // a write costs 2x input for the hour-long cache, 1.25x for 5 minutes
+        hour * input * 2 +
+        (written - hour) * input * 1.25 +
+        (u.cache_read_input_tokens ?? 0) * input * read +
+        (u.output_tokens ?? 0) * output) /
+      1e6;
+  }
+  return usd;
+}
 
 // Every spare of every provider, ended when the server exits. A server killed
 // by a signal skips this; its spare then reads the end of its stdin and exits
@@ -88,9 +156,15 @@ export function claudeCode({
   const effortOf = (req: WarmRequest) => req.effort || DEFAULT_EFFORT;
   // everything fixed when the process starts
   const keyOf = (req: WarmRequest) =>
-    JSON.stringify([req.system, req.model ?? "", effortOf(req)]);
+    JSON.stringify([
+      req.system,
+      req.model ?? "",
+      effortOf(req),
+      req.conversation?.id ?? "",
+    ]);
 
   function launch(req: WarmRequest): ChildProcess {
+    const linked = req.conversation;
     const args = [
       "-p",
       "--input-format",
@@ -115,7 +189,10 @@ export function claudeCode({
       effortOf(req),
     ];
     if (req.model) args.push("--model", req.model);
-    const proc = spawn("claude", args, { cwd });
+    if (linked) args.push("--resume", linked.id, "--fork-session");
+    // a conversation is found again from the folder it started in
+    const where = linked && fs.existsSync(linked.cwd) ? linked.cwd : cwd;
+    const proc = spawn("claude", args, { cwd: where, env: childEnv() });
     // a missing `claude` is reported by the move as no result, never thrown
     proc.on("error", () => {});
     proc.stderr?.on("data", () => {});
@@ -125,6 +202,7 @@ export function claudeCode({
   // at most one, ever
   let spare: {
     key: string;
+    stamp: string; // the linked conversation as the spare read it
     proc: ChildProcess;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
@@ -137,9 +215,15 @@ export function claudeCode({
     proc.kill("SIGTERM");
   }
 
-  // the spare for this key, if there is a live one, taken out of reserve
-  function take(key: string): ChildProcess | null {
-    if (!spare || spare.key !== key || !alive(spare.proc)) {
+  // the spare for this request, if there is a live one, taken out of reserve:
+  // one that read its conversation before you said more there is not
+  function take(req: WarmRequest): ChildProcess | null {
+    if (
+      !spare ||
+      spare.key !== keyOf(req) ||
+      spare.stamp !== conversationStamp(req.conversation?.file) ||
+      !alive(spare.proc)
+    ) {
       release();
       return null;
     }
@@ -152,7 +236,13 @@ export function claudeCode({
 
   function warm(req: WarmRequest) {
     const key = keyOf(req);
-    if (spare && spare.key === key && alive(spare.proc)) {
+    const stamp = conversationStamp(req.conversation?.file);
+    if (
+      spare &&
+      spare.key === key &&
+      spare.stamp === stamp &&
+      alive(spare.proc)
+    ) {
       clearTimeout(spare.timer);
       spare.timer = setTimeout(release, idleMs);
       spare.timer.unref?.();
@@ -162,7 +252,7 @@ export function claudeCode({
     const proc = launch(req);
     const timer = setTimeout(release, idleMs);
     timer.unref?.();
-    spare = { key, proc, timer };
+    spare = { key, stamp, proc, timer };
     track(proc);
     proc.once("close", () => {
       if (spare?.proc === proc) {
@@ -191,32 +281,39 @@ export function claudeCode({
     ],
     warm,
     release,
+    findConversation: (hint) => findConversation(hint),
     run(req: ModelRequest, onText: (soFar: string) => void): ModelCall {
       const effort = effortOf(req);
       const started = Date.now();
-      const spareProc = take(keyOf(req));
+      const spareProc = take(req);
       let proc = spareProc ?? launch(req);
       let cancelled = false;
       let resolveUsage: (u: ModelUsage | null) => void = () => {};
       const usage = new Promise<ModelUsage | null>((r) => {
         resolveUsage = r;
       });
+      // the model the move ran on, as its stream said: a resumed
+      // conversation's modelUsage also lists the models your chat used
+      let ranOn = "";
       const toUsage = (r: CliResult | null): ModelUsage | null => {
         if (!r) return null;
         const u = r.usage ?? {};
         const model =
-          Object.entries(r.modelUsage ?? {}).sort(
+          ranOn ||
+          (Object.entries(r.modelUsage ?? {}).sort(
             (a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0),
           )[0]?.[0] ??
-          req.model ??
-          "";
+            req.model ??
+            "");
         return {
           input:
             (u.input_tokens ?? 0) +
             (u.cache_creation_input_tokens ?? 0) +
             (u.cache_read_input_tokens ?? 0),
           output: u.output_tokens ?? 0,
-          costUsd: r.total_cost_usd ?? 0,
+          costUsd: req.conversation
+            ? priceOf(model, r.usage)
+            : (r.total_cost_usd ?? 0),
           model,
           effort,
         };
@@ -267,6 +364,8 @@ export function claudeCode({
                 heard = true;
                 const e = d.event;
                 if (e?.type === "message_start") {
+                  if (typeof e.message?.model === "string")
+                    ranOn = e.message.model;
                   lastText = "";
                   stopReason = null;
                 }

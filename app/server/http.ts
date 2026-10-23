@@ -6,10 +6,11 @@ import path from "node:path";
 
 import type { ActionRequest, ProviderInfo } from "../shared/model.ts";
 import { act } from "./actions/index.ts";
+import { link, mapText } from "./actions/link.ts";
 import { STATIC_DIR } from "./config.ts";
 import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
-import { listMaps } from "./store.ts";
+import { listMaps, readMap } from "./store.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
 
 export function createApp(engine: Engine, hub: Hub) {
@@ -52,6 +53,43 @@ export function createApp(engine: Engine, hub: Hub) {
         .status(500)
         .json({ error: "Something went wrong on the server. Try again." });
     }
+  });
+
+  // for the living-map skill: is the server up, and is it this app
+  app.get("/api/health", (_req, res) => {
+    res.json({
+      app: "living-map",
+      ok: true,
+      map: engine.state.map?.id ?? null,
+      provider: engine.provider.name,
+    });
+  });
+
+  // open (or start) the map of one of your conversations, from that
+  // conversation (the living-map skill)
+  app.post("/api/link", async (req, res) => {
+    try {
+      const r = await link(engine, (req.body ?? {}) as Record<string, unknown>);
+      res.status(r.error ? 400 : 200).json(r);
+    } catch (e) {
+      console.error("[link] failed:", e);
+      res
+        .status(500)
+        .json({ error: "Something went wrong on the server. Try again." });
+    }
+  });
+
+  // a map as plain text, for a conversation to read back (the open one if
+  // no id is given)
+  app.get("/api/outline", (req, res) => {
+    const id = typeof req.query.id === "string" ? req.query.id : "";
+    const current = engine.state.map;
+    const m = !id || id === current?.id ? current : readMap(id);
+    if (!m) {
+      res.status(404).type("text/plain").send("No such map.");
+      return;
+    }
+    res.type("text/plain").send(mapText(engine, m));
   });
 
   app.get("/api/maps", (_req, res) => {
