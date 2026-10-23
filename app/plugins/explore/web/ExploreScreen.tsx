@@ -238,7 +238,10 @@ export function ExploreScreen({ ws }: { ws: Workspace }) {
           placeholder={
             selection.length
               ? "Say something about the selected nodes…"
-              : "Ask Claude about this…"
+              : // beside your chat, say where this goes: the board, not it
+                map.linked
+                ? "Ask about this board (your chat is not interrupted)…"
+                : "Ask Claude about this…"
           }
         />
       )}

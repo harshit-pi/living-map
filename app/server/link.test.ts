@@ -32,7 +32,8 @@ function conversation(id: string, lines: unknown[], at = Date.now()) {
   const dir = path.join(claude, "projects", projectFolder(cwd));
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, `${id}.jsonl`);
-  fs.writeFileSync(f, lines.map((l) => JSON.stringify(l)).join("\n"));
+  // Claude Code ends every line, the last one too
+  fs.writeFileSync(f, lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
   fs.utimesSync(f, at / 1000, at / 1000);
   return f;
 }
@@ -139,17 +140,24 @@ test("linking starts a map whose every move reads the conversation; asked again,
   assert.match(text, /\[pg\] option/);
 });
 
-test("a conversation with no map needs a question; one that cannot be found says so", async () => {
+test("a conversation with no map is read first, then drawn in the view it needs; one that cannot be found says so", async () => {
   const { engine, calls } = setup();
-  assert.match(
-    (await link(engine, { session: "older" })).error ?? "",
-    /pass `question`/,
-  );
   assert.match(
     (await link(engine, { session: "nope", question: "Q" })).error ?? "",
     /Could not find/,
   );
   assert.equal(calls.length, 0);
+  const r = await link(engine, { session: "older" });
+  assert.equal(r.created, true);
+  await settle();
+  // the layer's catch-up: only the new turns, not the resumed conversation
+  assert.match(calls[0].system, /LIVE RAIL OF A CONVERSATION/);
+  assert.equal(calls[0].conversation, undefined);
+  assert.match(calls[0].message, /\[turn 1\] USER: Something from last week/);
+  // then the view (Explore, with no other suggested) draws, reading it all
+  assert.equal(engine.state.map?.purpose, "explore");
+  assert.equal(calls[1].conversation?.id, "older");
+  assert.ok(Object.keys(engine.state.map!.nodes).length > 0);
 });
 
 test("a linked map left empty is drawn again when it is linked again", async () => {
@@ -202,4 +210,68 @@ test("a first move that draws nothing is asked once more, without anyone waiting
   await settle();
   assert.equal(calls.length, 2);
   assert.ok(Object.keys(engine.state.map!.nodes).length);
+});
+
+test("what you write on a view, and its answer, reach the main chat; switching views does not", async () => {
+  const { engine } = setup();
+  await link(engine, { session: "older", question: "Which DB?" });
+  await settle();
+  const { act } = await import("./actions/index.ts");
+  const { unsentFor } = await import("../layer/view.ts");
+  unsentFor("older"); // what came before is not this test's
+  await act(engine, { type: "thread", nodeId: "pg", text: "Yes, go with it" });
+  await act(engine, { type: "purpose", purpose: "learn" });
+  const heard = unsentFor("older");
+  assert.match(heard, /in the thread on "Postgres" on the Explore view/);
+  assert.match(heard, /"Yes, go with it"/);
+  assert.match(heard, /The map answered: Laid out\./);
+  assert.doesNotMatch(heard, /Switched the canvas/);
+  assert.equal(unsentFor("older"), "");
+});
+
+test("a listener in the main chat is woken by what you tell it on the map, not by a tick", async () => {
+  const { engine } = setup();
+  await link(engine, { session: "older", question: "Which DB?" });
+  await settle();
+  const { act } = await import("./actions/index.ts");
+  const { unsentFor, wakesFor } = await import("../layer/view.ts");
+  const { layerOf } = await import("../layer/store.ts");
+  unsentFor("older");
+  const s = layerOf(engine.state.map!.conversation!);
+  s.items.k = {
+    id: "k",
+    parent: null,
+    type: "task",
+    state: "pending",
+    owner: "you",
+    title: "Run it",
+    summary: "",
+    updatedAt: 0,
+    order: 0,
+  };
+  await act(engine, {
+    type: "plugin",
+    plugin: "follow",
+    name: "mark",
+    args: { id: "k", state: "done" },
+  });
+  // a tick waits for your next message
+  assert.equal(wakesFor("older"), false);
+  await act(engine, {
+    type: "plugin",
+    plugin: "follow",
+    name: "tell",
+    args: { text: "Go ahead and push" },
+  });
+  assert.equal(wakesFor("older"), true);
+  const heard = unsentFor("older");
+  assert.match(heard, /"Run it": the user marked it done/);
+  assert.match(heard, /wrote to you from the map: "Go ahead and push"/);
+  const view = engine.publicMap(engine.state.map)!.data!.follow as {
+    told: { text: string; heard: boolean }[];
+  };
+  assert.deepEqual(
+    view.told.map((t) => [t.text, t.heard]),
+    [["Go ahead and push", true]],
+  );
 });

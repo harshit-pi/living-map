@@ -36,7 +36,8 @@ import {
 import { sceneOutline, sceneView } from "./core/scene.ts";
 import type { Raw, StoredMap } from "./core/types.ts";
 import type { Hub } from "./events.ts";
-import { modeOf, pluginFor } from "./plugins.ts";
+import type { ServerPlugin } from "./plugin.ts";
+import { LAYERS, modeOf, pluginFor } from "./plugins.ts";
 import type {
   ModelCall,
   ModelProvider,
@@ -59,6 +60,17 @@ export type TurnOptions = {
   // (Learn writing a later step's model while you build: its caption could
   // say what the hidden model holds)
   quiet?: boolean;
+  // the move works another canvas than the map's own mode: the conversation
+  // layer every linked map shares. Its ops go only to that plugin's
+  // applyOp (never to the map's nodes), and core's node ops are not offered.
+  as?: ServerPlugin;
+  // where the move's thread lives when it is not one of the map's threads
+  // (a side chat kept by the layer), and what it may change there
+  lines?: ChatLine[];
+  scope?: string | null;
+  // not resumed from the conversation the map is linked to: the move's
+  // message carries what it needs of it (Chat's catch-up sends the new turns)
+  unlinked?: boolean;
   // what the working bar says once the move's ops show what it is doing
   // (null: keep the label): the first move's label is a guess from the
   // question's words until the model frames it
@@ -144,8 +156,15 @@ export function createEngine({
   // a plugin's view, when it has one for this map (a Learn map from before
   // build mode has none, and goes out exactly as it did)
   const dataOf = (m: StoredMap) => {
+    const data: Record<string, unknown> = {};
     const v = pluginFor(m.purpose)?.view?.(m);
-    return v === undefined ? {} : { data: { [m.purpose]: v } };
+    if (v !== undefined) data[m.purpose] = v;
+    // what a layer shares with every view of the map (the conversation's rail)
+    for (const layer of LAYERS) {
+      const lv = layer.view(m);
+      if (lv !== undefined) data[layer.id] = lv;
+    }
+    return Object.keys(data).length ? { data } : {};
   };
 
   const snapshot = (): ServerEvent => ({
@@ -196,14 +215,14 @@ export function createEngine({
     instructions: string,
   ) {
     const sceneId = scope ?? opts.nodeId;
-    const plugin = modeOf(m.purpose);
+    const plugin = opts.as ?? modeOf(m.purpose);
     return [
-      `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${outline(m.nodes)}`,
+      `CANVAS (${plugin.canvasName ?? `${plugin.label.toLowerCase()} canvas`}):\n${plugin.canvas?.(m) ?? outline(m.nodes)}`,
       plugin.outline?.(m, {
         sections: opts.sections ?? [],
         nodeId: scope ?? opts.nodeId ?? null,
       }) ?? "",
-      scope
+      scope && !opts.as
         ? `THIS THREAD IS PINNED TO [${scope}]. Path from the root: ${pathTo(
             m.nodes,
             scope,
@@ -267,10 +286,10 @@ export function createEngine({
     const m = state.map;
     if (!m) return { error: "Start first." };
     const threadId = opts.threadId ?? null;
-    const thread = threadId ? m.threads[threadId] : null;
-    const scope = thread?.nodeId ?? null;
+    const thread = threadId && !opts.lines ? m.threads[threadId] : null;
+    const scope = opts.lines ? (opts.scope ?? null) : (thread?.nodeId ?? null);
     // ops core does not know go to the map's plugin
-    const plugin = modeOf(m.purpose);
+    const plugin = opts.as ?? modeOf(m.purpose);
     // a side thread may change only what its node allows: an op the plugin
     // refused there is said under the reply, which may still name it as made
     let refused = 0;
@@ -282,8 +301,23 @@ export function createEngine({
         }
       : undefined;
     const opClean = plugin.cleanOp
-      ? (op: Raw) => plugin.cleanOp!(m, op)
+      ? (op: Raw) => plugin.cleanOp!(m, op, { scope })
       : undefined;
+    // a move on another canvas (opts.as) hands every op to that plugin alone
+    const apply = (ops: Raw[]) => {
+      if (opts.as) {
+        for (const op of ops) opExtra?.(op);
+        return;
+      }
+      applyOps(m, ops, {
+        scope,
+        judge: opts.judge,
+        extra: opExtra,
+        clean: opClean,
+        keep: opts.keep,
+        keepYours: plugin.keepUserNodes,
+      });
+    };
     state.busy = true;
     stopped = false;
     lastSettings = settings;
@@ -304,7 +338,7 @@ export function createEngine({
       waiting: state.waiting,
     });
 
-    const messages = threadOf(m, threadId);
+    const messages = opts.lines ?? threadOf(m, threadId);
     const notes = m.notes.splice(0);
     let shown = "";
     let applied = 0;
@@ -336,7 +370,9 @@ export function createEngine({
       for (const n of Object.values(m.nodes)) delete n.fresh;
       call = provider.run(
         {
-          ...linkOf(m, prompt.system),
+          ...(opts.unlinked
+            ? { system: prompt.system }
+            : linkOf(m, prompt.system)),
           message: text,
           ...settings,
         },
@@ -353,14 +389,7 @@ export function createEngine({
           const ops = completeOps(soFar);
           if (ops.length > applied) {
             try {
-              applyOps(m, ops.slice(applied), {
-                scope,
-                judge: opts.judge,
-                extra: opExtra,
-                clean: opClean,
-                keep: opts.keep,
-                keepYours: plugin.keepUserNodes,
-              });
+              apply(ops.slice(applied));
             } catch (e) {
               console.error("[move] an op could not be applied:", e);
             }
@@ -400,15 +429,7 @@ export function createEngine({
         return {};
       }
       const ops = completeOps(reply.final);
-      if (ops.length > applied)
-        applyOps(m, ops.slice(applied), {
-          scope,
-          judge: opts.judge,
-          extra: opExtra,
-          clean: opClean,
-          keep: opts.keep,
-          keepYours: plugin.keepUserNodes,
-        });
+      if (ops.length > applied) apply(ops.slice(applied));
       // say so when some of the model's changes could not be read, rather than
       // dropping them silently
       const broken = unreadableOps(reply.final);
@@ -425,15 +446,26 @@ export function createEngine({
           text: "Claude replied without changing the canvas.",
           ts: Date.now(),
         });
+      const answer = visiblePart(reply.final).trim();
       if (!opts.quiet)
         messages.push({
           role: "claude",
-          text: visiblePart(reply.final).trim() || "(updated the canvas)",
+          text: answer || "(updated the canvas)",
           ts: Date.now(),
           view,
           ...(opts.blankId ? { blankId: opts.blankId } : {}),
           ...(opts.nodeId && !threadId ? { nodeId: opts.nodeId } : {}),
         });
+      // what you wrote on a view and what it answered: a layer passes it on
+      // (the conversation's main chat hears it); a move on the layer itself
+      // says its own
+      if (opts.text && !opts.quiet && !opts.as)
+        for (const layer of LAYERS)
+          layer.heard?.(m, {
+            said: opts.text,
+            answer,
+            on: scope ? (m.nodes[scope]?.title ?? null) : null,
+          });
       // it says how to have them made: told only that they were not, you
       // were left with a reply naming changes the map did not show
       if (refused)
@@ -448,7 +480,7 @@ export function createEngine({
       void reply.usage.then((u) =>
         recordUsage(m, u, reply.firstMs, reply.endMs),
       );
-      return {};
+      return { ok: true };
     } finally {
       call = null;
       state.busy = false;
@@ -462,7 +494,9 @@ export function createEngine({
       push();
       // a move already waiting starts at once: a process started now would
       // be no further on than its own
-      if (!stopped && !state.waiting.length) warm(settings);
+      // a move that did not resume the conversation (Chat's catch-up) is not
+      // what comes next: a spare started on its settings would go unused
+      if (!stopped && !state.waiting.length && !opts.unlinked) warm(settings);
     }
   }
 

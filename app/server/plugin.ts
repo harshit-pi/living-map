@@ -17,8 +17,10 @@ export type ServerPlugin = {
   canvasName?: string;
   // other modes a map of this one may switch to and back, keeping the map
   switchesWith?: string[];
-  // the model's job on this canvas, sent on every move (with core's map ops)
+  // the model's job on this canvas, sent on every move (with core's map ops,
+  // unless it brings all its own: the conversation layer)
   prompt: string;
+  ownOps?: boolean;
   // extra instructions by name, sent only on moves that list them in `sections`
   sections?: Record<string, string>;
   // the job and sections for one map, when they depend on it (Learn's older
@@ -27,6 +29,9 @@ export type ServerPlugin = {
     prompt: string;
     sections?: Record<string, string>;
   };
+  // the canvas as the model reads it, in place of core's node outline (Chat
+  // says what each node stands for)
+  canvas?: (map: StoredMap) => string;
   // what the model is told about the plugin's state on every move; the
   // move's sections say what it is for (Learn shows a hidden model only to
   // the moves that work on it), and `nodeId` the node it is about (its
@@ -47,7 +52,11 @@ export type ServerPlugin = {
   // the plugin may clean its text in place (Learn leaves out what would say
   // the links of a step you are building), or return false to drop it (a
   // note Learn's screen never shows)
-  cleanOp?: (map: StoredMap, op: Raw) => void | false;
+  cleanOp?: (
+    map: StoredMap,
+    op: Raw,
+    opts?: { scope: string | null },
+  ) => void | false;
   // the model may not change or remove a node you made, chose or settled
   // (by: "you"), whatever its reply says
   keepUserNodes?: boolean;

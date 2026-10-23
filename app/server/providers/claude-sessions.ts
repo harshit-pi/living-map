@@ -39,6 +39,47 @@ export function conversationFile(
   return null;
 }
 
+// A conversation you resumed goes on in a new file under a new id, which
+// starts with a copy of the old one (its lines keep the old session id). The
+// newest such file beside it, if any.
+export function successor(file: string, id: string): string | null {
+  if (!isId(id)) return null;
+  const dir = path.dirname(file);
+  let since: number;
+  try {
+    since = fs.statSync(file).mtimeMs;
+  } catch {
+    return null;
+  }
+  const mark = `"sessionId":"${id}"`;
+  const found: { f: string; at: number }[] = [];
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".jsonl") || !isId(name.slice(0, -6))) continue;
+    const f = path.join(dir, name);
+    if (f === file) continue;
+    try {
+      const at = fs.statSync(f).mtimeMs;
+      if (at <= since) continue;
+      // the copy comes first: its start is enough to know it
+      const fd = fs.openSync(f, "r");
+      const head = Buffer.alloc(256 * 1024);
+      const n = fs.readSync(fd, head, 0, head.length, 0);
+      fs.closeSync(fd);
+      if (head.subarray(0, n).toString("utf8").includes(mark))
+        found.push({ f, at });
+    } catch {
+      continue;
+    }
+  }
+  return found.sort((a, b) => b.at - a.at)[0]?.f ?? null;
+}
+
 // changes whenever the conversation does: a process started on an older
 // version of it would answer without what was said since
 export function conversationStamp(file: string | undefined): string {

@@ -1,6 +1,7 @@
 // What every action gets: the engine, the model settings for this request,
 // and a few helpers for the open map.
 
+import { fromView } from "../../layer/view.ts";
 import type { ActionResult, MapNode, Settings } from "../../shared/model.ts";
 import { own, type StoredMap } from "../core/types.ts";
 import type { Engine, TurnOptions } from "../engine.ts";
@@ -38,6 +39,8 @@ export function makeCtx(
     },
     note(text) {
       map.notes.push(text);
+      // the main chat hears what you did on a view of its map
+      if (map.conversation) fromView(map, text);
     },
   };
 }

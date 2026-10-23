@@ -12,6 +12,7 @@ import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
 import { listMaps, readMap } from "./store.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
+import { listen, unsentFor, wakesFor } from "../layer/view.ts";
 
 export function createApp(engine: Engine, hub: Hub) {
   const app = express();
@@ -90,6 +91,58 @@ export function createApp(engine: Engine, hub: Hub) {
       return;
     }
     res.type("text/plain").send(mapText(engine, m));
+  });
+
+  // what your conversation has not heard from its maps (side chats, ticks,
+  // what you did on its views),
+  // asked by the living-map hook each time you write there; marked heard
+  app.post("/api/inbox", (req, res) => {
+    const id =
+      typeof req.body?.session === "string"
+        ? req.body.session.slice(0, 100)
+        : "";
+    if (!id) {
+      res.json({ text: "" });
+      return;
+    }
+    const text = unsentFor(id);
+    // the rail's "for your chat" count drops now it is heard
+    if (text) engine.push();
+    res.json({ text });
+  });
+
+  // The listener in your main chat (skill/wait.ts) waits here: answered as
+  // soon as the map has something it should hear now, else empty after
+  // `timeout` seconds (at most 25 minutes), and it asks again.
+  app.get("/api/inbox/wait", (req, res) => {
+    const id =
+      typeof req.query.session === "string"
+        ? req.query.session.slice(0, 100)
+        : "";
+    const secs = Math.min(1500, Math.max(1, Number(req.query.timeout) || 600));
+    if (!id) {
+      res.json({ text: "" });
+      return;
+    }
+    listen(id, 1);
+    engine.push();
+    let over = false;
+    const end = (text: string) => {
+      if (over) return;
+      over = true;
+      clearInterval(tick);
+      clearTimeout(limit);
+      listen(id, -1);
+      if (!res.writableEnded) res.json({ text });
+      engine.push();
+    };
+    const tick = setInterval(() => {
+      if (!wakesFor(id)) return;
+      end(unsentFor(id));
+    }, 1000);
+    const limit = setTimeout(() => end(""), secs * 1000);
+    // the listener went away (its chat stopped it): no longer waiting
+    res.on("close", () => end(""));
   });
 
   app.get("/api/maps", (_req, res) => {

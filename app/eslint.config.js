@@ -15,7 +15,11 @@ export default defineConfig([
   js.configs.recommended,
   tseslint.configs.recommended,
   {
-    files: ["web/**/*.{ts,tsx}", "plugins/*/web/**/*.{ts,tsx}"],
+    files: [
+      "web/**/*.{ts,tsx}",
+      "plugins/*/web/**/*.{ts,tsx}",
+      "layer/web/**/*.{ts,tsx}",
+    ],
     extends: [
       reactHooks.configs.flat["recommended-latest"],
       reactRefresh.configs.vite,
@@ -27,6 +31,7 @@ export default defineConfig([
       "server/**/*.ts",
       "eval/**/*.ts",
       "plugins/*/*.ts",
+      "layer/*.ts",
       "shared/**/*.ts",
       "*.config.{js,ts}",
     ],

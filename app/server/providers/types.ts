@@ -13,6 +13,8 @@ export type Conversation = {
   cwd: string; // the folder it runs in
   title: string;
   file?: string; // where the provider keeps it, if on disk
+  // the ids it had before it was resumed under a new one, oldest first
+  previous?: string[];
 };
 
 export type ModelRequest = {
