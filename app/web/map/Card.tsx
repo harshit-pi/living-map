@@ -33,21 +33,21 @@ function actionsOf(i: LedgerItem): Act[] {
   switch (i.type) {
     case "ask":
       return i.state === "waiting"
-        ? [set("done", "Done", "You've dealt with it")]
+        ? [set("done", "Done", "You've dealt with it; Claude hears it now")]
         : [];
     case "question":
       return i.state === "open" ? [set("answered", "Answered")] : [];
     case "option":
       return i.state === "offered"
-        ? [set("taken", "Take this", "Mark this option taken on the map")]
+        ? [set("taken", "Take this", "Take this option; Claude hears it now")]
         : [];
     case "task":
       return i.state !== "done" && i.state !== "dropped" && i.owner !== "claude"
-        ? [set("done", "Done")]
+        ? [set("done", "Done", "Mark it done; Claude hears it now")]
         : [];
     case "decision":
       return i.state === "decided"
-        ? [set("reopened", "Reopen", "Mark this open again on the map")]
+        ? [set("reopened", "Reopen", "Open it again; Claude hears it now")]
         : [];
     case "assumption":
       return i.state === "assumed"
@@ -63,15 +63,18 @@ const answerable = (i: LedgerItem) =>
   (i.type === "question" && i.state === "open");
 
 // A clicked item, under the strip: what it is, the words it came from, and
-// what you can do about it. Answers go to the chat at once.
+// what you can do about it. Answers, picks and ticks go to the chat at
+// once; the card says when the chat has them.
 export function Card({
   item,
   byId,
   changes,
   primary,
   beside,
+  half,
   act,
   onPick,
+  onAsk,
   onClose,
 }: {
   item: LedgerItem;
@@ -79,12 +82,17 @@ export function Card({
   changes: ChangeStatement[];
   primary: boolean;
   beside: boolean; // the list is open at the right: the card opens left of it
+  half: boolean; // a side chat covers the lower half: the card keeps above it
   act: (a: LedgerAction) => Promise<ActResult>;
   onPick: (id: string) => void;
+  onAsk: () => void;
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
   const [sent, setSent] = useState<"" | "sending" | "sent">("");
+  // what was told to the chat before this card opened isn't news here
+  const [toldBefore] = useState(item.sent?.at ?? 0);
+  const told = item.sent && item.sent.at > toldBefore ? item.sent : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState(false);
@@ -123,7 +131,7 @@ export function Card({
     <div
       role="dialog"
       aria-label={item.title}
-      className={`absolute top-2 ${beside ? "right-[368px]" : "right-2"} left-2 z-30 max-h-[calc(100%-16px)] overflow-y-auto rounded-xl bg-surface p-3 shadow-xl ring-1 ring-line sm:left-auto sm:w-[400px]`}
+      className={`absolute top-2 ${beside ? "right-[368px]" : "right-2"} left-2 z-30 ${half ? "max-h-[calc(50%-16px)]" : "max-h-[calc(100%-16px)]"} overflow-y-auto rounded-xl bg-surface p-3 shadow-xl ring-1 ring-line sm:left-auto sm:w-[400px]`}
     >
       <div className="flex items-start gap-2">
         <span className="mt-0.5 rounded-full bg-panel px-2 py-0.5 text-[11px] text-muted">
@@ -212,9 +220,17 @@ export function Card({
           />
         </div>
       )}
-      {sent === "sent" && (
-        <div className="mt-3 rounded-lg bg-success-soft px-2.5 py-1.5 text-[12.5px] text-success-strong">
-          Sent to your chat
+      {(told || sent === "sent") && (
+        <div
+          role="status"
+          className={`mt-3 rounded-lg px-2.5 py-1.5 text-[12.5px] ${told?.heard ? "bg-success-soft text-success-strong" : "bg-panel text-body"}`}
+          title={
+            told?.heard
+              ? "Your chat took it from the map's inbox"
+              : "It reaches Claude at its next step, or as soon as it is idle"
+          }
+        >
+          {told?.heard ? "Sent · Claude has it" : "Sent to your chat"}
         </div>
       )}
       {error && (
@@ -275,15 +291,16 @@ export function Card({
           </button>
           <button
             className={button}
-            disabled
-            title="Side chats come next"
-            aria-describedby={`soon-${item.id}`}
+            onClick={onAsk}
+            title="A side chat on this item: it reads the chat and your project, and changes nothing"
           >
             Ask about this
+            {item.proposals ? (
+              <span className="ml-1 rounded-full bg-hint-soft px-1.5 text-[11px] text-hint-strong">
+                {item.proposals}
+              </span>
+            ) : null}
           </button>
-          <span id={`soon-${item.id}`} className="text-[11px] text-faint">
-            Side chats come next
-          </span>
         </div>
       )}
     </div>

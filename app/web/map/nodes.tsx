@@ -83,6 +83,14 @@ export function ItemNode({ data }: NodeProps) {
           </div>
         )}
       </div>
+      {!!i.proposals && (
+        <span
+          title={`A side chat proposed ${i.proposals === 1 ? "a change" : `${i.proposals} changes`} here; open it to apply or leave`}
+          className="absolute -top-1.5 -left-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-hint px-1 text-[10px] font-medium text-on-primary ring-2 ring-canvas"
+        >
+          {i.proposals}
+        </span>
+      )}
       {d.isNew && (
         <span
           title="New since you looked"

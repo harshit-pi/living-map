@@ -12,7 +12,7 @@ import { STATIC_DIR } from "./config.ts";
 import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
 import { listening } from "./flags.ts";
-import { initLedger, ledgerServer } from "./ledger.ts";
+import { heardInLedger, initLedger, ledgerServer } from "./ledger.ts";
 import { listMaps, readMap } from "./store.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
 import { listen, unsentFor, wakesFor } from "../layer/view.ts";
@@ -114,7 +114,10 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
     }
     const text = unsentFor(id);
     // the rail's "for your chat" count drops now it is heard
-    if (text) engine.push();
+    if (text) {
+      engine.push();
+      heardInLedger(id);
+    }
     res.json({ text });
   });
 
@@ -151,6 +154,7 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
     const tick = setInterval(() => {
       if (!wakesFor(id)) return;
       end(unsentFor(id));
+      heardInLedger(id);
     }, 1000);
     const limit = setTimeout(() => end(""), secs * 1000);
     // the listener went away (its chat stopped it): no longer waiting

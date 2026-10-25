@@ -166,7 +166,7 @@ export function message(s: Store, turns: Turn[]): string {
 }
 
 // quotes are compared loosely: models normalise spacing, quotes and markdown
-const loose = (s: string) =>
+export const loose = (s: string) =>
   s
     .normalize("NFKC")
     // a markdown link reads as its text

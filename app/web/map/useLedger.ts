@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { applyLocal } from "./fixture.ts";
+import { applyLocal, localSide } from "./fixture.ts";
 import type {
   LedgerAction,
   LedgerEvent,
   LedgerView,
+  SideChat,
 } from "../../shared/ledger.ts";
 import { api } from "../lib/session.ts";
 
-export type ActResult = { ok: boolean; error?: string };
+export type ActResult = { ok: boolean; error?: string; side?: SideChat };
 
 export type Ledger = {
   view: LedgerView;
+  // side chats seen on this page, by id: streamed on the event stream
+  sides: Record<string, SideChat>;
   online: boolean;
   linked: boolean; // false once the server says no chat is linked any more
   act: (a: LedgerAction) => Promise<ActResult>;
@@ -29,6 +32,16 @@ const isView = (v: unknown): v is LedgerView =>
 // is asked; actions apply in the page.
 export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
   const [view, setView] = useState(initial);
+  const [sides, setSides] = useState<Record<string, SideChat>>({});
+  // a side chat's newer copy wins: the stream can run ahead of an answer
+  const keepSide = useCallback((side: SideChat) => {
+    setSides((all) => {
+      const had = all[side.id];
+      if (had && had.messages.length > side.messages.length) return all;
+      return { ...all, [side.id]: side };
+    });
+  }, []);
+  const localSides = useRef<Record<string, SideChat>>({});
   const [online, setOnline] = useState(true);
   const [linked, setLinked] = useState(true);
   const conv = useRef(initial.conv);
@@ -76,14 +89,17 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
       es.onmessage = (m) => {
         heard = Date.now();
         setOnline(true);
-        let ev: Partial<LedgerEvent>;
+        let ev: Partial<Extract<LedgerEvent, { type: "side" }>> &
+          Partial<Extract<LedgerEvent, { type: "ledger" }>>;
         try {
-          ev = JSON.parse(m.data as string) as Partial<LedgerEvent>;
+          ev = JSON.parse(m.data as string) as typeof ev;
         } catch {
           return;
         }
-        if (ev?.type !== "ledger" || !isView(ev.view)) return;
         if (ev.conv && ev.conv !== conv.current) return;
+        if (ev?.type === "side" && ev.side && typeof ev.side.id === "string")
+          return setSides((all) => ({ ...all, [ev.side!.id]: ev.side! }));
+        if (ev?.type !== "ledger" || !isView(ev.view)) return;
         setView(ev.view);
       };
     };
@@ -110,9 +126,14 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
   const act = useCallback(
     async (action: LedgerAction): Promise<ActResult> => {
       if (fixture) {
-        local.current = applyLocal(local.current, action);
+        const side = localSide(local.current, localSides.current, action);
+        if (side) {
+          localSides.current = { ...localSides.current, [side.id]: side };
+          setSides(localSides.current);
+        }
+        local.current = applyLocal(local.current, action, localSides.current);
         setView(local.current);
-        return { ok: true };
+        return { ok: true, side };
       }
       try {
         const r = await api("/api/ledger/act", {
@@ -126,13 +147,18 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
         } catch {
           // an empty answer is fine: the view comes on the stream
         }
-        const b = (body ?? {}) as { error?: string; view?: unknown };
+        const b = (body ?? {}) as {
+          error?: string;
+          view?: unknown;
+          side?: SideChat;
+        };
         if (!r.ok)
           return { ok: false, error: b.error ?? "That didn't go through." };
         // the answer may carry the new view; else it comes on the stream
         if (isView(b.view)) setView(b.view);
         else if (isView(body)) setView(body);
-        return { ok: true };
+        if (b.side && typeof b.side.id === "string") keepSide(b.side);
+        return { ok: true, side: b.side };
       } catch {
         return {
           ok: false,
@@ -140,8 +166,8 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
         };
       }
     },
-    [fixture],
+    [fixture, keepSide],
   );
 
-  return { view, online, linked, act };
+  return { view, sides, online, linked, act };
 }

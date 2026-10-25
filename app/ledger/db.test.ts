@@ -130,7 +130,7 @@ test("a state written and read back is the same", () => {
         }
       ).user_version,
     ),
-    1,
+    2,
   );
   again.close();
 

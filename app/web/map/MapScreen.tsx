@@ -26,6 +26,7 @@ import {
   type Lens,
 } from "./lens.ts";
 import { SearchBox } from "./SearchBox.tsx";
+import { Chip, SideSheet } from "./SideSheet.tsx";
 import { newIds, snapOf, type Snap } from "./since.ts";
 import { SinceBar, Strip } from "./Strip.tsx";
 import { Toolbar } from "./Toolbar.tsx";
@@ -75,22 +76,32 @@ export default function MapScreen({
 
 const clampZoom = (z: number) => Math.min(1, Math.max(0.7, z));
 
-// where the camera starts: the chat's root at the left edge when the window
-// has room for a few columns, else the topic Claude is on
-function startAt(v: LedgerView): Viewport {
+// Where the camera starts. On a narrow pane, the topic Claude is on at the
+// left edge. Wider, the whole tree from the chat's root, zoomed so its
+// columns fill the width instead of leaving the right of the pane empty;
+// scrolled down to that topic only when it would start below the fold.
+function startAt(
+  v: LedgerView,
+  w = typeof window === "undefined" ? 1024 : window.innerWidth,
+  h = typeof window === "undefined" ? 768 : window.innerHeight,
+): Viewport {
   const l = layout(v.items, (id) => !!v.items.find((i) => i.id === id)?.folded);
-  const zoom = 0.85;
-  const w = typeof window === "undefined" ? 1024 : window.innerWidth;
-  const h = typeof window === "undefined" ? 768 : window.innerHeight;
   const t = nowTopic(v.items);
-  const p = (t && l.nodes.get(t.id)) || l.nodes.get(ROOT)!;
-  const left = w >= 900 ? l.nodes.get(ROOT)! : p;
+  const root = l.nodes.get(ROOT)!;
+  const p = (t && l.nodes.get(t.id)) || root;
+  let wide = 0;
+  for (const n of l.nodes.values()) wide = Math.max(wide, n.x + NODE_W);
+  const narrow = w < NARROW;
+  const zoom = narrow
+    ? 0.85
+    : Math.min(1.15, Math.max(0.7, (w - 32) / Math.max(1, wide)));
+  const left = narrow ? p : root;
   // the top of the map when that keeps the topic well in view
   const top = 16 + p.y * zoom < h * 0.6;
   return {
     x: Math.round(16 - left.x * zoom),
     y: Math.round(top ? 16 : Math.min(h * 0.25, 140) - p.y * zoom),
-    zoom,
+    zoom: Math.round(zoom * 100) / 100,
   };
 }
 
@@ -101,7 +112,7 @@ function Screen({
   initial: LedgerView;
   fixture: boolean;
 }) {
-  const { view, online, linked, act } = useLedger(initial, fixture);
+  const { view, sides, online, linked, act } = useLedger(initial, fixture);
   const rf = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
@@ -121,6 +132,13 @@ function Screen({
   const [step, setStep] = useState(-1);
   const [following, setFollowing] = useState(false);
   const [error, setError] = useState("");
+  // the side chat shown over the lower half; the others wait as chips
+  const [sideId, setSideId] = useState<string | null>(null);
+  // where stepping through a lens got to, for the lens it was on
+  const [lensStep, setLensStep] = useState<{ lens: Lens | null; at: number }>({
+    lens: null,
+    at: -1,
+  });
   // where the camera was, so the map comes back there after strip-only
   const [camera, setCamera] = useState(() => startAt(initial));
 
@@ -161,6 +179,22 @@ function Screen({
   const card = selected ? (byId.get(selected) ?? null) : null;
   const now = nowTopic(items);
   const beside = drawer && width >= SIDE_BY_SIDE;
+  // a side chat you ended (here or on another page) is no longer shown
+  const side =
+    sideId && view.sides.some((x) => x.id === sideId)
+      ? (sides[sideId] ?? null)
+      : null;
+  const otherSides = view.sides.filter((x) => x.id !== side?.id);
+  // what the lens lights up, in map order, for its stepper
+  const lensIds = useMemo(() => {
+    if (!lens) return [];
+    const m = matcher(lens, changed);
+    return order.filter((id) => {
+      const i = byId.get(id);
+      return !!i && i.type !== "topic" && m(i);
+    });
+  }, [lens, changed, order, byId]);
+  const lensAt = lensStep.lens === lens ? lensStep.at : -1;
   const firstWaiting =
     view.strip.waiting.map((id) => byId.get(id)).find(Boolean) ??
     items.find((i) => i.waiting) ??
@@ -222,16 +256,20 @@ function Screen({
 
   // the camera, moved only when you ask: a step, a pick, Now
   const centre = useCallback(
-    (id: string, l: Layout, withCard: boolean) => {
+    (id: string, l: Layout, withCard: boolean, sheet = false) => {
       const p = l.nodes.get(id);
       if (!p) return;
       const zoom = clampZoom(rf.getZoom());
       const narrow = width < NARROW;
       // with the card open, the item lands beside it (and the list), not
-      // under it
+      // under it; with a side chat open, in the half above it
       const dx =
         withCard && !narrow ? (CARD_W + (beside ? DRAWER_W : 0)) / 2 / zoom : 0;
-      const dy = withCard && narrow ? (height * 0.25) / zoom : 0;
+      const dy = sheet
+        ? -(height * 0.25) / zoom
+        : withCard && narrow
+          ? (height * 0.25) / zoom
+          : 0;
       void rf.setCenter(p.x + NODE_W / 2 + dx, p.y + NODE_H / 2 - dy, {
         zoom,
         duration: 300,
@@ -334,6 +372,25 @@ function Screen({
     pick(id);
   };
 
+  const stepLens = (to: number) => {
+    const id = lensIds[to];
+    if (!id) return;
+    setLensStep({ lens, at: to });
+    pick(id);
+  };
+
+  // a side chat on an item: the one open on it, or a new one; the item
+  // goes to the half above the sheet
+  const openSide = async (id: string) => {
+    const r = await run({ type: "side-open", item: id });
+    if (!r.ok || !r.side) return;
+    setSideId(r.side.id);
+    setSelected(null);
+    setFollowing(false);
+    const l = reveal(id);
+    centre(id, l, false, true);
+  };
+
   // ⌘F searches the map; Esc closes the search, then the card, then the list
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -345,12 +402,13 @@ function Screen({
           setSearching(false);
           setQuery("");
         } else if (selected) setSelected(null);
+        else if (sideId) setSideId(null);
         else if (drawer) setDrawer(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [searching, selected, drawer]);
+  }, [searching, selected, drawer, sideId]);
 
   const more = (
     <More
@@ -406,7 +464,7 @@ function Screen({
         <SinceBar
           snap={snap}
           at={step}
-          primary={!card}
+          primary={!card && !side}
           onStep={stepTo}
           onClose={() => {
             setSnap(null);
@@ -465,6 +523,11 @@ function Screen({
         listOpen={drawer}
         canNow={!!now}
         following={following}
+        step={
+          lens && !searching
+            ? { at: lensAt, n: lensIds.length, onStep: stepLens }
+            : undefined
+        }
       />
       {/* clipped, not hidden: focus or find-in-page can scroll a hidden box
           sideways, shifting the whole map with no way back */}
@@ -533,12 +596,40 @@ function Screen({
             item={card}
             byId={byId}
             changes={view.changes}
-            primary
+            primary={!side}
             beside={beside}
+            half={!!side}
             act={act}
             onPick={pick}
+            onAsk={() => void openSide(card.id)}
             onClose={() => setSelected(null)}
           />
+        )}
+        {side ? (
+          <SideSheet
+            key={side.id}
+            side={side}
+            item={byId.get(side.item) ?? null}
+            others={otherSides}
+            primary
+            act={run}
+            onItem={(id) => pick(id)}
+            onOpen={(id) => void openSide(id)}
+            onHide={() => setSideId(null)}
+          />
+        ) : (
+          otherSides.length > 0 && (
+            <div className="absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-24px)] gap-1 overflow-x-auto [scrollbar-width:none]">
+              {otherSides.map((o) => (
+                <Chip
+                  key={o.id}
+                  side={o}
+                  onOpen={() => void openSide(o.item)}
+                  onClose={() => void run({ type: "side-close", side: o.id })}
+                />
+              ))}
+            </div>
+          )
         )}
         <Drawer
           open={drawer}

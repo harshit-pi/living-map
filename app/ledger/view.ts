@@ -19,6 +19,9 @@ export type Facts = {
   reading?: { done: number; total: number };
   spend: LedgerView["spend"];
   changes?: ChangeStatement[];
+  told?: Map<string, { at: number; heard: boolean }>;
+  proposals?: Map<string, number>; // pending side-chat proposals per item
+  sides?: LedgerView["sides"];
 };
 
 const first = (i: Item) => i.src[0] ?? 0;
@@ -44,6 +47,8 @@ export function buildView(s: State, f: Facts): LedgerView {
     isNew: first(i) > looked,
     order: s.meta.get(i.id)?.order ?? "",
     ...(s.meta.get(i.id)?.folded ? { folded: true } : {}),
+    ...(f.told?.get(i.id) ? { sent: f.told.get(i.id) } : {}),
+    ...(f.proposals?.get(i.id) ? { proposals: f.proposals.get(i.id) } : {}),
   }));
   const waiting = live(store)
     .filter(isWaiting)
@@ -73,6 +78,7 @@ export function buildView(s: State, f: Facts): LedgerView {
       },
     },
     changes: f.changes ?? [],
+    sides: f.sides ?? [],
     spend: f.spend,
     health: {
       following: f.following,

@@ -17,7 +17,13 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { applyAction, applyAnswer, checkAnswer, place } from "./apply.ts";
+import {
+  applyAction,
+  applyAnswer,
+  checkAnswer,
+  place,
+  type Acted,
+} from "./apply.ts";
 import type { Conv, LedgerDb, State } from "./db.ts";
 import {
   asksSomething,
@@ -64,8 +70,11 @@ export type LedgerDeps = {
   db: LedgerDb;
   extract?: (req: ExtractRequest) => Promise<ExtractResult>;
   emit: (e: LedgerEvent) => void;
-  // words for the main chat, delivered through its inbox
-  tell?: (conv: Conv, text: string) => void;
+  // words for the main chat, delivered through its inbox (`quiet`: they
+  // wait for your next message there instead of waking it)
+  tell?: (conv: Conv, text: string, quiet?: boolean) => void;
+  // when the main chat last took what waited in its inbox (0: never)
+  heardAt?: (conv: Conv) => number;
   // the model the extractor runs on ("" for Claude Code's default)
   model?: () => string;
   now?: () => number;
@@ -470,12 +479,24 @@ export function createLedger(deps: LedgerDeps) {
     return s ? { s } : null;
   }
 
+  // the side chats open on a chat, as the view lists them (sides.ts sets it)
+  let sidesOf: (root: string) => LedgerView["sides"] = () => [];
+
   function viewOf(root: string): LedgerView | null {
     const hit = stateOf(root);
     if (!hit) return null;
     const { s, f } = hit;
     const read = s.store.read;
+    const heardAt = deps.heardAt?.(s.conv) ?? 0;
     return buildView(s, {
+      told: new Map(
+        [...db.told(root)].map(([id, at]) => [
+          id,
+          { at, heard: heardAt >= at },
+        ]),
+      ),
+      proposals: db.pendingByItem(root),
+      sides: sidesOf(root),
       turns: f?.turns.length ?? read,
       behind: f ? Math.max(0, f.sealed - read) : 0,
       following: s.conv.following,
@@ -497,17 +518,22 @@ export function createLedger(deps: LedgerDeps) {
     if (v) deps.emit({ type: "ledger", conv: root, view: v });
   }
 
-  // What you did on the map: written as "you" at once, heard by the chat
-  // when it is an answer.
-  function act(
+  // A change to a chat's items from outside the extractor (you, a side
+  // chat's proposal): made on the state in memory, placed, written in one
+  // transaction, told to the main chat when it says so, and pushed.
+  function change(
     root: string,
-    action: LedgerAction,
+    fn: (s: State, turns: number) => Acted,
   ): { error?: string; view?: LedgerView } {
     const hit = stateOf(root);
     if (!hit) return { error: "That chat is not on the map." };
     const { s, f } = hit;
-    const r = applyAction(s, action, f?.turns.length ?? s.store.read);
-    if (r.error) return { error: r.error };
+    const r = fn(s, f?.turns.length ?? s.store.read);
+    if (r.error) {
+      // nothing written: what is in memory follows what was
+      if (f) f.s = db.load(root) ?? f.s;
+      return { error: r.error };
+    }
     place(s, now());
     try {
       db.commit(s, r.lines, now());
@@ -515,10 +541,26 @@ export function createLedger(deps: LedgerDeps) {
       if (f) f.s = db.load(root) ?? f.s;
       throw e;
     }
-    if (r.tell) deps.tell?.(s.conv, r.tell);
+    if (r.tell) {
+      deps.tell?.(s.conv, r.tell, r.quiet);
+      if (r.about) db.setTold(root, r.about, now());
+    }
     push(root);
     return { view: viewOf(root) ?? undefined };
   }
+
+  // What you did on the map: written as "you" at once; what the chat should
+  // hear (an answer, a pick, a tick) goes to it at once too.
+  function act(root: string, action: LedgerAction) {
+    return change(root, (s, turns) => {
+      const r = applyAction(s, action, turns);
+      return "item" in action && r.tell ? { ...r, about: action.item } : r;
+    });
+  }
+
+  // a chat's turns as the follower last read them (null: not followed now)
+  const turnsOf = (root: string): Turn[] | null =>
+    followers.get(root)?.turns ?? null;
 
   // the page opened on this chat: what waits is filed now
   function nudge(root: string) {
@@ -543,8 +585,19 @@ export function createLedger(deps: LedgerDeps) {
     tick,
     view: viewOf,
     act,
+    change,
+    turnsOf,
+    state: (root: string) => stateOf(root)?.s ?? null,
     nudge,
     push,
+    useSides(fn: (root: string) => LedgerView["sides"]) {
+      sidesOf = fn;
+    },
+    // the main chat with this session id took its inbox: its cards say so
+    heard(session: string) {
+      const root = db.findConv([session])?.root;
+      if (root) push(root);
+    },
     // the conversation any of these ids is filed under
     rootOf: (ids: string[]) => db.findConv(unique(ids))?.root ?? null,
     // the one linked last

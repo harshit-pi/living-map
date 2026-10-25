@@ -12,6 +12,7 @@ export function Toolbar({
   listOpen,
   canNow,
   following,
+  step,
 }: {
   lens: Lens | null;
   counts: Record<Lens, number>;
@@ -22,6 +23,8 @@ export function Toolbar({
   listOpen: boolean;
   canNow: boolean;
   following: boolean; // the camera is on Now's topic, following it
+  // with a lens on: stepping through what it lights up, in map order
+  step?: { at: number; n: number; onStep: (to: number) => void };
 }) {
   const tool =
     "flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-[12px]";
@@ -52,6 +55,30 @@ export function Toolbar({
           );
         })}
       </div>
+      {step && step.n > 0 && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            className={`${tool} w-7 border-line px-0 text-body hover:bg-panel disabled:opacity-40`}
+            disabled={step.at <= 0}
+            onClick={() => step.onStep(step.at - 1)}
+            aria-label="Previous lit item"
+          >
+            ‹
+          </button>
+          <span className="min-w-8 text-center text-[11px] text-muted tabular-nums">
+            {step.at < 0 ? step.n : `${step.at + 1}/${step.n}`}
+          </span>
+          <button
+            className={`${tool} w-7 border-line px-0 text-body hover:bg-panel disabled:opacity-40`}
+            disabled={step.at >= step.n - 1}
+            onClick={() => step.onStep(step.at + 1)}
+            aria-label="Next lit item"
+            title="Go to each lit item in turn"
+          >
+            ›
+          </button>
+        </div>
+      )}
       <button
         onClick={onSearch}
         title="Search titles (⌘F)"

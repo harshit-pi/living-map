@@ -10,8 +10,10 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 
+import { applyAction } from "./apply.ts";
 import { openDb, type Conv } from "./db.ts";
 import { backoff, createLedger, QUIET_MS } from "./follow.ts";
+import { emptyStore, type Item } from "./items.ts";
 import type {
   ExtractRequest,
   ExtractResult,
@@ -264,36 +266,57 @@ const settle = () => new Promise((r) => setTimeout(r, 100));
 
 test("one run per chat at a time, two at most overall", async () => {
   const chats = [chat(), chat(), chat()];
+  // which two chats run first depends on which reads finish first, so the
+  // test checks the rules, not an order: never two runs for one chat, never
+  // more than two at once, and every turn filed in the end
+  let running = 0;
+  let most = 0;
   const release: (() => void)[] = [];
-  const t = setup(
-    (req) => new Promise((done) => release.push(() => done(filing(req)))),
-  );
-  // well past the 5 s still: the files' real write times can trail the
-  // fake clock by seconds on a busy machine
-  for (const c of chats) {
-    t.link(c);
+  const t = setup((req) => {
+    running++;
+    most = Math.max(most, running);
+    return new Promise((done) =>
+      release.push(() => {
+        running--;
+        done(filing(req));
+      }),
+    );
+  });
+  const roots = chats.map((c) => {
+    const root = t.link(c);
     c.turn("Pick one?", "A or B?");
-  }
-  t.advance(60_000);
+    // written long ago: sealed on first read, whatever the machine's load
+    const ago = (Date.now() - 3_600_000) / 1000;
+    fs.utimesSync(c.file, ago, ago);
+    return root;
+  });
   const round = t.ledger.tick();
   await until(() => t.calls.length >= 2);
   await settle();
   assert.equal(t.calls.length, 2, "the third chat waits");
-  // the first chat's next turn arrives while its run is out
+  // a chat's next turn arrives while runs are out
   chats[0]!.turn("And then?", "C?");
   t.advance(60_000);
   void t.ledger.tick();
   await settle();
-  assert.equal(t.calls.length, 2);
+  assert.equal(t.calls.length, 2, "nothing more starts while two run");
   for (const r of release.splice(0)) r();
   await round;
-  // now the third chat, and the first one's next turn
-  t.advance(60_000);
-  const next = t.ledger.tick();
-  await until(() => t.calls.length >= 4);
-  assert.equal(t.calls.length, 4);
-  for (const r of release.splice(0)) r();
-  await next;
+  // drain: whatever waits runs, two at a time, until every turn is filed
+  for (let k = 0; k < 6; k++) {
+    t.advance(60_000);
+    const next = t.ledger.tick();
+    await settle();
+    for (const r of release.splice(0)) r();
+    await next;
+    if (roots.every((r, n) => t.ledger.view(r)!.read === (n === 0 ? 2 : 1)))
+      break;
+  }
+  assert.ok(most <= 2, `at most two at once, saw ${most}`);
+  assert.deepEqual(
+    roots.map((r) => t.ledger.view(r)!.read),
+    [2, 1, 1],
+  );
 }, 30_000);
 
 test("a long chat linked late reads its newest 40 turns first", async () => {
@@ -449,6 +472,46 @@ test("your actions land as yours, and an answer reaches the chat", async () => {
   const s = t.db.load(root)!;
   assert.equal(s.store.items.get(q1.id)!.writers.state, "you");
   assert.equal(s.meta.get(v.items[0]!.id)!.folded, true);
+});
+
+test("taking an option, reopening a decision and finishing your task tell the chat at once", () => {
+  const store = emptyStore("c", "A chat");
+  const add = (id: string, type: Item["type"], state: string, more = {}) =>
+    store.items.set(id, {
+      id,
+      type,
+      state,
+      title: `The ${type}`,
+      body: "",
+      quote: "",
+      src: [1],
+      parent: null,
+      basis: "said",
+      links: [],
+      writers: {},
+      ...more,
+    });
+  add("i1", "question", "open");
+  add("i2", "option", "offered", { parent: "i1" });
+  add("i3", "decision", "decided");
+  add("i4", "task", "to-do", { owner: "you" });
+  add("i5", "task", "doing", { owner: "claude" });
+  add("i6", "assumption", "assumed");
+  const s = {
+    conv: {} as Conv,
+    store,
+    meta: new Map(),
+  };
+  const tell = (item: string, state: string) =>
+    applyAction(s, { type: "state", item, state }, 1).tell;
+  assert.equal(
+    tell("i2", "taken"),
+    'On the map, the user took the option "The option" for "The question".',
+  );
+  assert.match(tell("i3", "reopened")!, /reopened the decision "The decision"/);
+  assert.match(tell("i4", "done")!, /marked their task "The task" done/);
+  assert.equal(tell("i5", "done"), undefined, "Claude's own task: no");
+  assert.equal(tell("i6", "confirmed"), undefined);
 });
 
 // ---- what changed ------------------------------------------------------------

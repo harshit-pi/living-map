@@ -227,10 +227,28 @@ test("a chat linked through /api/link is followed, filed and acted on", async ()
   assert.equal(after.items.find((i) => i.id === ask.id)!.state, "done");
   assert.deepEqual(after.strip.waiting, []);
 
+  // sent, and not yet taken by the chat
+  const sent = after.items.find((i) => i.id === ask.id)!.sent!;
+  assert.equal(sent.heard, false);
+  assert.ok(sent.at > 0);
+
   // the main chat hears it through its inbox, as the hook asks
   const inbox = await call("POST", "/api/inbox", { session: "chat-1" });
   assert.match(
     String(inbox.json.text),
     /answered "Ship it now\?": Yes, ship it\./,
+  );
+  // and the card can say Claude has it
+  const heard = (await call("GET", "/api/ledger/view?conv=chat-1"))
+    .json as unknown as LedgerView;
+  assert.equal(heard.items.find((i) => i.id === ask.id)!.sent!.heard, true);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(
+    events.some(
+      (e) =>
+        e.type === "ledger" &&
+        e.view.items.find((i) => i.id === ask.id)?.sent?.heard === true,
+    ),
+    "pushed to the page when the chat took it",
   );
 });

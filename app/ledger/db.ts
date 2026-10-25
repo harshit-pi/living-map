@@ -61,6 +61,36 @@ export type Run = {
 
 export type LogLine = { writer: Writer; op: unknown };
 
+export type SideRow = {
+  id: number;
+  conv: string;
+  item: string;
+  title: string;
+  closed: boolean;
+  input: number;
+  output: number;
+  usd: number;
+  at: number;
+};
+
+export type SideMessageRow = {
+  role: "you" | "claude";
+  text: string;
+  tools: string[];
+  stopped: boolean;
+  at: number;
+};
+
+// a proposal as checked when it came: the ops in the extractor's shape
+export type ProposalRow = {
+  id: number;
+  side: number;
+  ops: unknown[];
+  dropped: { op: unknown; why: string }[];
+  status: "pending" | "applied" | "dropped";
+  at: number;
+};
+
 const MIGRATIONS: string[] = [
   `CREATE TABLE conversations (
      root TEXT PRIMARY KEY,
@@ -148,6 +178,45 @@ const MIGRATIONS: string[] = [
      review TEXT,
      PRIMARY KEY (conv, id)
    );`,
+  // side chats (sides.ts): what was said, what it cost, what it proposed;
+  // and what you did that the main chat was told, to say when it has it
+  `CREATE TABLE sides (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     conv TEXT NOT NULL,
+     item TEXT NOT NULL,
+     title TEXT NOT NULL,
+     closed INTEGER NOT NULL DEFAULT 0,
+     input INTEGER NOT NULL DEFAULT 0,
+     output INTEGER NOT NULL DEFAULT 0,
+     usd REAL NOT NULL DEFAULT 0,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX sides_conv ON sides (conv, id);
+   CREATE TABLE side_messages (
+     seq INTEGER PRIMARY KEY AUTOINCREMENT,
+     side INTEGER NOT NULL,
+     role TEXT NOT NULL,
+     text TEXT NOT NULL,
+     tools TEXT NOT NULL DEFAULT '[]',
+     stopped INTEGER NOT NULL DEFAULT 0,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX side_messages_side ON side_messages (side, seq);
+   CREATE TABLE side_proposals (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     side INTEGER NOT NULL,
+     ops TEXT NOT NULL,
+     dropped TEXT NOT NULL,
+     status TEXT NOT NULL,
+     at INTEGER NOT NULL
+   );
+   CREATE INDEX side_proposals_side ON side_proposals (side, id);
+   CREATE TABLE told (
+     conv TEXT NOT NULL,
+     item TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     PRIMARY KEY (conv, item)
+   );`,
 ];
 
 type Row = Record<string, SQLInputValue>;
@@ -201,6 +270,18 @@ export function openDb(file: string) {
       throw e;
     }
   }
+
+  const sideOf = (r: Row): SideRow => ({
+    id: num(r.id),
+    conv: text(r.conv),
+    item: text(r.item),
+    title: text(r.title),
+    closed: num(r.closed) === 1,
+    input: num(r.input),
+    output: num(r.output),
+    usd: num(r.usd),
+    at: num(r.at),
+  });
 
   const convOf = (r: Row): Conv => ({
     root: text(r.root),
@@ -454,20 +535,26 @@ export function openDb(file: string) {
       }));
     },
 
-    // calls and dollars of the map's own work on a chat: all of it, and
-    // since `since` (the start of today)
+    // the map's own work on a chat: its reads (extractions), and the
+    // dollars of those and its side chats, in all and since `since` (the
+    // start of today)
     spend(conv: string, since: number) {
+      const runs = db
+        .prepare("SELECT COUNT(*) AS n FROM runs WHERE conv = ?")
+        .get(conv) as Row;
       const all = db
-        .prepare(
-          "SELECT COUNT(*) AS n, TOTAL(usd) AS usd FROM runs WHERE conv = ?",
-        )
+        .prepare("SELECT TOTAL(usd) AS usd FROM spend WHERE conv = ?")
         .get(conv) as Row;
       const today = db
         .prepare(
-          "SELECT TOTAL(usd) AS usd FROM runs WHERE conv = ? AND at >= ?",
+          "SELECT TOTAL(usd) AS usd FROM spend WHERE conv = ? AND at >= ?",
         )
         .get(conv, since) as Row;
-      return { calls: num(all.n), usd: num(all.usd), todayUsd: num(today.usd) };
+      return {
+        calls: num(runs.n),
+        usd: num(all.usd),
+        todayUsd: num(today.usd),
+      };
     },
 
     setSource(file: string, conv: string, offset: number, at: number) {
@@ -514,6 +601,147 @@ export function openDb(file: string) {
           review ? { ...c, review: review as ChangeStatement["review"] } : c,
         ];
       });
+    },
+
+    // ---- side chats ----
+
+    addSide(conv: string, item: string, title: string, at: number): number {
+      return Number(
+        db
+          .prepare(
+            "INSERT INTO sides (conv, item, title, at) VALUES (?, ?, ?, ?)",
+          )
+          .run(conv, item, title, at).lastInsertRowid,
+      );
+    },
+
+    // a chat's side chats, oldest first; closed ones only when asked
+    sides(conv: string, closed = false): SideRow[] {
+      return (
+        db
+          .prepare(
+            `SELECT * FROM sides WHERE conv = ?${closed ? "" : " AND closed = 0"} ORDER BY id`,
+          )
+          .all(conv) as Row[]
+      ).map(sideOf);
+    },
+
+    side(id: number): SideRow | null {
+      const r = db.prepare("SELECT * FROM sides WHERE id = ?").get(id) as
+        Row | undefined;
+      return r ? sideOf(r) : null;
+    },
+
+    closeSide(id: number) {
+      db.prepare("UPDATE sides SET closed = 1 WHERE id = ?").run(id);
+    },
+
+    addSideMessage(side: number, m: SideMessageRow) {
+      db.prepare(
+        "INSERT INTO side_messages (side, role, text, tools, stopped, at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(side, m.role, m.text, json(m.tools), m.stopped ? 1 : 0, m.at);
+    },
+
+    sideMessages(side: number): SideMessageRow[] {
+      return (
+        db
+          .prepare("SELECT * FROM side_messages WHERE side = ? ORDER BY seq")
+          .all(side) as Row[]
+      ).map((r) => ({
+        role: r.role === "you" ? "you" : "claude",
+        text: text(r.text),
+        tools: parse<string[]>(r.tools, []),
+        stopped: num(r.stopped) === 1,
+        at: num(r.at),
+      }));
+    },
+
+    // what one answer cost, on the side chat and in the chat's spend
+    addSideSpend(side: SideRow, u: RunUsage, at: number) {
+      tx(() => {
+        db.prepare(
+          "UPDATE sides SET input = input + ?, output = output + ?, usd = usd + ? WHERE id = ?",
+        ).run(u.input, u.output, u.usd, side.id);
+        putSpend.run(
+          side.conv,
+          null,
+          "side",
+          u.model,
+          u.input,
+          u.output,
+          u.usd,
+          at,
+        );
+      });
+    },
+
+    addProposal(
+      side: number,
+      ops: unknown[],
+      dropped: ProposalRow["dropped"],
+      at: number,
+    ): number {
+      return Number(
+        db
+          .prepare(
+            "INSERT INTO side_proposals (side, ops, dropped, status, at) VALUES (?, ?, ?, 'pending', ?)",
+          )
+          .run(side, json(ops), json(dropped), at).lastInsertRowid,
+      );
+    },
+
+    proposals(side: number): ProposalRow[] {
+      return (
+        db
+          .prepare("SELECT * FROM side_proposals WHERE side = ? ORDER BY id")
+          .all(side) as Row[]
+      ).map((r) => ({
+        id: num(r.id),
+        side: num(r.side),
+        ops: parse<unknown[]>(r.ops, []),
+        dropped: parse<ProposalRow["dropped"]>(r.dropped, []),
+        status: (["applied", "dropped"].includes(text(r.status))
+          ? text(r.status)
+          : "pending") as ProposalRow["status"],
+        at: num(r.at),
+      }));
+    },
+
+    // settles a pending proposal; false when it was not pending
+    settleProposal(id: number, status: "applied" | "dropped"): boolean {
+      const r = db
+        .prepare(
+          "UPDATE side_proposals SET status = ? WHERE id = ? AND status = 'pending'",
+        )
+        .run(status, id);
+      return Number(r.changes) === 1;
+    },
+
+    // pending proposals per item, over a chat's open side chats
+    pendingByItem(conv: string): Map<string, number> {
+      const rows = db
+        .prepare(
+          `SELECT s.item AS item, COUNT(*) AS n FROM side_proposals p JOIN sides s ON s.id = p.side
+           WHERE s.conv = ? AND p.status = 'pending' GROUP BY s.item`,
+        )
+        .all(conv) as Row[];
+      return new Map(rows.map((r) => [text(r.item), num(r.n)]));
+    },
+
+    // ---- what the main chat was told ----
+
+    setTold(conv: string, item: string, at: number) {
+      db.prepare(
+        `INSERT INTO told (conv, item, at) VALUES (?, ?, ?)
+         ON CONFLICT (conv, item) DO UPDATE SET at = excluded.at`,
+      ).run(conv, item, at);
+    },
+
+    told(conv: string): Map<string, number> {
+      const rows = db
+        .prepare("SELECT item, at FROM told WHERE conv = ?")
+        .all(conv) as Row[];
+      return new Map(rows.map((r) => [text(r.item), num(r.at)]));
     },
 
     // a change statement's review, by you

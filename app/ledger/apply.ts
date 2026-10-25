@@ -5,7 +5,7 @@
 
 import type { LogLine, State } from "./db.ts";
 import { apply, type Answer, type Op } from "./extract.ts";
-import { STATES } from "./items.ts";
+import { STATES, type Item } from "./items.ts";
 import { keyAfter } from "./order.ts";
 import type { Turn } from "./transcript.ts";
 import type { LedgerAction } from "../shared/ledger.ts";
@@ -90,11 +90,30 @@ export function applyAnswer(
   return { lines, rejected };
 }
 
+// Acting reaches the chat at once: taking an option, reopening a decision,
+// finishing a task of yours or something Claude waited on. Other states
+// (an assumption confirmed, a question marked answered with no words) are
+// the map's own bookkeeping.
+function tellOf(s: State, item: Item, state: string): string | undefined {
+  const q = item.parent ? s.store.items.get(item.parent) : undefined;
+  if (item.type === "option" && state === "taken")
+    return `On the map, the user took the option "${item.title}"${q?.type === "question" ? ` for "${q.title}"` : ""}.`;
+  if (item.type === "decision" && state === "reopened")
+    return `On the map, the user reopened the decision "${item.title}": it is open again.`;
+  if (item.type === "task" && state === "done" && item.owner !== "claude")
+    return `On the map, the user marked their task "${item.title}" done.`;
+  if (item.type === "ask" && state === "done")
+    return `On the map, the user marked "${item.title}" done: they have dealt with it.`;
+  return undefined;
+}
+
 export type Acted = {
   lines: LogLine[];
   error?: string;
   // words for the main chat, delivered through its inbox (layer/view.ts)
   tell?: string;
+  quiet?: boolean; // the words wait for your next message there
+  about?: string; // the item they are about: its card says when they arrive
 };
 
 // What you did on the map, as writer "you". `turns` is how many turns the
@@ -107,6 +126,9 @@ export function applyAction(s: State, a: LedgerAction, turns: number): Acted {
   if (a.type === "review")
     // statements come with phase 6; db.review() files a review when they do
     return { lines: [], error: "There is no such change." };
+  // side chats are sides.ts' own
+  if (!("item" in a) || a.type === "side-open")
+    return { lines: [], error: "That action is not known." };
   const item = s.store.items.get(String(a.item ?? ""));
   if (!item || item.retired)
     return { lines: [], error: "There is no such item." };
@@ -121,6 +143,7 @@ export function applyAction(s: State, a: LedgerAction, turns: number): Acted {
     item.writers.state = "you";
     return {
       lines: [{ writer: "you", op: { op: "update", item: item.id, state } }],
+      tell: tellOf(s, item, state),
     };
   }
   if (a.type === "not-right") {

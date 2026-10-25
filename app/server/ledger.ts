@@ -41,3 +41,9 @@ export async function followInLedger(c: Conversation) {
     console.error("[ledger] could not follow the chat:", e);
   }
 }
+
+// the main chat took its inbox: the map's cards say "Claude has it" (only
+// when the ledger is running; it is never started for this)
+export function heardInLedger(session: string) {
+  void loading?.then((l) => l.ledger.heard(session)).catch(() => {});
+}

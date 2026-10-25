@@ -11,6 +11,7 @@ import type {
   LedgerAction,
   LedgerItem,
   LedgerView,
+  SideChat,
 } from "../../shared/ledger.ts";
 
 // sortable keys in the order the items were filed: what a fractional key
@@ -117,6 +118,7 @@ function fullView(): LedgerView {
     read: TURNS - 2,
     lookedTurn: LOOKED,
     items,
+    sides: [],
     strip: {
       doing: "Transcript adapter tests",
       waiting: [],
@@ -149,24 +151,77 @@ function withStrip(v: LedgerView): LedgerView {
 }
 
 const CLOSED = new Set(["done", "answered", "taken", "dropped", "struck"]);
+// side chats ended in the fixture
+const closed = new Set<string>();
+
+// A side chat in the fixture: it opens and takes your words, and says it
+// can't answer here (no model runs on the fixture).
+export function localSide(
+  v: LedgerView,
+  all: Record<string, SideChat>,
+  a: LedgerAction,
+): SideChat | undefined {
+  if (a.type === "side-open") {
+    const had = Object.values(all).find((s) => s.item === a.item);
+    if (had) return had;
+    const item = v.items.find((i) => i.id === a.item);
+    return {
+      id: `s${Object.keys(all).length + 1}`,
+      item: a.item,
+      title: item?.title ?? a.item,
+      messages: [],
+      busy: false,
+      proposals: [],
+      tokens: { input: 0, output: 0, usd: 0 },
+    };
+  }
+  if (a.type === "side-say" && all[a.side]) {
+    const s = all[a.side]!;
+    return {
+      ...s,
+      messages: [
+        ...s.messages,
+        { role: "you", text: a.text, at: 0 },
+        {
+          role: "claude",
+          text: "Side chats answer on a linked chat; this is the fixture.",
+          at: 0,
+        },
+      ],
+    };
+  }
+  return undefined;
+}
 
 // an action applied to the fixture, as the server would file it
-export function applyLocal(v: LedgerView, a: LedgerAction): LedgerView {
+export function applyLocal(
+  v: LedgerView,
+  a: LedgerAction,
+  sides: Record<string, SideChat> = {},
+): LedgerView {
   const edit = (id: string, f: (i: LedgerItem) => LedgerItem | null) => ({
-    ...v,
-    items: v.items.flatMap((i) => {
+    ...next,
+    items: next.items.flatMap((i) => {
       if (i.id !== id) return [i];
       const n = f(i);
       return n ? [n] : [];
     }),
   });
-  let next: LedgerView = v;
+  let next: LedgerView = {
+    ...v,
+    sides: Object.values(sides)
+      .filter((s) => !closed.has(s.id))
+      .map((s) => ({ id: s.id, item: s.item, title: s.title, busy: false })),
+  };
+  const sent = { at: 1, heard: false };
+  if (a.type === "side-close") closed.add(a.side);
   if (a.type === "state")
     next = edit(a.item, (i) => ({
       ...i,
       state: a.state,
       waiting: false,
       open: !CLOSED.has(a.state) && i.open,
+      sent,
     }));
   else if (a.type === "answer")
     next = edit(a.item, (i) => ({
@@ -174,20 +229,21 @@ export function applyLocal(v: LedgerView, a: LedgerAction): LedgerView {
       state: i.type === "ask" ? "done" : "answered",
       waiting: false,
       open: false,
+      sent,
     }));
   else if (a.type === "not-right") next = edit(a.item, () => null);
   else if (a.type === "fold")
     next = edit(a.item, (i) => ({ ...i, folded: a.folded }));
   else if (a.type === "looked")
     next = {
-      ...v,
+      ...next,
       lookedTurn: v.turns,
-      items: v.items.map((i) => (i.isNew ? { ...i, isNew: false } : i)),
+      items: next.items.map((i) => (i.isNew ? { ...i, isNew: false } : i)),
     };
   else if (a.type === "review")
     next = {
-      ...v,
-      changes: v.changes.map((c) =>
+      ...next,
+      changes: next.changes.map((c) =>
         c.id === a.change ? { ...c, review: a.review } : c,
       ),
     };
