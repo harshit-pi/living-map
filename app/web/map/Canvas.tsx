@@ -1,6 +1,7 @@
 import {
   Background,
   BaseEdge,
+  Position,
   ReactFlow,
   type Edge,
   type EdgeProps,
@@ -82,6 +83,30 @@ export function Canvas({
   onMoveEnd: (v: Viewport) => void;
 }) {
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  // Where lines meet a box, given rather than measured: React Flow forgets
+  // its measurements whenever the nodes change, and draws no line until it
+  // has measured again, which never happens while the pane is hidden.
+  const handles = useMemo(
+    (): Node["handles"] => [
+      {
+        type: "target",
+        position: Position.Left,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: size.h,
+      },
+      {
+        type: "source",
+        position: Position.Right,
+        x: size.w - 1,
+        y: 0,
+        width: 1,
+        height: size.h,
+      },
+    ],
+    [size],
+  );
   const nodes = useMemo((): Node[] => {
     return laid.order.map((id) => {
       const p = laid.nodes.get(id)!;
@@ -116,6 +141,7 @@ export function Canvas({
         position: { x: p.x, y: p.y },
         width: size.w,
         height: size.h,
+        handles,
         data,
         draggable: false,
         selectable: false,
@@ -130,7 +156,19 @@ export function Canvas({
           "rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
       };
     });
-  }, [laid, byId, items, title, folded, lit, selected, newIds, size, now]);
+  }, [
+    laid,
+    byId,
+    items,
+    title,
+    folded,
+    lit,
+    selected,
+    newIds,
+    size,
+    now,
+    handles,
+  ]);
 
   const edges = useMemo((): Edge[] => {
     const dimmed = new Set(
