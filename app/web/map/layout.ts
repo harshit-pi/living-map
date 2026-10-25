@@ -9,11 +9,20 @@
 
 import type { LedgerItem } from "../../shared/ledger.ts";
 
-export const COL = 260; // px between columns
-export const ROW = 60; // px between rows
-export const NODE_W = 224;
-export const NODE_H = 46;
 export const ROOT = "root"; // the chat itself, left of every topic
+
+// How big a node is and how far apart: col and row are px between columns
+// and rows. The size follows the pane's width class only, never its exact
+// width, so a resize within the class moves nothing.
+export type Size = { col: number; row: number; w: number; h: number };
+export const WIDE: Size = { col: 260, row: 60, w: 224, h: 46 };
+// a pane beside the chat: a topic, its items and theirs fit side by side at
+// 480 px, with room for three lines of title in each
+export const NARROW: Size = { col: 160, row: 66, w: 146, h: 54 };
+// panes narrower than this get the narrow size
+export const NARROW_PANE = 640;
+export const sizeFor = (paneWidth: number): Size =>
+  paneWidth < NARROW_PANE ? NARROW : WIDE;
 
 export type Placed = {
   id: string;
@@ -53,6 +62,7 @@ export function childrenMap(items: LedgerItem[]): Map<string, LedgerItem[]> {
 export function layout(
   items: LedgerItem[],
   folded: (id: string) => boolean = () => false,
+  size: Size = WIDE,
 ): Layout {
   const kids = childrenMap(items);
   const nodes = new Map<string, Placed>();
@@ -66,8 +76,8 @@ export function layout(
     const first = row;
     nodes.set(id, {
       id,
-      x: depth * COL,
-      y: first * ROW,
+      x: depth * size.col,
+      y: first * size.row,
       depth,
       row: first,
       parent,

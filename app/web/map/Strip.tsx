@@ -71,12 +71,13 @@ export function Strip({
 }) {
   const rest = view.strip.waiting.length - (firstWaiting ? 1 : 0);
   return (
-    // on a narrow pane what waits on you gets a row of its own, so neither
-    // it nor what Claude is on is cut to a few letters
-    <div className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-surface px-3 py-1.5">
+    // below 768 px of strip, what waits on you gets a row of its own, so
+    // neither it nor what Claude is on is cut to a few letters; measured on
+    // the strip itself, so a page zoomed or set in a narrow pane wraps too
+    <div className="@container flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-surface px-3 py-1.5">
       <div
         // idle, it gives the room to what waits on you
-        className={`flex min-w-0 items-center gap-1.5 text-[12.5px] max-sm:flex-1 ${view.strip.doing || !firstWaiting ? "flex-1" : ""}`}
+        className={`flex min-w-0 items-center gap-1.5 text-[12.5px] @max-3xl:flex-1 ${view.strip.doing || !firstWaiting ? "flex-1" : ""}`}
         title={view.strip.doing ?? undefined}
       >
         <span
@@ -95,7 +96,7 @@ export function Strip({
         )}
       </div>
       {firstWaiting && (
-        <div className="flex min-w-0 flex-1 items-center gap-1 max-sm:order-last max-sm:basis-full">
+        <div className="flex min-w-0 flex-1 items-center gap-1 @max-3xl:order-last @max-3xl:basis-full">
           <button
             onClick={() => onWaiting(firstWaiting.id)}
             title={`Waiting on you: ${firstWaiting.title}`}

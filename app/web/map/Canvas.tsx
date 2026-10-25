@@ -9,7 +9,7 @@ import {
 } from "@xyflow/react";
 import { useMemo } from "react";
 
-import { COL, NODE_H, NODE_W, ROOT, type Layout } from "./layout.ts";
+import { ROOT, type Layout, type Size } from "./layout.ts";
 import { countsOf, countsText, descendants } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import { ItemNode, type ItemData } from "./nodes.tsx";
@@ -19,8 +19,15 @@ const nodeTypes = { item: ItemNode };
 
 // out of the parent's right side, down the gap between the columns, across
 // into the child: every child of one parent shares that one vertical line
-function Branch({ sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
-  const mid = sourceX + (COL - NODE_W) / 2;
+function Branch({
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  style,
+  data,
+}: EdgeProps) {
+  const mid = sourceX + Number(data?.gap ?? 0) / 2;
   const path =
     Math.abs(targetY - sourceY) < 1
       ? `M ${sourceX} ${sourceY} H ${targetX}`
@@ -46,6 +53,7 @@ export function Canvas({
   title,
   items,
   laid,
+  size,
   folded,
   lit,
   newIds,
@@ -59,6 +67,7 @@ export function Canvas({
   title: string;
   items: LedgerItem[];
   laid: Layout;
+  size: Size;
   folded: (id: string) => boolean;
   // null: no lens or search on, nothing dims
   lit: ((i: LedgerItem) => boolean) | null;
@@ -96,13 +105,14 @@ export function Canvas({
             )),
         selected: selected === id,
         isNew: newIds.has(id),
+        size,
       };
       return {
         id,
         type: "item",
         position: { x: p.x, y: p.y },
-        width: NODE_W,
-        height: NODE_H,
+        width: size.w,
+        height: size.h,
         data,
         draggable: false,
         selectable: false,
@@ -117,7 +127,7 @@ export function Canvas({
           "rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
       };
     });
-  }, [laid, byId, items, title, folded, lit, selected, newIds]);
+  }, [laid, byId, items, title, folded, lit, selected, newIds, size]);
 
   const edges = useMemo((): Edge[] => {
     const dimmed = new Set(
@@ -128,6 +138,7 @@ export function Canvas({
       source: e.from,
       target: e.to,
       type: "branch",
+      data: { gap: size.col - size.w },
       style: {
         stroke: LINE,
         strokeWidth: 1.5,
@@ -150,7 +161,7 @@ export function Canvas({
       },
     }));
     return [...tree, ...links];
-  }, [laid, nodes]);
+  }, [laid, nodes, size]);
 
   return (
     <ReactFlow

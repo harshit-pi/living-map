@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 
-import { NODE_H, NODE_W } from "./layout.ts";
+import { NARROW, type Size } from "./layout.ts";
 import { lookOf } from "./look.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
@@ -17,7 +17,16 @@ export type ItemData = {
   dim: boolean;
   selected: boolean;
   isNew: boolean;
+  size: Size;
 };
+
+// the narrow size is a smaller box with a third line of title, so a title
+// says as much in less width
+const textOf = (d: ItemData) =>
+  d.size === NARROW
+    ? { title: "text-[12px] leading-[14px]", lines: 3, pad: "gap-1.5 px-2" }
+    : { title: "text-[12.5px] leading-[15px]", lines: 2, pad: "gap-2 px-2.5" };
+const CLAMP = ["", "line-clamp-1", "line-clamp-2", "line-clamp-3"];
 
 const hidden = { opacity: 0, pointerEvents: "none" as const };
 
@@ -43,10 +52,13 @@ export function ItemNode({ data }: NodeProps) {
   if (!i) return <RootNode d={d} />;
   const look = lookOf(i);
   const topic = i.type === "topic";
+  const text = textOf(d);
+  // a folded topic keeps a line for what it holds
+  const lines = topic && d.folded ? text.lines - 1 : text.lines;
   return (
     <div
-      style={{ width: NODE_W, height: NODE_H }}
-      className={`relative flex items-center gap-2 rounded-lg px-2.5 transition-opacity ${look.box} ${ring(d)} ${d.dim ? "opacity-25" : ""}`}
+      style={{ width: d.size.w, height: d.size.h }}
+      className={`relative flex items-center ${text.pad} rounded-lg transition-opacity ${look.box} ${ring(d)} ${d.dim ? "opacity-25" : ""}`}
       title={`${i.title}: ${look.tag}`}
     >
       <Handles />
@@ -68,7 +80,8 @@ export function ItemNode({ data }: NodeProps) {
       <div className="min-w-0 flex-1">
         <div
           data-content
-          className={`text-[12.5px] leading-[15px] ${topic && d.folded ? "line-clamp-1" : "line-clamp-2"} ${look.title}`}
+          // a long name with no spaces breaks instead of running off the box
+          className={`${text.title} ${CLAMP[lines]} wrap-break-word ${look.title}`}
         >
           {i.title}
         </div>
@@ -102,15 +115,16 @@ export function ItemNode({ data }: NodeProps) {
 }
 
 function RootNode({ d }: { d: ItemData }) {
+  const text = textOf(d);
   return (
     <div
-      style={{ width: NODE_W, height: NODE_H }}
-      className={`flex items-center justify-center rounded-full border-2 border-ink bg-surface px-4 ${d.dim ? "opacity-60" : ""}`}
+      style={{ width: d.size.w, height: d.size.h }}
+      className={`flex items-center justify-center rounded-full border-2 border-ink bg-surface ${d.size === NARROW ? "px-3" : "px-4"} ${d.dim ? "opacity-60" : ""}`}
     >
       <Handles />
       <div
         data-content
-        className="line-clamp-2 text-center text-[12.5px] leading-[15px] font-semibold text-ink"
+        className={`${CLAMP[text.lines]} text-center ${text.title} font-semibold text-ink`}
       >
         {d.title}
       </div>

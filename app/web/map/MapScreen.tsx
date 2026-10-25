@@ -10,13 +10,22 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
 import { Canvas } from "./Canvas.tsx";
 import { Card } from "./Card.tsx";
 import { Drawer } from "./Drawer.tsx";
-import { layout, NODE_H, NODE_W, ROOT, type Layout } from "./layout.ts";
+import {
+  layout,
+  NARROW,
+  NARROW_PANE,
+  ROOT,
+  sizeFor,
+  WIDE,
+  type Layout,
+} from "./layout.ts";
 import {
   changedIds,
   foldsAbove,
@@ -42,8 +51,6 @@ import { store, stored } from "../lib/storage.ts";
 
 // coming back to the page after this long counts as a new look
 const AWAY_MS = 5 * 60_000;
-// below this width the card covers the top of the map instead of its side
-const NARROW = 640;
 const CARD_W = 400;
 const DRAWER_W = 360;
 // from this width the card opens beside the open list instead of over it
@@ -76,31 +83,52 @@ export default function MapScreen({
 
 const clampZoom = (z: number) => Math.min(1, Math.max(0.7, z));
 
+// the window is the pane the map sits in; only crossing NARROW_PANE re-renders
+const onResize = (f: () => void) => {
+  window.addEventListener("resize", f);
+  return () => window.removeEventListener("resize", f);
+};
+const isNarrow = () => window.innerWidth < NARROW_PANE;
+
+// how far in from the pane's left edge a framed topic sits: on a narrow pane
+// little enough that the topic, its items and theirs all fit
+const marginX = (narrow: boolean) => (narrow ? 8 : 16);
+// how far down a framed topic sits: on a narrow pane at the top, so what it
+// holds fills the pane below it
+const marginY = (narrow: boolean, h: number) =>
+  narrow ? 16 : Math.min(h * 0.2, 120);
+
 // Where the camera starts. On a narrow pane, the topic Claude is on at the
-// left edge. Wider, the whole tree from the chat's root, zoomed so its
-// columns fill the width instead of leaving the right of the pane empty;
-// scrolled down to that topic only when it would start below the fold.
+// top left, at full size, so its items read beside it. Wider, the whole tree
+// from the chat's root, zoomed so its columns fill the width instead of
+// leaving the right of the pane empty; scrolled down to that topic only when
+// it would start below the fold.
 function startAt(
   v: LedgerView,
   w = typeof window === "undefined" ? 1024 : window.innerWidth,
   h = typeof window === "undefined" ? 768 : window.innerHeight,
 ): Viewport {
-  const l = layout(v.items, (id) => !!v.items.find((i) => i.id === id)?.folded);
+  const size = sizeFor(w);
+  const l = layout(
+    v.items,
+    (id) => !!v.items.find((i) => i.id === id)?.folded,
+    size,
+  );
   const t = nowTopic(v.items);
   const root = l.nodes.get(ROOT)!;
   const p = (t && l.nodes.get(t.id)) || root;
   let wide = 0;
-  for (const n of l.nodes.values()) wide = Math.max(wide, n.x + NODE_W);
-  const narrow = w < NARROW;
+  for (const n of l.nodes.values()) wide = Math.max(wide, n.x + size.w);
+  const narrow = w < NARROW_PANE;
   const zoom = narrow
-    ? 0.85
+    ? 1
     : Math.min(1.15, Math.max(0.7, (w - 32) / Math.max(1, wide)));
   const left = narrow ? p : root;
   // the top of the map when that keeps the topic well in view
-  const top = 16 + p.y * zoom < h * 0.6;
+  const top = 16 + p.y * zoom < h * (narrow ? 0.4 : 0.6);
   return {
-    x: Math.round(16 - left.x * zoom),
-    y: Math.round(top ? 16 : Math.min(h * 0.25, 140) - p.y * zoom),
+    x: Math.round(marginX(narrow) - left.x * zoom),
+    y: Math.round(top ? 16 : marginY(narrow, h) - p.y * zoom),
     zoom: Math.round(zoom * 100) / 100,
   };
 }
@@ -116,6 +144,10 @@ function Screen({
   const rf = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
+  const narrowPane = useSyncExternalStore(onResize, isNarrow, () => false);
+  // below NARROW_PANE the map draws its narrow nodes; it is also where the
+  // card covers the top of the map instead of its side
+  const size = narrowPane ? NARROW : WIDE;
 
   const [lens, setLens] = useState<Lens | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -148,7 +180,10 @@ function Screen({
     (id: string) => folds[id] ?? !!byId.get(id)?.folded,
     [folds, byId],
   );
-  const laid = useMemo(() => layout(items, folded), [items, folded]);
+  const laid = useMemo(
+    () => layout(items, folded, size),
+    [items, folded, size],
+  );
   // every item in map order, folds open: the order the since bar steps in
   const order = useMemo(() => layout(items).order, [items]);
   const changed = useMemo(
@@ -260,7 +295,7 @@ function Screen({
       const p = l.nodes.get(id);
       if (!p) return;
       const zoom = clampZoom(rf.getZoom());
-      const narrow = width < NARROW;
+      const narrow = width < NARROW_PANE;
       // with the card open, the item lands beside it (and the list), not
       // under it; with a side chat open, in the half above it
       const dx =
@@ -270,12 +305,12 @@ function Screen({
         : withCard && narrow
           ? (height * 0.25) / zoom
           : 0;
-      void rf.setCenter(p.x + NODE_W / 2 + dx, p.y + NODE_H / 2 - dy, {
+      void rf.setCenter(p.x + size.w / 2 + dx, p.y + size.h / 2 - dy, {
         zoom,
         duration: 300,
       });
     },
-    [rf, width, height, beside],
+    [rf, width, height, beside, size],
   );
   const frameLeft = useCallback(
     (id: string, l: Layout, duration = 300) => {
@@ -284,14 +319,14 @@ function Screen({
       const zoom = clampZoom(rf.getZoom());
       void rf.setViewport(
         {
-          x: 16 - p.x * zoom,
-          y: Math.min(height * 0.2, 120) - p.y * zoom,
+          x: marginX(narrowPane) - p.x * zoom,
+          y: marginY(narrowPane, height) - p.y * zoom,
           zoom,
         },
         { duration },
       );
     },
-    [rf, height],
+    [rf, height, narrowPane],
   );
 
   // open the folds an item sits in (and, for Now, the topic itself); gives
@@ -306,7 +341,7 @@ function Screen({
       void run({ type: "fold", item: f, folded: false });
     }
     setFolds(next);
-    return layout(items, (x) => next[x] ?? !!byId.get(x)?.folded);
+    return layout(items, (x) => next[x] ?? !!byId.get(x)?.folded, size);
   };
 
   const setStrip = (on: boolean) => {
@@ -360,7 +395,7 @@ function Screen({
     // on a narrow pane the card covers the top: an item under it comes down
     const p = laid.nodes.get(id);
     const vp = rf.getViewport();
-    if (p && width < NARROW && p.y * vp.zoom + vp.y < height * 0.55)
+    if (p && width < NARROW_PANE && p.y * vp.zoom + vp.y < height * 0.55)
       centre(id, laid, true);
   };
 
@@ -536,6 +571,7 @@ function Screen({
           title={view.title}
           items={items}
           laid={laid}
+          size={size}
           folded={folded}
           lit={lit}
           newIds={marked}

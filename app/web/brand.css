@@ -3,9 +3,18 @@
   Change the look here; components only ever name these roles
   (bg-canvas, text-ink, bg-primary, border-success-line, …).
 
-  Values follow claude.ai's light palette (colour version 2), read from its CSS
-  variables; the claude.ai token each one comes from is noted. Tints claude.ai
-  does not define are mixed from its colours over white.
+  Light values follow claude.ai's light palette (colour version 2), read from
+  its CSS variables; the claude.ai token each one comes from is noted. Tints
+  claude.ai does not define are mixed from its colours over white. A few are
+  a shade darker than claude.ai's, so text on them and white text on their
+  fills reads at 4.5:1 or more.
+
+  Dark values sit under prefers-color-scheme below and follow claude.ai's dark
+  surfaces. There, filled buttons and badges carry dark text (on-primary), so
+  the colour fills can stay bright enough to read as text and lines on the
+  dark surfaces too. Text roles reach 4.5:1 on every surface and tint they sit
+  on, faint (placeholders, quiet marks) 3:1; check both themes when changing
+  a value.
 */
 
 @theme static {
@@ -30,23 +39,23 @@
   /* text */
   --color-ink: #131313; /* titles and strong text (text-000) */
   --color-body: #383835; /* running text (text-200) */
-  --color-muted: #7b7974; /* secondary text (text-400) */
-  --color-faint: #a3a19b; /* placeholders, the quietest text */
+  --color-muted: #6b6964; /* secondary text (text-400, darkened) */
+  --color-faint: #8a8882; /* placeholders, the quietest text */
 
   /* primary: buttons, focus, the thing to do next */
-  --color-primary: #d97757; /* (accent-brand) */
-  --color-primary-strong: #c6613f; /* hover, text on soft (brand-000) */
+  --color-primary: #bc5430; /* (accent-brand, darkened for white text) */
+  --color-primary-strong: #a6482a; /* hover, text on soft (brand-000, darkened) */
   --color-primary-soft: #fbf1ee; /* primary at 10% */
   --color-primary-line: #f4d6cd; /* primary at 30% */
   --color-on-primary: #ffffff; /* (oncolor-100) */
 
   /* states */
-  --color-success: #009300; /* got it, filled, chosen (success-100) */
+  --color-success: #008a00; /* got it, filled, chosen (success-100, darkened) */
   --color-success-strong: #006300; /* (success-000) */
   --color-success-soft: #edf7ed;
   --color-success-line: #caeac7; /* (success-900) */
 
-  --color-warning: #a66a00; /* open, to figure out (warning-100) */
+  --color-warning: #a06500; /* open, to figure out (warning-100, darkened) */
   --color-warning-strong: #734500; /* (warning-000) */
   --color-warning-soft: #fdf6e8;
   --color-warning-line: #f9dca4; /* (warning-900) */
@@ -60,4 +69,55 @@
   --color-hint-strong: #4a3aa7; /* (accent-pro-000) */
   --color-hint-soft: #f2f1fe;
   --color-hint-line: #dfdbfd; /* (accent-pro-900) */
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --color-canvas: #262624; /* (bg-100) */
+    --color-surface: #30302e; /* (bg-000) */
+    --color-panel: #1f1e1d; /* (bg-200) */
+    --color-bubble: #141413; /* (bg-300) */
+    --color-board-light: #3d3c39;
+    --color-board-dark: #2a2a28;
+
+    --color-line: rgb(222 220 209 / 0.14);
+    --color-line-strong: rgb(222 220 209 / 0.28);
+
+    --color-ink: #faf9f5; /* (text-000) */
+    --color-body: #c2c0b6; /* (text-200) */
+    --color-muted: #adaba3;
+    --color-faint: #827f78;
+
+    --color-primary: #d97757; /* (accent-brand) */
+    --color-primary-strong: #eea184;
+    --color-primary-soft: #443933;
+    --color-primary-line: #704b3e;
+    --color-on-primary: #1a1918;
+
+    --color-success: #5fb85a;
+    --color-success-strong: #93d48e;
+    --color-success-soft: #364033;
+    --color-success-line: #42643f;
+
+    --color-warning: #d9a13b;
+    --color-warning-strong: #efc57a;
+    --color-warning-soft: #443e30;
+    --color-warning-line: #705b33;
+
+    --color-danger: #ef7b7b;
+    --color-danger-strong: #f6a9a9;
+    --color-danger-soft: #473937;
+    --color-danger-line: #794d4b;
+
+    --color-hint: #9e93f1;
+    --color-hint-strong: #c6bffb;
+    --color-hint-soft: #3d3c45;
+    --color-hint-line: #5a5678;
+  }
 }

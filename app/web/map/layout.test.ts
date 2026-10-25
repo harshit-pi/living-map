@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { applyLocal, fixtureView, keyAt } from "./fixture.ts";
-import { COL, layout, moves, ROOT, ROW, type Layout } from "./layout.ts";
+import {
+  layout,
+  moves,
+  NARROW,
+  ROOT,
+  sizeFor,
+  WIDE,
+  type Layout,
+} from "./layout.ts";
 import {
   changedIds,
   countsOf,
@@ -46,6 +54,8 @@ function rng(seed: number) {
     return s / 2 ** 32;
   };
 }
+
+const { col: COL, row: ROW } = WIDE;
 
 describe("layout", () => {
   it("grows left to right, a parent on its first child's row", () => {
@@ -105,57 +115,76 @@ describe("layout", () => {
     expect(l.links).toEqual([{ from: "a", to: "b", rel: "about" }]);
   });
 
+  it("sizes nodes by the pane's width class, not its exact width", () => {
+    expect(sizeFor(400)).toBe(NARROW);
+    expect(sizeFor(639)).toBe(NARROW);
+    expect(sizeFor(640)).toBe(WIDE);
+    // three columns, from a topic at an 8 px margin, inside a 480 px pane
+    expect(8 + 2 * NARROW.col + NARROW.w).toBeLessThanOrEqual(480);
+    const items = [item("t1", null, "a1"), item("a", "t1", "a1")];
+    expect(layout(items, undefined, NARROW).nodes.get("a")).toMatchObject({
+      x: 2 * NARROW.col,
+      y: 0,
+    });
+  });
+
   // The rule: an appended item never moves a node on an earlier row, and
   // moves the ones after it only by whole rows. Checked at every step of a
-  // 300-step growth with topics, nesting and folded topics.
-  it("keeps every node above an insert still over 300 appends", () => {
-    const rand = rng(7);
-    const items: LedgerItem[] = [];
-    const folded = new Set<string>();
-    const isFolded = (id: string) => folded.has(id);
-    let n = 0;
-    let prev: Layout = layout(items, isFolded);
-    let checked = 0;
-    let shifted = 0;
-    for (let step = 0; step < 300; step++) {
-      const topics = items.filter((i) => i.type === "topic");
-      const id = `i${++n}`;
-      const order = keyAt(n);
-      if (!topics.length || rand() < 0.12) {
-        items.push(item(id, null, order));
-        if (rand() < 0.2) folded.add(id);
-      } else {
-        // mostly under a recent item, sometimes anywhere
-        const pool = rand() < 0.7 ? items.slice(-12) : items;
-        const parent = pool[Math.floor(rand() * pool.length)];
-        items.push(item(id, parent.id, order));
-      }
-      const next = layout(items, isFolded);
-      const placed = next.nodes.get(id);
-      const ms = moves(prev, next);
-      if (!placed) {
-        // filed inside a fold: nothing on screen moves at all
-        expect(ms.every((m) => m.dx === 0 && m.dy === 0)).toBe(true);
-      } else {
-        for (const m of ms) {
-          expect(m.dx).toBe(0);
-          if (m.prevY < placed.y) {
-            expect(m.dy).toBe(0);
-            checked++;
-          } else {
-            expect(m.dy % ROW).toBe(0);
-            expect(m.dy).toBeGreaterThanOrEqual(0);
-            if (m.dy) shifted++;
+  // 300-step growth with topics, nesting and folded topics, in both sizes.
+  it.each([
+    ["wide", WIDE],
+    ["narrow", NARROW],
+  ])(
+    "keeps every node above an insert still over 300 appends (%s)",
+    (_, size) => {
+      const rand = rng(7);
+      const items: LedgerItem[] = [];
+      const folded = new Set<string>();
+      const isFolded = (id: string) => folded.has(id);
+      let n = 0;
+      let prev: Layout = layout(items, isFolded, size);
+      let checked = 0;
+      let shifted = 0;
+      for (let step = 0; step < 300; step++) {
+        const topics = items.filter((i) => i.type === "topic");
+        const id = `i${++n}`;
+        const order = keyAt(n);
+        if (!topics.length || rand() < 0.12) {
+          items.push(item(id, null, order));
+          if (rand() < 0.2) folded.add(id);
+        } else {
+          // mostly under a recent item, sometimes anywhere
+          const pool = rand() < 0.7 ? items.slice(-12) : items;
+          const parent = pool[Math.floor(rand() * pool.length)];
+          items.push(item(id, parent.id, order));
+        }
+        const next = layout(items, isFolded, size);
+        const placed = next.nodes.get(id);
+        const ms = moves(prev, next);
+        if (!placed) {
+          // filed inside a fold: nothing on screen moves at all
+          expect(ms.every((m) => m.dx === 0 && m.dy === 0)).toBe(true);
+        } else {
+          for (const m of ms) {
+            expect(m.dx).toBe(0);
+            if (m.prevY < placed.y) {
+              expect(m.dy).toBe(0);
+              checked++;
+            } else {
+              expect(m.dy % size.row).toBe(0);
+              expect(m.dy).toBeGreaterThanOrEqual(0);
+              if (m.dy) shifted++;
+            }
           }
         }
+        prev = next;
       }
-      prev = next;
-    }
-    // the script really exercised both sides of the rule
-    expect(checked).toBeGreaterThan(1000);
-    expect(shifted).toBeGreaterThan(100);
-    expect(items.length).toBe(300);
-  });
+      // the script really exercised both sides of the rule
+      expect(checked).toBeGreaterThan(1000);
+      expect(shifted).toBeGreaterThan(100);
+      expect(items.length).toBe(300);
+    },
+  );
 
   it("keeps nodes above still when an item lands between siblings", () => {
     const base = [

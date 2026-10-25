@@ -8,6 +8,10 @@ import App from "./App.tsx";
 import { setFavicon } from "./lib/favicon.ts";
 
 setFavicon();
+// the icon and the browser's chrome follow the system's light or dark theme
+window
+  .matchMedia("(prefers-color-scheme: dark)")
+  .addEventListener("change", setFavicon);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
