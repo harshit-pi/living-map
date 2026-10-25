@@ -82,7 +82,6 @@ test("the view holds live items, the strip and health", () => {
   assert.equal(by.get("i7")!.open, true);
   assert.equal(v.strip.doing, "task i4");
   assert.deepEqual(v.strip.waiting, ["i3", "i2"], "oldest first");
-  assert.deepEqual(v.strip.since, { turns: 4, waiting: 1, changes: 0 });
   assert.deepEqual(v.health, {
     following: true,
     behind: 1,

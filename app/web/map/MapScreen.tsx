@@ -479,8 +479,6 @@ function Screen({
       </Notice>
     );
 
-  const showSince = !!snap && (snap.ids.length > 0 || snap.waiting > 0);
-
   const top = (
     <>
       <Strip
@@ -497,7 +495,7 @@ function Screen({
         waitingLens={lens === "waiting"}
         more={more}
       />
-      {showSince && snap && (
+      {snap && (
         <SinceBar
           snap={snap}
           at={step}

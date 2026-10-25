@@ -100,12 +100,6 @@ export function buildView(s: State, f: Facts): LedgerView {
     strip: {
       doing,
       waiting: waiting.map((i) => i.id),
-      since: {
-        turns: Math.max(0, f.turns - looked),
-        waiting: waiting.filter((i) => first(i) > looked).length,
-        changes: (f.changes ?? []).filter((c) => !c.low && c.turn > looked)
-          .length,
-      },
     },
     changes: f.changes ?? [],
     sides: f.sides ?? [],

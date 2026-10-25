@@ -55,7 +55,6 @@ export type LedgerView = {
   strip: {
     doing: string | null; // what Claude is on, from its task list
     waiting: string[]; // ids, oldest first
-    since: { turns: number; waiting: number; changes: number };
   };
   changes: ChangeStatement[];
   // side chats still open, oldest first: the page shows one, the rest as chips

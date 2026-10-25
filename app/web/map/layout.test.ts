@@ -245,7 +245,6 @@ describe("the fixture", () => {
     expect(gone.items.some((i) => i.id === "i45")).toBe(false);
     const looked = applyLocal(v, { type: "looked" });
     expect(looked.items.some((i) => i.isNew)).toBe(false);
-    expect(looked.strip.since.turns).toBe(0);
   });
 });
 

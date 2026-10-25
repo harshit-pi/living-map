@@ -572,7 +572,6 @@ test("a snapshot when following starts and after each sealed turn; what differs 
       low: false,
     },
   );
-  assert.equal(v.strip.since.changes, 1);
   // the same turn read again files nothing twice
   await t.ledger.tick();
   assert.equal(t.ledger.view(root)!.changes.length, 1);

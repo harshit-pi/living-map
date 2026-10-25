@@ -122,7 +122,6 @@ function fullView(): LedgerView {
     strip: {
       doing: "Transcript adapter tests",
       waiting: [],
-      since: { turns: 0, waiting: 0, changes: 0 },
     },
     changes,
     spend: { calls: 41, usd: 0.62, todayUsd: 0.18 },
@@ -141,11 +140,6 @@ function withStrip(v: LedgerView): LedgerView {
     strip: {
       ...v.strip,
       waiting,
-      since: {
-        turns: Math.max(0, v.turns - v.lookedTurn),
-        waiting: v.items.filter((i) => i.isNew && i.waiting).length,
-        changes: v.changes.filter((c) => c.turn > v.lookedTurn).length,
-      },
     },
   };
 }
