@@ -25,7 +25,7 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* surfaces */
-  --color-canvas: #f9f9f7; /* page background (bg-100) */
+  --color-canvas: #ffffff; /* page background: white, like surfaces; cards keep their borders */
   --color-surface: #ffffff; /* cards, panels, inputs (bg-000) */
   --color-panel: #f3f3f0; /* subtle fills: headers, chips, hover (bg-200) */
   --color-bubble: #f0efec; /* your messages (bg-300) */
