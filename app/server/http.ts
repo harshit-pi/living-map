@@ -11,12 +11,14 @@ import { authRoutes, type Auth } from "./auth.ts";
 import { STATIC_DIR } from "./config.ts";
 import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
-import { experimental } from "./flags.ts";
+import { listening } from "./flags.ts";
+import { heardInLedger, initLedger, ledgerServer } from "./ledger.ts";
 import { listMaps, readMap } from "./store.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
 import { listen, unsentFor, wakesFor } from "../layer/view.ts";
 
 export function createApp(engine: Engine, hub: Hub, auth: Auth) {
+  initLedger(engine, hub);
   const app = express();
   app.disable("x-powered-by");
   // before anything else: who may ask (see auth.ts)
@@ -106,13 +108,16 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
       typeof req.body?.session === "string"
         ? req.body.session.slice(0, 100)
         : "";
-    if (!id || !experimental()) {
+    if (!id || !listening()) {
       res.json({ text: "" });
       return;
     }
     const text = unsentFor(id);
     // the rail's "for your chat" count drops now it is heard
-    if (text) engine.push();
+    if (text) {
+      engine.push();
+      heardInLedger(id);
+    }
     res.json({ text });
   });
 
@@ -126,7 +131,7 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
         : "";
     const secs = Math.min(1500, Math.max(1, Number(req.query.timeout) || 600));
     // the conversation layer is off: nothing will come, so the listener stops
-    if (!experimental()) {
+    if (!listening()) {
       res.json({ text: "", off: true });
       return;
     }
@@ -149,10 +154,25 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
     const tick = setInterval(() => {
       if (!wakesFor(id)) return;
       end(unsentFor(id));
+      heardInLedger(id);
     }, 1000);
     const limit = setTimeout(() => end(""), secs * 1000);
     // the listener went away (its chat stopped it): no longer waiting
     res.on("close", () => end(""));
+  });
+
+  // the v3 map (app/ledger/), only while its flag is on (see flags.ts)
+  app.use("/api/ledger", (req, res, next) => {
+    void ledgerServer().then(
+      (l) => {
+        if (l) l.router(req, res, next);
+        else res.status(404).json({ error: "Not found." });
+      },
+      () =>
+        res
+          .status(500)
+          .json({ error: "Something went wrong on the server. Try again." }),
+    );
   });
 
   app.get("/api/maps", (_req, res) => {

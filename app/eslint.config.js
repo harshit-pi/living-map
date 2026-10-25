@@ -32,6 +32,7 @@ export default defineConfig([
       "eval/**/*.ts",
       "plugins/*/*.ts",
       "layer/*.ts",
+      "ledger/**/*.ts",
       "shared/**/*.ts",
       "*.config.{js,ts}",
     ],

@@ -26,6 +26,7 @@
     "eval",
     "plugins",
     "layer",
+    "ledger",
     "skill",
     "vite.config.ts"
   ],

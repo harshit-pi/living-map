@@ -9,22 +9,34 @@ import path from "node:path";
 
 import { HOME } from "./config.ts";
 
-let cached: { at: number; on: boolean } | null = null;
+let cached: { at: number; s: Record<string, unknown> } | null = null;
 
-export function experimental(): boolean {
-  if (process.env.LIVING_MAP_EXPERIMENTAL)
-    return process.env.LIVING_MAP_EXPERIMENTAL === "1";
-  // read at most every few seconds: it is asked on every tick and request
-  if (cached && Date.now() - cached.at < 5000) return cached.on;
-  let on: boolean;
+// ~/.living-map/settings.json, read at most every few seconds: flags are
+// asked on every tick and request
+function settings(): Record<string, unknown> {
+  if (cached && Date.now() - cached.at < 5000) return cached.s;
+  let s: Record<string, unknown>;
   try {
-    const s = JSON.parse(
+    s = JSON.parse(
       fs.readFileSync(path.join(HOME, "settings.json"), "utf8"),
-    ) as { experimental?: unknown };
-    on = s.experimental === true;
+    ) as Record<string, unknown>;
   } catch {
-    on = false;
+    s = {};
   }
-  cached = { at: Date.now(), on };
-  return on;
+  cached = { at: Date.now(), s };
+  return s;
 }
+
+const flag = (env: string, key: string) =>
+  process.env[env] ? process.env[env] === "1" : settings()[key] === true;
+
+export const experimental = () =>
+  flag("LIVING_MAP_EXPERIMENTAL", "experimental");
+
+// The v3 map (app/ledger/): the item store, following the chat, and its
+// page. Its own switch, so it can be tried apart from the conversation
+// layer above: LIVING_MAP_LEDGER=1, or {"ledger": true} in settings.json.
+export const ledger = () => flag("LIVING_MAP_LEDGER", "ledger");
+
+// the chat hears the map (the inbox, the listener) when either is on
+export const listening = () => experimental() || ledger();

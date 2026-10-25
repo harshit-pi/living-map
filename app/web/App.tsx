@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -17,11 +19,14 @@ import { useLiveMap } from "./lib/live.ts";
 import { useSignedIn } from "./lib/session.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
+import { useLedgerProbe, wantsFixture } from "./map/probe.ts";
 import { modeOf, PLUGINS, pluginFor } from "./plugins.ts";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
 import { StartScreen } from "./screens/StartScreen.tsx";
-import { LAYER_ID } from "../layer/shared.ts";
 import { Frame } from "../layer/web/Rail.tsx";
+
+// the map of your chat, loaded only when the server has one for this page
+const MapScreen = lazy(() => import("./map/MapScreen.tsx"));
 
 const DEFAULTS: Settings = { model: "", effort: "" };
 
@@ -37,11 +42,29 @@ const useRoomy = () => useSyncExternalStore(onResize, isRoomy, () => false);
 
 // Not signed in (the page was opened without the skill's one-time link):
 // nothing of your maps is shown, only how to open it.
+// ?fixture=1 draws the fixture map; a dev build lets it past the sign-in, so
+// the page can be worked on with no server behind it.
 export default function App() {
   const signedIn = useSignedIn();
-  if (signedIn === false) return <SignedOut />;
-  if (signedIn === null) return <div className="h-full bg-canvas" />;
-  return <MapApp />;
+  const [fixture] = useState(wantsFixture);
+  const open = signedIn || (fixture && import.meta.env.DEV);
+  if (!open && signedIn === false) return <SignedOut />;
+  if (!open) return <div className="h-full bg-canvas" />;
+  return <Chooser fixture={fixture} />;
+}
+
+// the new map when the server answers with one (the experimental flag on, a
+// chat linked); otherwise the page as it was
+function Chooser({ fixture }: { fixture: boolean }) {
+  const probe = useLedgerProbe(fixture);
+  const blank = <div className="h-full bg-canvas" />;
+  if (probe === null) return blank;
+  if (probe === "none") return <MapApp />;
+  return (
+    <Suspense fallback={blank}>
+      <MapScreen initial={probe.view} fixture={probe.fixture} />
+    </Suspense>
+  );
 }
 
 function SignedOut() {
@@ -210,11 +233,9 @@ function MapApp() {
   // every mode is a plugin with its own screen
   const plugin = modeOf(map.purpose);
   const switching = live.busy || !!live.working || live.waiting.length > 0;
-  // the modes this map can switch between (Explore and Learn share their
-  // map); a map of your conversation is one view of it, and offers them all
+  // the modes this map can switch between (Explore and Learn share their map)
   const switches = PLUGINS.filter(
     (p) =>
-      !!map.linked ||
       p.id === map.purpose ||
       p.switchesWith?.includes(map.purpose) ||
       pluginFor(map.purpose)?.switchesWith?.includes(p.id),
@@ -262,64 +283,71 @@ function MapApp() {
             compact={simple}
           />
         </div>
-        <div className="flex items-center justify-end gap-2">
-          {modes.length > 1 ? (
-            // off while a move runs or waits: switched late, the screen
-            // changed under the pointer and the next click landed on
-            // Explore's Next, a paid move
-            <Segmented
-              value={map.purpose}
-              options={modes}
-              disabled={switching}
-              title={
-                switching
-                  ? "Claude is working: switch once the map settles"
-                  : undefined
-              }
-              onChange={(purpose) => {
-                if (switching) return;
-                void run(
-                  map.linked
-                    ? {
-                        type: "plugin",
-                        plugin: LAYER_ID,
-                        name: "view",
-                        args: { mode: purpose },
-                      }
-                    : { type: "purpose", purpose },
-                );
-              }}
-            />
-          ) : (
-            <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
-              {plugin.label}
-            </span>
-          )}
-          {plugin.Header && <plugin.Header ws={ws} />}
-          {!simple && <UpdateButton steps={live.updateSteps} update={update} />}
-          {/* the simpler header keeps the update inside Maps, a dot on it
+        {/* a map of your chat is the chat itself: the view is picked from
+            what the chat is doing (/living-map learn switches it), and there
+            is no other map to open or start, so none of those controls */}
+        {map.linked ? (
+          <div className="flex items-center justify-end gap-2">
+            {plugin.Header && <plugin.Header ws={ws} />}
+            <UpdateButton steps={live.updateSteps} update={update} />
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            {modes.length > 1 ? (
+              // off while a move runs or waits: switched late, the screen
+              // changed under the pointer and the next click landed on
+              // Explore's Next, a paid move
+              <Segmented
+                value={map.purpose}
+                options={modes}
+                disabled={switching}
+                title={
+                  switching
+                    ? "Claude is working: switch once the map settles"
+                    : undefined
+                }
+                onChange={(purpose) => {
+                  if (switching) return;
+                  void run({ type: "purpose", purpose });
+                }}
+              />
+            ) : (
+              <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
+                {plugin.label}
+              </span>
+            )}
+            {plugin.Header && <plugin.Header ws={ws} />}
+            {!simple && (
+              <UpdateButton steps={live.updateSteps} update={update} />
+            )}
+            {/* the simpler header keeps the update inside Maps, a dot on it
               saying one is out */}
-          <MapsMenu
-            onOpen={(id) => {
-              void openMap(id);
-            }}
-            onNew={simple ? startNew : undefined}
-            update={
-              simple ? (
-                <UpdateButton steps={live.updateSteps} update={update} inMenu />
-              ) : undefined
-            }
-            dot={simple && !!update.info?.available}
-          />
-          {!simple && (
-            <button
-              onClick={startNew}
-              className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
-            >
-              New
-            </button>
-          )}
-        </div>
+            <MapsMenu
+              onOpen={(id) => {
+                void openMap(id);
+              }}
+              onNew={simple ? startNew : undefined}
+              update={
+                simple ? (
+                  <UpdateButton
+                    steps={live.updateSteps}
+                    update={update}
+                    inMenu
+                  />
+                ) : undefined
+              }
+              dot={simple && !!update.info?.available}
+            />
+            {!simple && (
+              <button
+                onClick={startNew}
+                className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
+              >
+                New
+              </button>
+            )}
+          </div>
+        )}
       </header>
       <WorkingBar
         working={live.working}

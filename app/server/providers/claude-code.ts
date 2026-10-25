@@ -19,6 +19,8 @@ import path from "node:path";
 
 import { conversationStamp, findConversation } from "./claude-sessions.ts";
 import type {
+  ExtractRequest,
+  ExtractResult,
   ModelCall,
   ModelProvider,
   ModelReply,
@@ -58,6 +60,7 @@ type CliResult = {
   is_error?: boolean;
   subtype?: string;
   result?: string;
+  structured_output?: unknown;
   total_cost_usd?: number;
   usage?: Tokens & { iterations?: Tokens[] };
   modelUsage?: Record<string, { outputTokens?: number }>;
@@ -262,8 +265,108 @@ export function claudeCode({
     });
   }
 
+  // A fresh `claude -p` per answer: its own system prompt in place of Claude
+  // Code's (so the call isn't mostly Claude Code's instructions and tools), no
+  // tools, no settings or MCP servers (your hooks never fire on it), an empty
+  // folder, and no prompt cache (the default hour-long cache write costs
+  // twice the input, and an extraction is never asked twice). The answer
+  // arrives as a structured-output tool call, not text.
+  const quiet = path.join(home, "extract");
+  function extract(req: ExtractRequest): Promise<ExtractResult> {
+    const started = Date.now();
+    fs.mkdirSync(quiet, { recursive: true });
+    const effort = req.effort || DEFAULT_EFFORT;
+    const args = [
+      "-p",
+      "--output-format",
+      "json",
+      "--system-prompt",
+      req.system,
+      "--tools",
+      "",
+      "--json-schema",
+      JSON.stringify(req.schema),
+      "--no-session-persistence",
+      "--strict-mcp-config",
+      "--mcp-config",
+      emptyMcp,
+      "--setting-sources",
+      "",
+      "--effort",
+      effort,
+    ];
+    if (req.model) args.push("--model", req.model);
+    const env: NodeJS.ProcessEnv = {
+      ...childEnv(),
+      DISABLE_PROMPT_CACHING: "1",
+    };
+    if (req.maxOutputTokens)
+      env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(req.maxOutputTokens);
+    const proc = spawn("claude", args, { cwd: quiet, env });
+    return new Promise((resolve) => {
+      let out = "";
+      let settled = false;
+      const end = (r: Omit<ExtractResult, "ms">) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ...r, ms: Date.now() - started });
+      };
+      // the CLI's own retries can wait minutes on a rate limit: past this,
+      // the call is given up and tried again later by its caller
+      const timer = setTimeout(() => {
+        proc.kill("SIGTERM");
+        end({ ok: false, error: "timed out", usage: null });
+      }, req.timeoutMs ?? 120_000);
+      timer.unref?.();
+      proc.on("error", () =>
+        end({ ok: false, error: "could not start claude", usage: null }),
+      );
+      proc.stderr?.on("data", () => {});
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        out += chunk;
+      });
+      proc.on("close", () => {
+        let r: CliResult | null;
+        try {
+          r = JSON.parse(out) as CliResult;
+        } catch {
+          r = null;
+        }
+        if (!r) return end({ ok: false, error: "no result", usage: null });
+        const model =
+          Object.entries(r.modelUsage ?? {}).sort(
+            (a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0),
+          )[0]?.[0] ??
+          req.model ??
+          "";
+        const u = r.usage ?? {};
+        const usage: ModelUsage = {
+          input:
+            (u.input_tokens ?? 0) +
+            (u.cache_creation_input_tokens ?? 0) +
+            (u.cache_read_input_tokens ?? 0),
+          output: u.output_tokens ?? 0,
+          costUsd: r.total_cost_usd ?? priceOf(model, r.usage),
+          model,
+          effort,
+        };
+        if (r.is_error || r.structured_output === undefined)
+          return end({
+            ok: false,
+            error: r.subtype ?? "no structured answer",
+            usage,
+          });
+        end({ ok: true, value: r.structured_output, usage });
+      });
+      proc.stdin?.on("error", () => {});
+      proc.stdin?.end(req.message);
+    });
+  }
+
   return {
     name: "Claude Code",
+    extract,
     models: [
       { id: "", label: "Default model" },
       { id: "fable", label: "Fable 5.1" },

@@ -9,7 +9,8 @@ import type { ActionResult, Purpose } from "../../shared/model.ts";
 import { outline } from "../core/canvas.ts";
 import { str, type StoredMap } from "../core/types.ts";
 import type { Engine } from "../engine.ts";
-import { experimental } from "../flags.ts";
+import { experimental, ledger, listening } from "../flags.ts";
+import { followInLedger } from "../ledger.ts";
 import { modeOf, pluginFor } from "../plugins.ts";
 import { linkedMaps } from "../store.ts";
 import { message } from "./canvas.ts";
@@ -116,11 +117,25 @@ export async function link(
     else if (say && modeOf(m.purpose).core.includes("message"))
       void message(ctx, say, []);
     engine.push();
+    if (ledger()) await followInLedger(m.conversation);
     return reply(m, false);
   }
 
   // its first map, with no view named: read the conversation, then draw
   // the view it needs
+  // with the v3 map on, a new chat is only followed: its page draws from
+  // the ledger, so no old view (and its paid first move) is started
+  if (ledger()) {
+    await followInLedger(conversation);
+    return {
+      mapId: "",
+      title: conversation.title,
+      purpose: "explore",
+      created: true,
+      conversation: conversation.title,
+      listen: true,
+    };
+  }
   if (!purpose && !question && experimental())
     return reply(await autoStart(engine, settings, conversation), true);
   const { map, first } = await begin(
@@ -167,7 +182,7 @@ const reply = (m: StoredMap, created: boolean): LinkResult => ({
   conversation: m.conversation?.title ?? "",
   // the main chat listens to the map (skill/wait.ts) only with the
   // conversation layer on
-  listen: experimental(),
+  listen: listening(),
 });
 
 // The map as text, for the conversation to read back ("what is on my map?"):
