@@ -5,6 +5,7 @@
 
 import {
   isOpen,
+  isWaiting,
   KINDS,
   live,
   outranks,
@@ -25,7 +26,7 @@ Kinds and their states (the first is where a new one starts):
 - question (open, answered, dropped): something asked that needs an answer. owner "you" only when Claude asked the user directly and is waiting for the answer (a choice, a confirmation, information only they have); owner "claude" when Claude will find the answer.
 - option (offered, taken, dropped): one of several choices offered for a question; its parent is that question. Mark it taken only when the conversation shows it was chosen.
 - decision (decided, reopened): something settled that later work relies on.
-- task (to-do, doing, done, dropped): work to be done. owner "claude" for Claude's own work. owner "you" only for a step Claude handed to the user by name (merge or review a PR, deploy, run a command it gave them, test on their device, contact someone, fill a form). A note that something is untested or unverified is a finding, not a task for the user.
+- task (to-do, doing, done, dropped): work to be done. owner "claude" for Claude's own work. owner "you" only for a step Claude handed to the user by name (merge or review a PR, deploy, run a command it gave them, test on their device, contact someone, fill a form). A note that something is untested or unverified is a finding, not a task for the user. "you" is the user themself: work assigned to someone else named in the chat (a teammate, a reviewer) is not the user's; file it as a finding, or leave it out.
 - ask (waiting, done, dropped): Claude waiting on the user for a go-ahead, an approval, or something only they can do (push, merge, sign in, pay).
 - assumption (assumed, confirmed, struck): something taken as true without being checked.
 - finding (said): a fact established that matters later.
@@ -155,7 +156,10 @@ export function renderMap(s: Store): string {
 // map tends to file the new and forget to close the old, and a stale
 // "waiting on you" is the mistake that costs the most trust.
 export function checklist(s: Store): string {
-  const open = live(s).filter(isOpen);
+  // what waits on the user first: a stale one there costs the most trust
+  const open = live(s)
+    .filter(isOpen)
+    .sort((a, b) => Number(isWaiting(b)) - Number(isWaiting(a)));
   if (!open.length) return "(nothing open)";
   return open
     .map(
@@ -163,6 +167,59 @@ export function checklist(s: Store): string {
         `- ${i.id} ${i.type} ${i.state}${i.owner ? ` owner=${i.owner}` : ""} (turn ${i.src.at(-1)}, ${Math.max(0, s.read - (i.src.at(-1) ?? 0))} turns ago): ${i.title}`,
     )
     .join("\n");
+}
+
+// ---- the sweep ------------------------------------------------------------------
+
+// Every SWEEP_EVERY turns, what waits on the user and hasn't come up for
+// SWEEP_AGE turns is checked on its own against the turns since: a batch
+// call files the new well but rarely notices a step done in passing ("I
+// merged the PR") or one that was never the user's. A few cents per 100
+// turns, against the eval's most common false alarm.
+export const SWEEP_EVERY = 10;
+export const SWEEP_AGE = 8;
+const SWEEP_CHARS = 60_000;
+
+export const quiet = (s: Store) =>
+  live(s).filter(
+    (i) => isWaiting(i) && s.read - (i.src.at(-1) ?? 0) >= SWEEP_AGE,
+  );
+
+export const SWEEP_SYSTEM = `You check a map of one Claude Code conversation for items said to wait on the user that may already be settled. For each item listed, read the turns shown (the conversation since the item last came up) and decide:
+- still waiting: leave it out of your answer;
+- done: the user did it, said they did ("merged", "deployed", "tested", "sent", "works"), or a later turn shows it happened;
+- dropped: the user moved on without taking up an optional offer, or the conversation made it moot;
+- not the user's: it belongs to someone else named in the chat (a teammate, a reviewer). Mark it dropped with reason "not the user's".
+Answer through the schema with "update" ops only: the item's id as "item", the new "state" (done for tasks and asks that happened, answered for questions, dropped otherwise), the "turn" that shows it, and a short "quote" from that turn. Leave out anything you are not sure about. Leave "topics" empty.`;
+
+// the items to check and the turns since the oldest came up, newest kept
+// whole when that runs long
+export function sweepMessage(
+  s: Store,
+  items: Item[],
+  turns: Turn[],
+): { message: string; shown: Turn[] } {
+  const from = Math.min(...items.map((i) => i.src.at(-1) ?? 0)) + 1;
+  const since = turns.filter((t) => t.n >= from && t.n <= s.read);
+  const parts = since.map(
+    (t) =>
+      `TURN ${t.n} · YOU:\n${clip(t.text, 1500)}\n\nTURN ${t.n} · CLAUDE:\n${clip(t.reply, 600, 900) || "(no words)"}`,
+  );
+  let chars = parts.reduce((n, p) => n + p.length, 0);
+  let first = 0;
+  while (chars > SWEEP_CHARS && first < parts.length - 1)
+    chars -= parts[first++]!.length;
+  const shown = since.slice(first);
+  const list = items
+    .map(
+      (i) =>
+        `- ${i.id} ${i.type} ${i.state}${i.owner ? ` owner=${i.owner}` : ""} (last came up turn ${i.src.at(-1)}): ${i.title}`,
+    )
+    .join("\n");
+  return {
+    message: `ITEMS TO CHECK:\n${list}\n\nTHE CONVERSATION SINCE:\n${parts.slice(first).join("\n\n")}`,
+    shown,
+  };
 }
 
 export function message(s: Store, turns: Turn[]): string {

@@ -15,7 +15,11 @@ import {
   apply,
   batches,
   message,
+  quiet,
   SCHEMA,
+  SWEEP_EVERY,
+  SWEEP_SYSTEM,
+  sweepMessage,
   SYSTEM,
   type Answer,
 } from "../ledger/extract.ts";
@@ -160,7 +164,9 @@ async function run(file: string) {
     output: 0,
     rejected: 0,
     failed: 0,
+    sweeps: 0,
   };
+  let lastSweep = 0;
   let model_ = "";
   // a batch never runs past a checkpoint: the map saved there must not have
   // read later turns than the labeler sees
@@ -211,6 +217,28 @@ async function run(file: string) {
     log.write(
       `${JSON.stringify({ turns: batch.map((t) => t.n), ok: r.ok, error: r.error, answer: r.value, rejected, usd: r.usage?.costUsd, ms: r.ms })}\n`,
     );
+    // the sweep, as live: what waits on you and has gone quiet, checked
+    // against the turns since
+    if (s.read - lastSweep >= SWEEP_EVERY && quiet(s).length) {
+      lastSweep = s.read;
+      const { message: m, shown } = sweepMessage(s, quiet(s), turns);
+      const w = await provider.extract!({
+        system: SWEEP_SYSTEM,
+        message: m,
+        schema: SCHEMA as unknown as Record<string, unknown>,
+        model,
+        timeoutMs: 180_000,
+      });
+      spend.calls++;
+      spend.sweeps++;
+      spend.ms += w.ms;
+      spend.usd += w.usage?.costUsd ?? 0;
+      spent += w.usage?.costUsd ?? 0;
+      const out = w.ok ? apply(s, w.value as Answer, shown) : null;
+      log.write(
+        `${JSON.stringify({ sweep: true, at: s.read, ok: w.ok, answer: w.value, rejected: out?.rejected, usd: w.usage?.costUsd })}\n`,
+      );
+    }
     for (const m of marks)
       if (
         batch.some((t) => t.n === m) &&

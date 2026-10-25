@@ -30,7 +30,11 @@ import {
   asksSomething,
   batches,
   message,
+  quiet,
   SCHEMA,
+  SWEEP_EVERY,
+  SWEEP_SYSTEM,
+  sweepMessage,
   SYSTEM,
   type Answer,
 } from "./extract.ts";
@@ -116,6 +120,7 @@ type Follower = {
   snapped: number;
   // Claude's own task list, as its calls left it
   plan?: Plan;
+  lastSweep: number; // the read point the last sweep checked at
 };
 
 const mtimeOf = (file: string) => {
@@ -167,6 +172,7 @@ export function createLedger(deps: LedgerDeps) {
       nudged: false,
       lookedForNext: now(),
       snapped: 0,
+      lastSweep: 0,
     };
     followers.set(c.root, f);
     return f;
@@ -454,10 +460,60 @@ export function createLedger(deps: LedgerDeps) {
       f.failures = 0;
       f.retryAt = 0;
       f.error = undefined;
+      const store = f.s.store;
+      if (store.read - f.lastSweep >= SWEEP_EVERY && quiet(store).length) {
+        f.lastSweep = store.read;
+        await sweep(f);
+      }
     } catch (e) {
       console.error("[ledger] filing turns failed:", e);
       fail("Filing the chat's turns failed on the server.");
     }
+  }
+
+  // What waits on you and has gone quiet, checked on its own against the
+  // turns since (extract.ts): saved and applied like any run. A failed sweep
+  // is left for the next one; it never holds up filing.
+  async function sweep(f: Follower) {
+    const root = f.s.conv.root;
+    const base = f.s.store.read;
+    const { message: m, shown } = sweepMessage(
+      f.s.store,
+      quiet(f.s.store),
+      f.turns,
+    );
+    if (!shown.length) return;
+    const r = await deps.extract!({
+      system: SWEEP_SYSTEM,
+      message: m,
+      schema: SCHEMA as unknown as Record<string, unknown>,
+      model: model(),
+      timeoutMs: 120_000,
+    });
+    const usage = r.usage
+      ? {
+          usd: r.usage.costUsd,
+          input: r.usage.input,
+          output: r.usage.output,
+          model: r.usage.model,
+        }
+      : null;
+    const answer = r.ok ? checkAnswer(r.value) : null;
+    const turns = shown.map((t) => t.n);
+    if (!answer || f.s.store.read !== base) {
+      db.saveRun(
+        root,
+        { turns, base, error: "sweep: no usable answer", usage, ms: r.ms },
+        now(),
+      );
+      return;
+    }
+    const id = db.saveRun(
+      root,
+      { turns, base, answer: r.value, usage, ms: r.ms },
+      now(),
+    );
+    commitRun(f, id, answer, shown);
   }
 
   async function tickOne(f: Follower) {

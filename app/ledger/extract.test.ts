@@ -5,7 +5,14 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { apply, batches, message, type Answer } from "./extract.ts";
+import {
+  apply,
+  batches,
+  message,
+  quiet,
+  sweepMessage,
+  type Answer,
+} from "./extract.ts";
 import { emptyStore, listsOf, type Store } from "./items.ts";
 import type { Turn } from "./transcript.ts";
 
@@ -363,4 +370,42 @@ test("a step only you can do waits on you until it is done, however long ago", (
   assert.ok(listsOf(s).waiting.some((i) => i.id === "i9"));
   s.items.get("i9")!.state = "done";
   assert.ok(!listsOf(s).waiting.some((i) => i.id === "i9"));
+});
+
+test("the sweep checks what waits on you and has gone quiet, against the turns since", () => {
+  const s = first(); // i2 waits on you, from turn 1
+  const later = Array.from({ length: 12 }, (_, k) =>
+    turn(k + 2, k === 6 ? "I picked VPC peering and it works." : "ok", "Done."),
+  );
+  s.read = 13;
+  const items = quiet(s);
+  assert.deepEqual(
+    items.map((i) => i.id),
+    ["i2"],
+  );
+  const { message: m, shown } = sweepMessage(s, items, later);
+  assert.match(m, /ITEMS TO CHECK:\n- i2 question open owner=you/);
+  assert.deepEqual(
+    shown.map((t) => t.n),
+    later.map((t) => t.n),
+  );
+  const r = apply(
+    s,
+    {
+      topics: [],
+      ops: [
+        {
+          op: "update",
+          item: "i2",
+          state: "answered",
+          turn: 8,
+          quote: "I picked VPC peering",
+        },
+      ],
+    },
+    shown,
+  );
+  assert.deepEqual(r.rejected, []);
+  assert.equal(s.items.get("i2")!.state, "answered");
+  assert.deepEqual(quiet(s), []);
 });

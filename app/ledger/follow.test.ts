@@ -12,6 +12,7 @@ import { test } from "vitest";
 
 import { applyAction } from "./apply.ts";
 import { openDb, type Conv } from "./db.ts";
+import { SWEEP_SYSTEM } from "./extract.ts";
 import { backoff, createLedger, QUIET_MS } from "./follow.ts";
 import { emptyStore, type Item } from "./items.ts";
 import type {
@@ -576,3 +577,45 @@ test("a snapshot when following starts and after each sealed turn; what differs 
   await t.ledger.tick();
   assert.equal(t.ledger.view(root)!.changes.length, 1);
 });
+
+test("what waits on you and goes quiet is swept: checked again against the turns since", async () => {
+  const c = chat();
+  const sweeps: ExtractRequest[] = [];
+  const t = setup((req) => {
+    if (req.system !== SWEEP_SYSTEM) return filing(req);
+    sweeps.push(req);
+    const id = /- (i\d+) question/.exec(req.message)?.[1];
+    const n = Number(/TURN (\d+) · YOU:\nI chose/.exec(req.message)?.[1] ?? 0);
+    return {
+      ok: true,
+      value: {
+        topics: [],
+        ops: [
+          {
+            op: "update",
+            item: id,
+            state: "answered",
+            turn: n,
+            quote: "I chose",
+          },
+        ],
+      },
+      ms: 1,
+      usage: null,
+    };
+  });
+  const root = t.link(c);
+  // the file is old: every turn is sealed when first read
+  c.turn("Postgres or Mongo?", "Which do you want?");
+  for (let k = 0; k < 11; k++)
+    c.turn(k === 4 ? "I chose Postgres, go on." : "next", "Done.");
+  const ago = (Date.now() - 3_600_000) / 1000;
+  fs.utimesSync(c.file, ago, ago);
+  for (let k = 0; k < 8 && t.ledger.view(root)!.read < 12; k++) {
+    t.advance(60_000);
+    await t.ledger.tick();
+  }
+  assert.ok(sweeps.length >= 1, "a sweep ran");
+  const v = t.ledger.view(root)!;
+  assert.deepEqual(v.strip.waiting, []);
+}, 30_000);
