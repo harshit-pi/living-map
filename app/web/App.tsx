@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -17,10 +19,14 @@ import { useLiveMap } from "./lib/live.ts";
 import { useSignedIn } from "./lib/session.ts";
 import { store, stored } from "./lib/storage.ts";
 import type { Workspace } from "./lib/workspace.ts";
+import { useLedgerProbe, wantsFixture } from "./map/probe.ts";
 import { modeOf, PLUGINS, pluginFor } from "./plugins.ts";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
 import { StartScreen } from "./screens/StartScreen.tsx";
 import { Frame } from "../layer/web/Rail.tsx";
+
+// the map of your chat, loaded only when the server has one for this page
+const MapScreen = lazy(() => import("./map/MapScreen.tsx"));
 
 const DEFAULTS: Settings = { model: "", effort: "" };
 
@@ -36,11 +42,29 @@ const useRoomy = () => useSyncExternalStore(onResize, isRoomy, () => false);
 
 // Not signed in (the page was opened without the skill's one-time link):
 // nothing of your maps is shown, only how to open it.
+// ?fixture=1 draws the fixture map; a dev build lets it past the sign-in, so
+// the page can be worked on with no server behind it.
 export default function App() {
   const signedIn = useSignedIn();
-  if (signedIn === false) return <SignedOut />;
-  if (signedIn === null) return <div className="h-full bg-canvas" />;
-  return <MapApp />;
+  const [fixture] = useState(wantsFixture);
+  const open = signedIn || (fixture && import.meta.env.DEV);
+  if (!open && signedIn === false) return <SignedOut />;
+  if (!open) return <div className="h-full bg-canvas" />;
+  return <Chooser fixture={fixture} />;
+}
+
+// the new map when the server answers with one (the experimental flag on, a
+// chat linked); otherwise the page as it was
+function Chooser({ fixture }: { fixture: boolean }) {
+  const probe = useLedgerProbe(fixture);
+  const blank = <div className="h-full bg-canvas" />;
+  if (probe === null) return blank;
+  if (probe === "none") return <MapApp />;
+  return (
+    <Suspense fallback={blank}>
+      <MapScreen initial={probe.view} fixture={probe.fixture} />
+    </Suspense>
+  );
 }
 
 function SignedOut() {

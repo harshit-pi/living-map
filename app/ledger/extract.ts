@@ -213,6 +213,31 @@ export function apply(
   };
   const reject = (op: Op, why: string) => rejected.push({ op, why });
 
+  // A create the model gave no ref is still named by its place among the
+  // creates (new1, new2, ...): models refer to them that way when they
+  // forget to name them.
+  const named = new Set(answer.ops.flatMap((o) => (o.ref ? [o.ref] : [])));
+  let k = 0;
+  for (const o of answer.ops)
+    if (o.op === "create") {
+      k++;
+      if (!o.ref && !named.has(`new${k}`)) o.ref = `new${k}`;
+    }
+
+  // a turn the answer gave no topic stays with the topic before it
+  const topicFor = (turn: number): string | undefined => {
+    const own = answer.topics.find((t) => t.turn === turn)?.topic;
+    if (own) return own;
+    const before = [...answer.topics]
+      .filter((t) => t.turn < turn)
+      .sort((a, b) => b.turn - a.turn)[0]?.topic;
+    if (before) return before;
+    const filed = [...s.topicOf.entries()]
+      .filter(([n]) => n < turn)
+      .sort((a, b) => b[0] - a[0])[0]?.[1];
+    return filed;
+  };
+
   // topics first, so every create can fall back to its turn's topic
   const topicOps = answer.ops.filter(
     (o) => o.op === "create" && o.type === "topic",
@@ -246,9 +271,7 @@ export function apply(
       let parent: string | null = null;
       if (type !== "topic") {
         const p = resolve(op.parent);
-        const fallback = resolve(
-          answer.topics.find((t) => t.turn === op.turn)?.topic,
-        );
+        const fallback = resolve(topicFor(op.turn));
         parent = exists(p) ? p! : exists(fallback) ? fallback! : null;
       }
       const id = `i${s.next++}`;
@@ -313,10 +336,10 @@ export function apply(
     applied.push(op);
   }
 
-  for (const t of answer.topics) {
-    const id = resolve(t.topic);
+  for (const t of turns) {
+    const id = resolve(topicFor(t.n));
     if (exists(id) && s.items.get(id!)!.type === "topic")
-      s.topicOf.set(t.turn, id!);
+      s.topicOf.set(t.n, id!);
   }
   s.read = Math.max(s.read, ...turns.map((t) => t.n));
   return { applied, rejected };

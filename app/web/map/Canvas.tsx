@@ -1,0 +1,165 @@
+import {
+  Background,
+  BaseEdge,
+  ReactFlow,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type Viewport,
+} from "@xyflow/react";
+import { useMemo } from "react";
+
+import { COL, NODE_H, NODE_W, ROOT, type Layout } from "./layout.ts";
+import { countsOf, countsText, descendants } from "./lens.ts";
+import { ItemNode, type ItemData } from "./nodes.tsx";
+import type { LedgerItem } from "../../shared/ledger.ts";
+
+const nodeTypes = { item: ItemNode };
+
+// out of the parent's right side, down the gap between the columns, across
+// into the child: every child of one parent shares that one vertical line
+function Branch({ sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
+  const mid = sourceX + (COL - NODE_W) / 2;
+  const path =
+    Math.abs(targetY - sourceY) < 1
+      ? `M ${sourceX} ${sourceY} H ${targetX}`
+      : `M ${sourceX} ${sourceY} H ${mid} V ${targetY} H ${targetX}`;
+  return <BaseEdge path={path} style={style} />;
+}
+const edgeTypes = { branch: Branch };
+
+const LINE = "var(--color-line-strong)";
+const LINK = "var(--color-faint)";
+
+// The map drawn: one node per placed item at the layout's position, tree
+// edges from parent to child, cross-links dashed. Nothing here decides a
+// position; a lens or a search only lights and dims.
+export function Canvas({
+  title,
+  items,
+  laid,
+  folded,
+  lit,
+  newIds,
+  selected,
+  initial,
+  onNode,
+  onPane,
+  onUserMove,
+}: {
+  title: string;
+  items: LedgerItem[];
+  laid: Layout;
+  folded: (id: string) => boolean;
+  // null: no lens or search on, nothing dims
+  lit: ((i: LedgerItem) => boolean) | null;
+  newIds: Set<string>;
+  selected: string | null;
+  initial: Viewport;
+  onNode: (id: string) => void;
+  onPane: () => void;
+  onUserMove: () => void;
+}) {
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const nodes = useMemo((): Node[] => {
+    return laid.order.map((id) => {
+      const p = laid.nodes.get(id)!;
+      const item = id === ROOT ? null : (byId.get(id) ?? null);
+      const isFolded = !!item && item.type === "topic" && folded(id);
+      const under = isFolded ? descendants(items, id) : [];
+      const data: ItemData = {
+        item,
+        title: item?.title ?? title,
+        folded: isFolded,
+        hasKids: item ? items.some((i) => i.parent === id) : true,
+        counts: isFolded ? countsText(countsOf(under)) : null,
+        lensCount: isFolded && lit ? under.filter(lit).length : 0,
+        lit: !!item && !!lit && lit(item),
+        dim:
+          !!lit &&
+          (!item ||
+            !(
+              lit(item) ||
+              (isFolded && under.some(lit)) ||
+              // a topic stays readable while what it holds is lit
+              (item.type === "topic" && descendants(items, id).some(lit))
+            )),
+        selected: selected === id,
+        isNew: newIds.has(id),
+      };
+      return {
+        id,
+        type: "item",
+        position: { x: p.x, y: p.y },
+        width: NODE_W,
+        height: NODE_H,
+        data,
+        draggable: false,
+        selectable: false,
+      };
+    });
+  }, [laid, byId, items, title, folded, lit, selected, newIds]);
+
+  const edges = useMemo((): Edge[] => {
+    const dimmed = new Set(
+      nodes.filter((n) => (n.data as ItemData).dim).map((n) => n.id),
+    );
+    const tree = laid.edges.map((e): Edge => ({
+      id: `${e.from}>${e.to}`,
+      source: e.from,
+      target: e.to,
+      type: "branch",
+      style: {
+        stroke: LINE,
+        strokeWidth: 1.5,
+        opacity: dimmed.has(e.to) ? 0.3 : 1,
+      },
+    }));
+    const links = laid.links.map((l): Edge => ({
+      id: `${l.from}~${l.to}`,
+      source: l.from,
+      target: l.to,
+      type: "default",
+      label: l.rel,
+      labelStyle: { fill: "var(--color-muted)", fontSize: 10 },
+      labelBgStyle: { fill: "var(--color-canvas)" },
+      style: {
+        stroke: LINK,
+        strokeWidth: 1.25,
+        strokeDasharray: "5 4",
+        opacity: dimmed.has(l.from) && dimmed.has(l.to) ? 0.3 : 1,
+      },
+    }));
+    return [...tree, ...links];
+  }, [laid, nodes]);
+
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
+      defaultViewport={initial}
+      elementsSelectable={false}
+      nodesDraggable={false}
+      nodesConnectable={false}
+      onNodeClick={(_, n) => {
+        if (n.id !== ROOT) onNode(n.id);
+      }}
+      onPaneClick={onPane}
+      // a move with an event behind it is yours (a drag, the wheel, a pinch);
+      // the camera moving for Now or a step has none
+      onMoveStart={(e) => {
+        if (e) onUserMove();
+      }}
+      // the wheel pans; a pinch or Ctrl-wheel zooms
+      panOnScroll
+      zoomOnScroll={false}
+      minZoom={0.2}
+      maxZoom={1.6}
+      proOptions={{ hideAttribution: true }}
+    >
+      <Background color="var(--color-line-strong)" gap={22} />
+    </ReactFlow>
+  );
+}

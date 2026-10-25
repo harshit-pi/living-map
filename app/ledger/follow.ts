@@ -1,0 +1,503 @@
+// Following your chats live: one follower per linked chat reads its
+// transcript as it grows, and files the new sealed turns with one fresh
+// extractor call (extract.ts) that sees only the map so far and those
+// turns, so it costs the same however long the chat gets.
+//
+// - Every couple of seconds it reads what the transcript gained.
+// - A turn is sealed when a later prompt exists, or the file has been still
+//   for 5 s after Claude ended it (transcript.ts).
+// - It runs at once after a sealed turn that asks or offers something, else
+//   once 3 sealed turns wait, else after 20 s of quiet.
+// - One extraction per chat at a time, at most 2 overall; a failure is
+//   tried again later and later (30 s doubling to 10 min), its error shown.
+// - A long chat linked late reads its newest 40 turns first; older ones are
+//   skipped for now.
+
+import fs from "node:fs";
+import path from "node:path";
+
+import { applyAction, applyAnswer, checkAnswer, place } from "./apply.ts";
+import type { Conv, LedgerDb, State } from "./db.ts";
+import {
+  asksSomething,
+  batches,
+  message,
+  SCHEMA,
+  SYSTEM,
+  type Answer,
+} from "./extract.ts";
+import {
+  emptyTranscript,
+  readMore,
+  view as readView,
+  type Transcript,
+  type Turn,
+} from "./transcript.ts";
+import { buildView } from "./view.ts";
+import { successor } from "../server/providers/claude-sessions.ts";
+import type {
+  Conversation,
+  ExtractRequest,
+  ExtractResult,
+} from "../server/providers/types.ts";
+import type {
+  LedgerAction,
+  LedgerEvent,
+  LedgerView,
+} from "../shared/ledger.ts";
+
+export const TICK_MS = 2000;
+export const QUIET_MS = 20_000;
+export const BATCH = 3;
+export const LATE_TURNS = 40;
+export const MAX_RUNNING = 2;
+// how long a quiet chat waits before looking for its continuation (resumed
+// under a new id, in another file)
+const SUCCESSOR_MS = 15_000;
+
+export const backoff = (failures: number) =>
+  failures ? Math.min(10 * 60_000, 30_000 * 2 ** (failures - 1)) : 0;
+
+export type LedgerDeps = {
+  db: LedgerDb;
+  extract?: (req: ExtractRequest) => Promise<ExtractResult>;
+  emit: (e: LedgerEvent) => void;
+  // words for the main chat, delivered through its inbox
+  tell?: (conv: Conv, text: string) => void;
+  // the model the extractor runs on ("" for Claude Code's default)
+  model?: () => string;
+  now?: () => number;
+  everyMs?: number; // 0: no timer (tests call tick)
+  findSuccessor?: (file: string, id: string) => string | null;
+};
+
+type Follower = {
+  s: State;
+  t: Transcript;
+  file: string;
+  grewAt: number; // when the transcript last grew
+  turns: Turn[];
+  sealed: number;
+  readOnce: boolean;
+  readBusy: boolean;
+  running: Promise<void> | null;
+  failures: number;
+  retryAt: number;
+  error?: string;
+  // a backlog being read (linked late, or many turns behind): from where,
+  // up to which turn
+  backlog?: { from: number; to: number };
+  nudged: boolean; // the page opened: run what is waiting now
+  lookedForNext: number;
+};
+
+const mtimeOf = (file: string) => {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return undefined;
+  }
+};
+
+const unique = (ids: string[]) => [...new Set(ids.filter(Boolean))];
+
+export function createLedger(deps: LedgerDeps) {
+  const { db } = deps;
+  const now = deps.now ?? Date.now;
+  const followers = new Map<string, Follower>();
+  let active = 0;
+  let warnedHaiku = false;
+
+  // judgment (what waits on you, what was decided) never runs on Haiku
+  const model = () => {
+    const m = deps.model?.() ?? "";
+    if (/haiku/i.test(m)) {
+      if (!warnedHaiku)
+        console.warn(
+          `[ledger] ledgerModel "${m}" ignored: the map never files on Haiku`,
+        );
+      warnedHaiku = true;
+      return "";
+    }
+    return m;
+  };
+
+  function addFollower(c: Conv): Follower {
+    const s = db.load(c.root);
+    if (!s) throw new Error(`no conversation ${c.root}`);
+    const f: Follower = {
+      s,
+      t: emptyTranscript(),
+      file: c.file,
+      grewAt: now(),
+      turns: [],
+      sealed: 0,
+      readOnce: false,
+      readBusy: false,
+      running: null,
+      failures: 0,
+      retryAt: 0,
+      nudged: false,
+      lookedForNext: now(),
+    };
+    followers.set(c.root, f);
+    return f;
+  }
+
+  // Starts following one of your conversations (or carries on, if it was
+  // already), under the first id it had.
+  function follow(c: Conversation): string {
+    const ids = unique([...(c.previous ?? []), c.id]);
+    const t = now();
+    const conv: Conv = db.findConv(ids) ?? {
+      root: ids[0]!,
+      ids: [],
+      title: "",
+      cwd: "",
+      file: "",
+      lookedTurn: 0,
+      following: true,
+      linkedAt: t,
+      skipped: 0,
+    };
+    conv.ids = unique([conv.root, ...conv.ids, ...ids]);
+    conv.title = c.title || conv.title;
+    conv.cwd = c.cwd || conv.cwd;
+    conv.file = c.file || conv.file;
+    conv.following = true;
+    conv.linkedAt = t;
+    db.saveConv(conv);
+    const f = followers.get(conv.root);
+    if (!f) addFollower(conv);
+    else {
+      f.s.conv = conv;
+      f.s.store.title = conv.title;
+      // carried on in another file: read that one from the start
+      if (f.file !== conv.file) restart(f, conv.file);
+    }
+    push(conv.root);
+    return conv.root;
+  }
+
+  function restart(f: Follower, file: string) {
+    f.file = file;
+    f.t = emptyTranscript();
+    f.readOnce = false;
+    f.grewAt = now();
+  }
+
+  // the followers marked following when the server last stopped
+  function resume() {
+    for (const c of db.conversations())
+      if (c.following && !followers.has(c.root) && c.file) addFollower(c);
+  }
+
+  async function read(f: Follower) {
+    if (f.readBusy) return;
+    f.readBusy = true;
+    const before = { turns: f.turns.length, sealed: f.sealed };
+    try {
+      let grew = false;
+      try {
+        const r = await readMore(f.t, f.file);
+        grew = r.added > 0 || r.reset;
+      } catch {
+        if (f.error !== "The chat's transcript can't be read.") {
+          f.error = "The chat's transcript can't be read.";
+          push(f.s.conv.root);
+        }
+        return;
+      }
+      const t = now();
+      // read for the first time: still since the file was last written
+      if (!f.readOnce) f.grewAt = Math.min(t, mtimeOf(f.file) ?? t);
+      else if (grew) f.grewAt = t;
+      else if (
+        t - f.grewAt > SUCCESSOR_MS &&
+        t - f.lookedForNext > SUCCESSOR_MS
+      ) {
+        f.lookedForNext = t;
+        const id = f.s.conv.ids.at(-1) ?? f.s.conv.root;
+        const next = (deps.findSuccessor ?? successor)(f.file, id);
+        if (next) {
+          const conv = f.s.conv;
+          conv.ids = unique([...conv.ids, path.basename(next, ".jsonl")]);
+          conv.file = next;
+          db.saveConv(conv);
+          restart(f, next);
+          return;
+        }
+      }
+      const v = readView(f.t, t - f.grewAt);
+      f.turns = v.turns;
+      f.sealed = v.sealed;
+      if (grew) db.setSource(f.file, f.s.conv.root, f.t.offset, t);
+      if (!f.readOnce) {
+        f.readOnce = true;
+        if (f.error === "The chat's transcript can't be read.")
+          f.error = undefined;
+        recover(f);
+        lateLink(f);
+      }
+      if (before.turns !== f.turns.length || before.sealed !== f.sealed)
+        push(f.s.conv.root);
+    } finally {
+      f.readBusy = false;
+    }
+  }
+
+  // Answers saved before a stop that never got applied: applied now, once.
+  function recover(f: Follower) {
+    for (const run of db.pendingRuns(f.s.conv.root)) {
+      const turns = run.turns.map((n) => f.turns.find((t) => t.n === n));
+      const answer = checkAnswer(run.answer);
+      if (turns.some((t) => !t) || !answer) {
+        db.failRun(run.id, "its turns are no longer in the transcript");
+        continue;
+      }
+      if (run.base !== f.s.store.read) {
+        db.failRun(run.id, "the map moved on before it was applied");
+        continue;
+      }
+      try {
+        commitRun(f, run.id, answer, turns as Turn[]);
+      } catch (e) {
+        console.error("[ledger] could not apply a saved answer:", e);
+      }
+    }
+  }
+
+  // A long chat linked late is read from its newest turns: reading all of it
+  // would take many calls before the map shows anything.
+  function lateLink(f: Follower) {
+    const { store, conv } = f.s;
+    const fresh = store.read === 0 && store.items.size === 0;
+    if (fresh && conv.skipped === 0 && f.sealed > LATE_TURNS) {
+      conv.skipped = f.sealed - LATE_TURNS;
+      store.read = conv.skipped;
+      db.commit(
+        f.s,
+        [{ writer: "extractor", op: { op: "skip", turns: conv.skipped } }],
+        now(),
+      );
+      console.log(
+        `[ledger] ${conv.root}: linked late; the newest ${LATE_TURNS} turns are read, ${conv.skipped} earlier ones are skipped for now`,
+      );
+    }
+    if (f.sealed - store.read > BATCH)
+      f.backlog = { from: store.read, to: f.sealed };
+  }
+
+  const pendingOf = (f: Follower) =>
+    f.turns.slice(0, f.sealed).filter((t) => t.n > f.s.store.read);
+
+  function due(f: Follower, pending: Turn[]): boolean {
+    if (!pending.length) return false;
+    if (f.nudged || (f.backlog && f.backlog.to > f.s.store.read)) return true;
+    return (
+      pending.some(asksSomething) ||
+      pending.length >= BATCH ||
+      now() - f.grewAt >= QUIET_MS
+    );
+  }
+
+  function maybeRun(f: Follower): Promise<void> | null {
+    if (f.running) return f.running;
+    if (!f.readOnce || !deps.extract || !f.s.conv.following) return null;
+    if (active >= MAX_RUNNING) return null;
+    if (f.failures && now() < f.retryAt) return null;
+    const pending = pendingOf(f);
+    if (!due(f, pending)) return null;
+    f.nudged = false;
+    const batch = batches(pending, BATCH)[0]!;
+    active++;
+    f.running = run(f, batch).finally(() => {
+      active--;
+      f.running = null;
+      if (f.backlog && f.s.store.read >= f.backlog.to) f.backlog = undefined;
+      push(f.s.conv.root);
+    });
+    return f.running;
+  }
+
+  function commitRun(f: Follower, id: number, answer: Answer, turns: Turn[]) {
+    const root = f.s.conv.root;
+    try {
+      const { lines, rejected } = applyAnswer(f.s, answer, turns, now());
+      db.commit(f.s, lines, now(), { id, rejected });
+    } catch (e) {
+      // what is in memory follows what was written
+      f.s = db.load(root) ?? f.s;
+      throw e;
+    }
+  }
+
+  async function run(f: Follower, batch: Turn[]) {
+    const root = f.s.conv.root;
+    const base = f.s.store.read;
+    const turns = batch.map((t) => t.n);
+    const fail = (error: string) => {
+      f.failures++;
+      f.retryAt = now() + backoff(f.failures);
+      f.error = error;
+    };
+    try {
+      const r = await deps.extract!({
+        system: SYSTEM,
+        message: message(f.s.store, batch),
+        schema: SCHEMA as unknown as Record<string, unknown>,
+        model: model(),
+        timeoutMs: 120_000,
+      });
+      const usage = r.usage
+        ? {
+            usd: r.usage.costUsd,
+            input: r.usage.input,
+            output: r.usage.output,
+            model: r.usage.model,
+          }
+        : null;
+      const answer = r.ok ? checkAnswer(r.value) : null;
+      if (!answer) {
+        const error = r.ok
+          ? "The map's answer was not in the shape asked for."
+          : r.error || "The model did not answer.";
+        db.saveRun(root, { turns, base, error, usage, ms: r.ms }, now());
+        fail(error);
+        return;
+      }
+      // what you did meanwhile stays; only the read point must not have
+      // moved (one run per chat at a time keeps it so)
+      if (f.s.store.read !== base) {
+        db.saveRun(
+          root,
+          { turns, base, error: "the map moved on", usage, ms: r.ms },
+          now(),
+        );
+        return;
+      }
+      const id = db.saveRun(
+        root,
+        { turns, base, answer: r.value, usage, ms: r.ms },
+        now(),
+      );
+      commitRun(f, id, answer, batch);
+      f.failures = 0;
+      f.retryAt = 0;
+      f.error = undefined;
+    } catch (e) {
+      console.error("[ledger] filing turns failed:", e);
+      fail("Filing the chat's turns failed on the server.");
+    }
+  }
+
+  async function tickOne(f: Follower) {
+    await read(f);
+    await maybeRun(f);
+  }
+
+  // one round for every follower; resolves when what it started is done
+  async function tick() {
+    await Promise.all([...followers.values()].map(tickOne));
+  }
+
+  const startOfDay = (t: number) => {
+    const d = new Date(t);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+
+  function stateOf(root: string): { s: State; f?: Follower } | null {
+    const f = followers.get(root);
+    if (f) return { s: f.s, f };
+    const s = db.load(root);
+    return s ? { s } : null;
+  }
+
+  function viewOf(root: string): LedgerView | null {
+    const hit = stateOf(root);
+    if (!hit) return null;
+    const { s, f } = hit;
+    const read = s.store.read;
+    return buildView(s, {
+      turns: f?.turns.length ?? read,
+      behind: f ? Math.max(0, f.sealed - read) : 0,
+      following: s.conv.following,
+      error: f?.error,
+      reading:
+        f?.backlog && f.backlog.to > read
+          ? {
+              done: read - f.backlog.from,
+              total: f.backlog.to - f.backlog.from,
+            }
+          : undefined,
+      spend: db.spend(root, startOfDay(now())),
+    });
+  }
+
+  function push(root: string) {
+    const v = viewOf(root);
+    if (v) deps.emit({ type: "ledger", conv: root, view: v });
+  }
+
+  // What you did on the map: written as "you" at once, heard by the chat
+  // when it is an answer.
+  function act(
+    root: string,
+    action: LedgerAction,
+  ): { error?: string; view?: LedgerView } {
+    const hit = stateOf(root);
+    if (!hit) return { error: "That chat is not on the map." };
+    const { s, f } = hit;
+    const r = applyAction(s, action, f?.turns.length ?? s.store.read);
+    if (r.error) return { error: r.error };
+    place(s, now());
+    try {
+      db.commit(s, r.lines, now());
+    } catch (e) {
+      if (f) f.s = db.load(root) ?? f.s;
+      throw e;
+    }
+    if (r.tell) deps.tell?.(s.conv, r.tell);
+    push(root);
+    return { view: viewOf(root) ?? undefined };
+  }
+
+  // the page opened on this chat: what waits is filed now
+  function nudge(root: string) {
+    const f = followers.get(root);
+    if (f) f.nudged = true;
+  }
+
+  let timer: ReturnType<typeof setInterval> | null = null;
+  if (deps.everyMs !== 0) {
+    timer = setInterval(() => {
+      for (const f of followers.values())
+        void tickOne(f).catch((e) =>
+          console.error("[ledger] following failed:", e),
+        );
+    }, deps.everyMs ?? TICK_MS);
+    timer.unref?.();
+  }
+
+  return {
+    follow,
+    resume,
+    tick,
+    view: viewOf,
+    act,
+    nudge,
+    push,
+    // the conversation any of these ids is filed under
+    rootOf: (ids: string[]) => db.findConv(unique(ids))?.root ?? null,
+    // the one linked last
+    latest: () => db.conversations()[0]?.root ?? null,
+    following: () => [...followers.keys()],
+    close() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
+  };
+}
+
+export type Ledger = ReturnType<typeof createLedger>;

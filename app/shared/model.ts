@@ -2,6 +2,8 @@
 // wire, the actions the browser can send, and the events the server pushes.
 // Both sides import this file, so the two can never drift apart.
 
+import type { LedgerEvent } from "./ledger.ts";
+
 export type Kind = "question" | "option" | "fact";
 export type Status =
   "open" | "answered" | "proposed" | "chosen" | "dropped" | "info";
@@ -286,4 +288,6 @@ export type ServerEvent =
     }
   | { type: "delta"; text: string; threadId: string | null }
   | { type: "ping" }
-  | ({ type: "update" } & UpdateStep);
+  | ({ type: "update" } & UpdateStep)
+  // the v3 map of a chat changed (shared/ledger.ts)
+  | LedgerEvent;

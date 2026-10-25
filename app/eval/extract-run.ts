@@ -91,6 +91,24 @@ async function choose(n: number): Promise<string[]> {
   return out;
 }
 
+// The disk can be full for a moment (other work on the machine); a write
+// waits and tries again rather than losing the chat's progress.
+async function save(file: string, text: string) {
+  for (let tries = 0; ; tries++) {
+    try {
+      fs.writeFileSync(file, text);
+      return;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOSPC" || tries >= 40)
+        throw e;
+      console.error(
+        `disk full writing ${path.basename(file)}; trying again in 30 s`,
+      );
+      await new Promise((r) => setTimeout(r, 30_000));
+    }
+  }
+}
+
 let spent = 0;
 
 type Checkpoint = {
@@ -132,6 +150,8 @@ async function run(file: string) {
   const s = emptyStore(conv, path.basename(path.dirname(file)));
   const checkpoints: Checkpoint[] = [];
   const log = fs.createWriteStream(path.join(dir, "log.jsonl"));
+  // a full disk loses log lines, never the run
+  log.on("error", () => {});
   const spend = {
     calls: 0,
     usd: 0,
@@ -182,7 +202,7 @@ async function run(file: string) {
         !checkpoints.some((c) => c.turn === m)
       )
         checkpoints.push(snapshot(s, m));
-    fs.writeFileSync(
+    await save(
       done,
       JSON.stringify(
         {
@@ -201,7 +221,7 @@ async function run(file: string) {
   }
   log.end();
   const complete = checkpoints.length === marks.length;
-  fs.writeFileSync(
+  await save(
     done,
     JSON.stringify(
       {
@@ -217,11 +237,11 @@ async function run(file: string) {
       1,
     ),
   );
-  fs.writeFileSync(
+  await save(
     path.join(dir, "map.mmd"),
     toMermaid(toMapItems(s), { title: s.title, conv, seq: s.read }),
   );
-  fs.writeFileSync(path.join(dir, "page.html"), page(s));
+  await save(path.join(dir, "page.html"), page(s));
   const l = listsOf(s);
   console.log(
     `${conv}: ${turns.length} turns, ${spend.calls} calls, $${spend.usd.toFixed(2)}, ${(spend.ms / 1000).toFixed(0)} s, ${s.items.size} items (${spend.rejected} changes rejected, ${spend.failed} calls failed); waiting ${l.waiting.length}, open ${l.open.length}`,

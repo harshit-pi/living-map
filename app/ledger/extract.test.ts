@@ -303,3 +303,42 @@ test("a state change lands even when its quote doesn't check out", () => {
   );
   assert.equal(s.items.get("i2")!.state, "answered");
 });
+
+test("creates with no ref are named by their place, and a turn with no topic keeps the one before", () => {
+  const s = first();
+  const t3 = turn(
+    3,
+    "And the routes?",
+    "Routes go in both directions. Want me to add them?",
+  );
+  const r = apply(
+    s,
+    {
+      topics: [{ turn: 2, topic: "i1" }],
+      ops: [
+        {
+          op: "create",
+          type: "question",
+          title: "Add routes both ways?",
+          quote: "Want me to add them?",
+          turn: 3,
+          owner: "you",
+        },
+        {
+          op: "create",
+          type: "finding",
+          title: "Routes go both ways",
+          quote: "Routes go in both directions",
+          turn: 3,
+          parent: "new1",
+        },
+      ],
+    },
+    [T2, t3],
+  );
+  assert.deepEqual(r.rejected, []);
+  const [q, f] = [s.items.get("i5")!, s.items.get("i6")!];
+  assert.equal(q.parent, "i1", "turn 3 had no topic: it keeps turn 2's");
+  assert.equal(f.parent, "i5", "new1 names the first create");
+  assert.equal(s.topicOf.get(3), "i1");
+});

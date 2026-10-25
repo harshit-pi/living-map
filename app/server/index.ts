@@ -12,8 +12,9 @@ import { createAuth } from "./auth.ts";
 import { HOME, MODEL_CWD, PORT, PROVIDER } from "./config.ts";
 import { createEngine } from "./engine.ts";
 import { createHub } from "./events.ts";
-import { experimental } from "./flags.ts";
+import { experimental, ledger } from "./flags.ts";
 import { createApp } from "./http.ts";
+import { ledgerServer } from "./ledger.ts";
 import { pickProvider } from "./providers/index.ts";
 import { loadCurrent, saveMap } from "./store.ts";
 import { follow } from "../layer/follow.ts";
@@ -33,12 +34,14 @@ const engine = createEngine({
 // tried out: see flags.ts)
 follow(engine, { refreshView, on: experimental });
 
-// the living-map skill, if you installed it, follows this copy of the app
-try {
-  installSkill(PORT);
-} catch (e) {
-  console.error("[skill] could not refresh the living-map skill:", e);
-}
+// the living-map skill, if you installed it, follows this copy of the app;
+// a copy run with a home of its own (a test, a second server) leaves it alone
+if (!process.env.LIVING_MAP_HOME)
+  try {
+    installSkill(PORT);
+  } catch (e) {
+    console.error("[skill] could not refresh the living-map skill:", e);
+  }
 
 const auth = createAuth({ home: HOME, port: PORT });
 
@@ -47,3 +50,7 @@ createApp(engine, hub, auth).listen(PORT, "127.0.0.1", () =>
     `Living Map on http://localhost:${PORT}  (${provider.name}, working in ${MODEL_CWD})`,
   ),
 );
+
+// the chats the v3 map followed when the server last stopped go on (still
+// being tried out: see flags.ts)
+if (ledger()) void ledgerServer();
