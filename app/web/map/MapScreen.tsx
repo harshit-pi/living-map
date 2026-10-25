@@ -607,6 +607,7 @@ function Screen({
           size={size}
           folded={folded}
           lit={lit}
+          lens={searching && query.trim() ? null : lens}
           newIds={marked}
           selected={selected}
           initial={camera}

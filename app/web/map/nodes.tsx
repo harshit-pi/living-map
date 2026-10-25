@@ -2,7 +2,8 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { Glyph } from "./Glyph.tsx";
 import { NARROW, type Size } from "./layout.ts";
-import { lookOf } from "./look.ts";
+import type { Lens } from "./lens.ts";
+import { LENS_LOOK, lookOf } from "./look.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 // What a node on the map is drawn from: its item (none for the chat's
@@ -15,6 +16,7 @@ export type ItemData = {
   counts: string | null; // "2 waiting · 5 settled", on a folded topic
   lensCount: number; // matches inside a fold, while a lens is on
   lit: boolean;
+  lens: Lens | null; // the lens lighting the map, if it isn't a search
   dim: boolean;
   selected: boolean;
   isNew: boolean;
@@ -35,7 +37,7 @@ const hidden = { opacity: 0, pointerEvents: "none" as const };
 const ring = (d: ItemData) =>
   d.selected
     ? "ring-2 ring-ink ring-offset-2 ring-offset-canvas"
-    : d.lit
+    : d.lit && !d.lens
       ? "ring-2 ring-primary ring-offset-2 ring-offset-canvas"
       : "";
 
@@ -55,12 +57,14 @@ export function ItemNode({ data }: NodeProps) {
   const look = lookOf(i);
   const topic = i.type === "topic";
   const text = textOf(d);
-  // a folded topic keeps a line for what it holds
-  const lines = topic && d.folded ? text.lines - 1 : text.lines;
+  // a topic keeps a line for what it holds
+  const lines = topic && d.counts ? text.lines - 1 : text.lines;
+  // a lens colours the boxes it lights
+  const box = d.lit && d.lens ? LENS_LOOK[d.lens].box : look.box;
   return (
     <div
       style={{ width: d.size.w, height: d.size.h }}
-      className={`relative flex items-center ${text.pad} rounded-lg transition-opacity ${look.box} ${ring(d)} ${d.dim ? "opacity-25" : ""}`}
+      className={`relative flex items-center ${text.pad} rounded-lg transition-opacity ${box} ${ring(d)} ${d.dim ? "opacity-25" : ""}`}
       title={`${i.title}: ${look.tag}`}
     >
       <Handles />
@@ -106,10 +110,12 @@ export function ItemNode({ data }: NodeProps) {
           )}
           {i.title}
         </div>
-        {topic && d.folded && (
+        {topic && d.counts && (
           <div className="truncate text-[10.5px] leading-[13px] text-muted">
             {d.lensCount > 0 ? (
-              <span className="font-medium text-primary-strong">
+              <span
+                className={`font-medium ${d.lens ? LENS_LOOK[d.lens].text : "text-primary-strong"}`}
+              >
                 {d.lensCount} inside ·{" "}
               </span>
             ) : null}

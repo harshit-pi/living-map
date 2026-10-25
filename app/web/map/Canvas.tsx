@@ -11,7 +11,7 @@ import {
 import { useMemo } from "react";
 
 import { ROOT, type Layout, type Size } from "./layout.ts";
-import { countsOf, countsText, descendants } from "./lens.ts";
+import { countsOf, countsText, descendants, type Lens } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import { ItemNode, type ItemData } from "./nodes.tsx";
 import type { LedgerItem } from "../../shared/ledger.ts";
@@ -57,6 +57,7 @@ export function Canvas({
   size,
   folded,
   lit,
+  lens,
   newIds,
   selected,
   initial,
@@ -73,6 +74,7 @@ export function Canvas({
   folded: (id: string) => boolean;
   // null: no lens or search on, nothing dims
   lit: ((i: LedgerItem) => boolean) | null;
+  lens: Lens | null; // the lens behind lit, null for a search
   newIds: Set<string>;
   selected: string | null;
   initial: Viewport;
@@ -113,14 +115,17 @@ export function Canvas({
       const item = id === ROOT ? null : (byId.get(id) ?? null);
       const isFolded = !!item && item.type === "topic" && folded(id);
       const under = isFolded ? descendants(items, id) : [];
+      const all = item?.type === "topic" ? descendants(items, id) : [];
       const data: ItemData = {
         item,
         title: item?.title ?? title,
         folded: isFolded,
         hasKids: item ? items.some((i) => i.parent === id) : true,
-        counts: isFolded ? countsText(countsOf(under)) : null,
+        // what a topic holds, folded or open
+        counts: all.length ? countsText(countsOf(all)) : null,
         lensCount: isFolded && lit ? under.filter(lit).length : 0,
         lit: !!item && !!lit && lit(item),
+        lens,
         dim:
           !!lit &&
           (!item ||
@@ -163,6 +168,7 @@ export function Canvas({
     title,
     folded,
     lit,
+    lens,
     selected,
     newIds,
     size,

@@ -1,3 +1,4 @@
+import type { Lens } from "./lens.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 // How a box looks: every box is white with the same thin border, and one
@@ -141,3 +142,35 @@ export function lookOf(i: LedgerItem): Look {
       };
   }
 }
+
+// A lens colours what it lights, in the colour of its button: the map stays
+// quiet until you ask, then one click shows exactly those boxes.
+export const LENS_LOOK: Record<
+  Lens,
+  { box: string; mark: string; text: string; on: string }
+> = {
+  waiting: {
+    box: "border border-warning bg-warning-soft",
+    mark: "text-warning-strong",
+    text: "text-warning-strong",
+    on: "border-warning bg-warning-soft font-medium text-warning-strong",
+  },
+  open: {
+    box: "border border-open bg-open-soft",
+    mark: "text-open",
+    text: "text-open-strong",
+    on: "border-open bg-open-soft font-medium text-open-strong",
+  },
+  decided: {
+    box: "border border-success bg-success-soft",
+    mark: "text-success",
+    text: "text-success-strong",
+    on: "border-success bg-success-soft font-medium text-success-strong",
+  },
+  changed: {
+    box: "border border-hint bg-hint-soft",
+    mark: "text-hint",
+    text: "text-hint-strong",
+    on: "border-hint bg-hint-soft font-medium text-hint-strong",
+  },
+};
