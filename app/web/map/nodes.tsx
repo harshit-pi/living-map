@@ -17,6 +17,7 @@ export type ItemData = {
   dim: boolean;
   selected: boolean;
   isNew: boolean;
+  now: boolean; // the topic the chat is on, marked with a dot
   size: Size;
 };
 
@@ -72,7 +73,7 @@ export function ItemNode({ data }: NodeProps) {
       ) : (
         <span
           aria-hidden
-          className={`w-3 shrink-0 text-center text-[12px] ${look.title}`}
+          className={`w-3 shrink-0 text-center text-[12px] ${look.mark}`}
         >
           {look.glyph}
         </span>
@@ -83,6 +84,12 @@ export function ItemNode({ data }: NodeProps) {
           // a long name with no spaces breaks instead of running off the box
           className={`${text.title} ${CLAMP[lines]} wrap-break-word ${look.title}`}
         >
+          {topic && d.now && (
+            <span
+              title="The topic the chat is on"
+              className="mr-1.5 inline-block h-2 w-2 rounded-full bg-primary align-[1px]"
+            />
+          )}
           {i.title}
         </div>
         {topic && d.folded && (
@@ -119,7 +126,7 @@ function RootNode({ d }: { d: ItemData }) {
   return (
     <div
       style={{ width: d.size.w, height: d.size.h }}
-      className={`flex items-center justify-center rounded-full border-2 border-ink bg-surface ${d.size === NARROW ? "px-3" : "px-4"} ${d.dim ? "opacity-60" : ""}`}
+      className={`flex items-center justify-center rounded-full border border-line-strong bg-surface ${d.size === NARROW ? "px-3" : "px-4"} ${d.dim ? "opacity-60" : ""}`}
     >
       <Handles />
       <div

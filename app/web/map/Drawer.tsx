@@ -143,7 +143,7 @@ export function Drawer({
               >
                 <span
                   aria-hidden
-                  className={`w-3 shrink-0 text-center text-[12px] ${look.title}`}
+                  className={`w-3 shrink-0 text-center text-[12px] ${look.mark}`}
                 >
                   {look.glyph}
                 </span>

@@ -596,6 +596,7 @@ function Screen({
           newIds={marked}
           selected={selected}
           initial={camera}
+          now={now?.id ?? null}
           onNode={onNode}
           onPane={() => setSelected(null)}
           onUserMove={() => setFollowing(false)}

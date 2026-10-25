@@ -59,6 +59,7 @@ export function Canvas({
   newIds,
   selected,
   initial,
+  now,
   onNode,
   onPane,
   onUserMove,
@@ -74,6 +75,7 @@ export function Canvas({
   newIds: Set<string>;
   selected: string | null;
   initial: Viewport;
+  now?: string | null; // the topic the chat is on
   onNode: (id: string) => void;
   onPane: () => void;
   onUserMove: () => void;
@@ -105,6 +107,7 @@ export function Canvas({
             )),
         selected: selected === id,
         isNew: newIds.has(id),
+        now: id === now,
         size,
       };
       return {
@@ -127,7 +130,7 @@ export function Canvas({
           "rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
       };
     });
-  }, [laid, byId, items, title, folded, lit, selected, newIds, size]);
+  }, [laid, byId, items, title, folded, lit, selected, newIds, size, now]);
 
   const edges = useMemo((): Edge[] => {
     const dimmed = new Set(
@@ -141,7 +144,7 @@ export function Canvas({
       data: { gap: size.col - size.w },
       style: {
         stroke: LINE,
-        strokeWidth: 1.5,
+        strokeWidth: 1,
         opacity: dimmed.has(e.to) ? 0.3 : 1,
       },
     }));
@@ -155,7 +158,7 @@ export function Canvas({
       labelBgStyle: { fill: "var(--color-canvas)" },
       style: {
         stroke: LINK,
-        strokeWidth: 1.25,
+        strokeWidth: 1,
         strokeDasharray: "5 4",
         opacity: dimmed.has(l.from) && dimmed.has(l.to) ? 0.3 : 1,
       },

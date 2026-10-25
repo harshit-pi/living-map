@@ -1,5 +1,19 @@
 import { LENSES, type Lens } from "./lens.ts";
 
+// Each lens wears the mark and colour of the boxes it lights, so the row
+// reads as the map's key: amber for what waits on you, the green ◆ of a
+// decision.
+const KEY: Record<Lens, { glyph: string; mark: string; off: string }> = {
+  waiting: {
+    glyph: "⚑",
+    mark: "text-warning-strong",
+    off: "border-warning bg-warning-soft text-warning-strong",
+  },
+  open: { glyph: "☐", mark: "text-muted", off: "border-line text-body" },
+  decided: { glyph: "◆", mark: "text-success", off: "border-line text-body" },
+  changed: { glyph: "±", mark: "text-muted", off: "border-line text-body" },
+};
+
 // The lenses and the map's tools, under the strip. A lens lights its items
 // and dims the rest in place; a second click turns it off.
 export function Toolbar({
@@ -45,8 +59,11 @@ export function Toolbar({
                   ? `Turn off ${l.label}`
                   : `Light up ${l.label.toLowerCase()} items`
               }
-              className={`${tool} gap-1 ${on ? "border-ink bg-surface font-medium text-ink" : "border-line text-body hover:bg-panel"}`}
+              className={`${tool} gap-1 ${on ? "border-ink bg-surface font-medium text-ink" : `${KEY[l.id].off} hover:bg-panel`}`}
             >
+              <span aria-hidden className={KEY[l.id].mark}>
+                {KEY[l.id].glyph}
+              </span>
               {l.label}
               <span
                 className={`tabular-nums ${on ? "text-ink" : "text-muted"} ${l.id === "waiting" && counts.waiting ? "font-semibold text-warning-strong" : ""}`}

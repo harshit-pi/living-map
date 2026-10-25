@@ -1,126 +1,140 @@
 import type { LedgerItem } from "../../shared/ledger.ts";
 
-export type Look = { box: string; title: string; glyph: string; tag: string };
+// How a box looks: every box is white with the same thin border, and one
+// colour means something: amber, for what waits on you. Everything else says
+// its state with a small glyph (a green ◆ for decided, a green ● for an
+// option taken) and grey text once it is done, settled or dropped.
+export type Look = {
+  box: string;
+  title: string;
+  glyph: string;
+  mark: string; // the glyph's colour
+  tag: string;
+};
 
-// One look per state, never colour alone: a glyph, a word, and colour.
+const PLAIN = "border border-line bg-surface";
+const DONE = "text-muted";
+
 export function lookOf(i: LedgerItem): Look {
   const dropped = i.state === "dropped" || i.state === "struck";
   if (dropped)
     return {
-      box: "border border-dashed border-line bg-panel",
-      title: "text-muted line-through",
+      box: PLAIN,
+      title: `${DONE} line-through`,
       glyph: "–",
+      mark: DONE,
       tag: i.state,
     };
   if (i.waiting)
     return {
-      box: "border-2 border-warning bg-warning-soft",
+      box: "border border-warning bg-warning-soft",
       title: "text-warning-strong",
-      glyph: i.type === "ask" ? "⚑" : "?",
+      glyph: i.type === "ask" ? "⚑" : i.type === "task" ? "☐" : "?",
+      mark: "text-warning-strong",
       tag: "on you",
     };
   switch (i.type) {
     case "topic":
       return {
-        box:
-          i.state === "active"
-            ? "border-2 border-primary bg-surface"
-            : i.state === "open"
-              ? "border-2 border-warning-line bg-surface"
-              : "border-2 border-line-strong bg-panel",
-        title: "font-semibold text-ink",
+        box: PLAIN,
+        title:
+          i.state === "done"
+            ? `font-semibold ${DONE}`
+            : "font-semibold text-ink",
         glyph: "",
+        mark: DONE,
         tag: i.state === "done" ? "settled" : i.state,
       };
     case "question":
       return i.open
         ? {
-            box: "rounded-[20px] border border-warning bg-surface",
+            box: `${PLAIN} rounded-[20px]`,
             title: "text-ink",
             glyph: "?",
+            mark: "text-muted",
             tag: i.owner === "claude" ? "Claude's to find out" : "open",
           }
         : {
-            box: "rounded-[20px] border border-line bg-surface",
-            title: "text-body",
+            box: `${PLAIN} rounded-[20px]`,
+            title: DONE,
             glyph: "?",
+            mark: DONE,
             tag: i.state,
           };
     case "option":
       return i.state === "taken"
         ? {
-            box: "border-2 border-success bg-success-soft",
-            title: "text-success-strong",
+            box: PLAIN,
+            title: "text-ink",
             glyph: "●",
+            mark: "text-success",
             tag: "taken",
           }
         : {
-            box: "border border-dashed border-line-strong bg-surface",
-            title: "text-ink",
+            box: PLAIN,
+            title: "text-body",
             glyph: "○",
+            mark: "text-muted",
             tag: "offered",
           };
     case "decision":
       return i.state === "reopened"
         ? {
-            box: "border-2 border-warning bg-surface",
-            title: "font-semibold text-ink",
+            box: PLAIN,
+            title: "text-ink",
             glyph: "◆",
+            mark: "text-warning-strong",
             tag: "reopened",
           }
         : {
-            box: "border-2 border-success bg-success-soft",
-            title: "font-semibold text-success-strong",
+            box: PLAIN,
+            title: "text-ink",
             glyph: "◆",
+            mark: "text-success",
             tag: "decided",
           };
     case "task":
       return i.state === "doing"
         ? {
-            box: "border border-primary bg-primary-soft",
-            title: "text-primary-strong",
+            box: PLAIN,
+            title: "text-ink",
             glyph: "◐",
+            mark: "text-primary",
             tag: i.owner === "claude" ? "Claude is on it" : "doing",
           }
         : i.state === "done"
-          ? {
-              box: "border border-line bg-surface",
-              title: "text-muted",
-              glyph: "☑",
-              tag: "done",
-            }
+          ? { box: PLAIN, title: DONE, glyph: "☑", mark: DONE, tag: "done" }
           : {
-              box: "border border-warning-line bg-surface",
+              box: PLAIN,
               title: "text-ink",
               glyph: "☐",
+              mark: "text-muted",
               tag: i.owner === "you" ? "yours to do" : "to do",
             };
     case "ask":
-      return {
-        box: "border border-line bg-surface",
-        title: "text-muted",
-        glyph: "⚑",
-        tag: i.state,
-      };
+      return { box: PLAIN, title: DONE, glyph: "⚑", mark: DONE, tag: i.state };
     case "assumption":
       return i.state === "confirmed"
         ? {
-            box: "border border-dashed border-success bg-surface",
-            title: "text-body",
+            box: PLAIN,
+            title: DONE,
             glyph: "~",
+            mark: DONE,
             tag: "confirmed",
           }
         : {
-            box: "border border-dashed border-warning bg-surface",
+            box: PLAIN,
             title: "text-ink",
             glyph: "~",
+            mark: "text-muted",
             tag: "assumed",
           };
     default:
       return {
-        box: "border border-line bg-surface",
+        box: PLAIN,
         title: "text-body",
         glyph: "•",
+        mark: "text-muted",
         tag: "finding",
       };
   }
