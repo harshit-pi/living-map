@@ -22,10 +22,10 @@ export const SYSTEM = `You keep a map of one Claude Code conversation between a 
 
 Kinds and their states (the first is where a new one starts):
 - topic: what a stretch of the conversation is about. Every new turn belongs to a topic: an existing one, or a new one you create.
-- question (open, answered, dropped): something asked that needs an answer. owner "you" when only the user can answer it (a choice, a confirmation, information only they have); owner "claude" when Claude will find the answer.
+- question (open, answered, dropped): something asked that needs an answer. owner "you" only when Claude asked the user directly and is waiting for the answer (a choice, a confirmation, information only they have); owner "claude" when Claude will find the answer.
 - option (offered, taken, dropped): one of several choices offered for a question; its parent is that question. Mark it taken only when the conversation shows it was chosen.
 - decision (decided, reopened): something settled that later work relies on.
-- task (to-do, doing, done, dropped): work to be done. owner "claude" for Claude's own work, "you" for what the user must do.
+- task (to-do, doing, done, dropped): work to be done. owner "claude" for Claude's own work. owner "you" only for a step Claude handed to the user by name (merge or review a PR, deploy, run a command it gave them, test on their device, contact someone, fill a form). A note that something is untested or unverified is a finding, not a task for the user.
 - ask (waiting, done, dropped): Claude waiting on the user for a go-ahead, an approval, or something only they can do (push, merge, sign in, pay).
 - assumption (assumed, confirmed, struck): something taken as true without being checked.
 - finding (said): a fact established that matters later.
@@ -35,7 +35,10 @@ Rules:
 - Prefer updating an existing item over creating a near-duplicate. When a question is answered, an ask is done, an option is taken or a task finishes, update its state.
 - Every batch, check the map's open items against the new turns: an item the conversation has answered, finished or moved past gets its new state (an ask the user replied to, or that the work went on without, is done or dropped; a question nobody pursues further is dropped). Stale open items are the worst mistake: the user trusts "waiting on you".
 - Options only when at least two were offered for the same question. A single proposal the user says yes or no to ("Want me to…?") is an ask, done or dropped, not an option.
-- A problem Claude names as still unfixed or not yet tried is an open task (owner claude) until it is fixed or dropped. A finding only when later work depends on it: most turns have none.
+- A problem Claude names as still unfixed or not yet tried is an open task (owner claude) until it is fixed or dropped.
+- A task owned by the user is done when the user says they did it ("merged", "deployed", "logged in", "sent") or a later turn shows it happened.
+- An optional offer ("if you want, I can…", "tell me if you'd rather…", "say so and I'll…") is an ask only while the user hasn't replied: if the user's next message doesn't take it up, mark it dropped. A reminder or precondition ("your login must still be active at 7:15") is a finding, not an ask.
+- When the user merges, approves, or says "ok" / "go ahead" after a reply, every ask and question in that reply with a default Claude stated is settled. When Claude restates an earlier ask in new words, update the old item instead of filing a new one. A finding only when later work depends on it: most turns have none.
 - Every create needs "quote": words copied exactly from the turn named in "turn" (at most 25 words). An update that changes state should quote the turn that shows it.
 - "turn" is always one of the NEW TURNS. Name new items "new1", "new2", ...; you may use those refs as parents later in the same answer.
 - A non-topic item's parent is the item it belongs under (an option under its question, a finding under the option it is about), or its topic.
@@ -156,7 +159,7 @@ export function checklist(s: Store): string {
   return open
     .map(
       (i) =>
-        `- ${i.id} ${i.type} ${i.state}${i.owner ? ` owner=${i.owner}` : ""} (turn ${i.src.at(-1)}): ${i.title}`,
+        `- ${i.id} ${i.type} ${i.state}${i.owner ? ` owner=${i.owner}` : ""} (turn ${i.src.at(-1)}, ${Math.max(0, s.read - (i.src.at(-1) ?? 0))} turns ago): ${i.title}`,
     )
     .join("\n");
 }

@@ -162,7 +162,22 @@ async function run(file: string) {
     failed: 0,
   };
   let model_ = "";
-  for (const batch of batches(turns)) {
+  // a batch never runs past a checkpoint: the map saved there must not have
+  // read later turns than the labeler sees
+  const cut = (b: Turn[]) => {
+    const out: Turn[][] = [];
+    let cur: Turn[] = [];
+    for (const t of b) {
+      cur.push(t);
+      if (marks.includes(t.n)) {
+        out.push(cur);
+        cur = [];
+      }
+    }
+    if (cur.length) out.push(cur);
+    return out;
+  };
+  for (const batch of batches(turns).flatMap(cut)) {
     if (spent >= maxUsd) {
       console.log(
         `stopping: $${spent.toFixed(2)} spent, the cap is $${maxUsd}`,

@@ -42,7 +42,7 @@ export function buildView(s: State, f: Facts): LedgerView {
     ...(i.owner ? { owner: i.owner } : {}),
     basis: i.basis,
     links: i.links,
-    waiting: isWaiting(i),
+    waiting: isWaiting(i, store.read),
     open: isOpen(i),
     isNew: first(i) > looked,
     order: s.meta.get(i.id)?.order ?? "",
@@ -51,7 +51,7 @@ export function buildView(s: State, f: Facts): LedgerView {
     ...(f.proposals?.get(i.id) ? { proposals: f.proposals.get(i.id) } : {}),
   }));
   const waiting = live(store)
-    .filter(isWaiting)
+    .filter((i) => isWaiting(i, store.read))
     .sort((a, b) => first(a) - first(b) || n(a.id) - n(b.id));
   // what Claude is on: its own task in progress, the newest if several
   const doing =

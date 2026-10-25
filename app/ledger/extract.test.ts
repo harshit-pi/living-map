@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { apply, batches, message, type Answer } from "./extract.ts";
-import { emptyStore, listsOf, type Store } from "./items.ts";
+import { emptyStore, listsOf, TASK_FRESH, type Store } from "./items.ts";
 import type { Turn } from "./transcript.ts";
 
 const turn = (n: number, text: string, reply: string): Turn => ({
@@ -341,4 +341,27 @@ test("creates with no ref are named by their place, and a turn with no topic kee
   assert.equal(q.parent, "i1", "turn 3 had no topic: it keeps turn 2's");
   assert.equal(f.parent, "i5", "new1 names the first create");
   assert.equal(s.topicOf.get(3), "i1");
+});
+
+test("a step only you can do waits on you while it is recent, then stays open only", () => {
+  const s = first();
+  s.items.set("i9", {
+    id: "i9",
+    type: "task",
+    state: "to-do",
+    title: "Merge PR #21",
+    body: "",
+    quote: "",
+    src: [2],
+    parent: "i1",
+    owner: "you",
+    basis: "said",
+    links: [],
+    writers: {},
+  });
+  s.read = 10;
+  assert.ok(listsOf(s).waiting.some((i) => i.id === "i9"));
+  s.read = 2 + TASK_FRESH + 1;
+  assert.ok(!listsOf(s).waiting.some((i) => i.id === "i9"));
+  assert.ok(listsOf(s).open.some((i) => i.id === "i9"));
 });

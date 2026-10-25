@@ -81,12 +81,20 @@ export const live = (s: Store) =>
 export const childrenOf = (s: Store, id: string | null) =>
   live(s).filter((i) => i.parent === id);
 
-// What waits on you: an ask still waiting, or an open question that is
-// yours to answer. Questions Claude will look into are open, not waiting.
-export const isWaiting = (i: Item) =>
+// What waits on you: an ask still waiting, an open question that is yours
+// to answer, or a step only you can do (a task of yours: merge, deploy, test
+// on your device) that came up recently. Questions Claude will look into are
+// open, not waiting; a task of yours nobody has mentioned for TASK_FRESH
+// turns stays open but stops counting as waiting.
+export const TASK_FRESH = 20;
+export const isWaiting = (i: Item, read?: number) =>
   !i.retired &&
   ((i.type === "ask" && i.state === "waiting") ||
-    (i.type === "question" && i.state === "open" && i.owner === "you"));
+    (i.type === "question" && i.state === "open" && i.owner === "you") ||
+    (i.type === "task" &&
+      i.owner === "you" &&
+      (i.state === "to-do" || i.state === "doing") &&
+      (read === undefined || read - (i.src.at(-1) ?? 0) <= TASK_FRESH)));
 
 export const isOpen = (i: Item) =>
   !i.retired &&
@@ -112,7 +120,7 @@ function inTopic(s: Store, topic: string): Item[] {
 // progress or is the newest topic; done when nothing in it is open
 export function topicState(s: Store, topic: string): string {
   const items = inTopic(s, topic);
-  if (items.some(isWaiting)) return "waiting";
+  if (items.some((i) => isWaiting(i, s.read))) return "waiting";
   const topics = live(s).filter((i) => i.type === "topic");
   if (
     items.some((i) => i.type === "task" && i.state === "doing") ||
@@ -148,7 +156,7 @@ export type Lists = {
 export const listsOf = (s: Store): Lists => {
   const all = live(s);
   return {
-    waiting: all.filter(isWaiting),
+    waiting: all.filter((i) => isWaiting(i, s.read)),
     open: all.filter(isOpen),
     decided: all.filter((i) => i.type === "decision" && i.state === "decided"),
     taken: all.filter((i) => i.type === "option" && i.state === "taken"),
