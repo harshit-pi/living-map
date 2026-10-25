@@ -129,7 +129,7 @@ function startAt(
   const narrow = w < NARROW_PANE;
   const zoom = narrow
     ? 1
-    : Math.min(1.15, Math.max(MIN_ZOOM, (w - 32) / Math.max(1, wide)));
+    : Math.min(1, Math.max(MIN_ZOOM, (w - 32) / Math.max(1, wide)));
   const left = narrow ? p : root;
   // the top of the map when that keeps the topic well in view
   const top = 16 + p.y * zoom < h * (narrow ? 0.4 : 0.6);

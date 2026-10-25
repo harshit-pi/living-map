@@ -16,7 +16,7 @@ export const ROOT = "root"; // the chat itself, left of every topic
 // width, so a resize within the class moves nothing.
 export type Size = { col: number; row: number; w: number; h: number };
 // room for three lines of title, which holds nearly every title whole
-export const WIDE: Size = { col: 316, row: 78, w: 280, h: 64 };
+export const WIDE: Size = { col: 296, row: 72, w: 264, h: 58 };
 // a pane beside the chat: a topic, its items and theirs fit side by side at
 // 480 px, with room for three lines of title in each
 export const NARROW: Size = { col: 160, row: 66, w: 146, h: 54 };
