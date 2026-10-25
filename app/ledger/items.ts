@@ -83,18 +83,16 @@ export const childrenOf = (s: Store, id: string | null) =>
 
 // What waits on you: an ask still waiting, an open question that is yours
 // to answer, or a step only you can do (a task of yours: merge, deploy, test
-// on your device) that came up recently. Questions Claude will look into are
-// open, not waiting; a task of yours nobody has mentioned for TASK_FRESH
-// turns stays open but stops counting as waiting.
-export const TASK_FRESH = 20;
-export const isWaiting = (i: Item, read?: number) =>
+// on your device) until it is done. Questions Claude will look into are open,
+// not waiting. A step of yours stays waiting however long ago it came up: in
+// the eval, ageing them out lost more real waits than it cleared stale ones.
+export const isWaiting = (i: Item, _read?: number) =>
   !i.retired &&
   ((i.type === "ask" && i.state === "waiting") ||
     (i.type === "question" && i.state === "open" && i.owner === "you") ||
     (i.type === "task" &&
       i.owner === "you" &&
-      (i.state === "to-do" || i.state === "doing") &&
-      (read === undefined || read - (i.src.at(-1) ?? 0) <= TASK_FRESH)));
+      (i.state === "to-do" || i.state === "doing")));
 
 export const isOpen = (i: Item) =>
   !i.retired &&

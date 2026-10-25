@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { apply, batches, message, type Answer } from "./extract.ts";
-import { emptyStore, listsOf, TASK_FRESH, type Store } from "./items.ts";
+import { emptyStore, listsOf, type Store } from "./items.ts";
 import type { Turn } from "./transcript.ts";
 
 const turn = (n: number, text: string, reply: string): Turn => ({
@@ -343,7 +343,7 @@ test("creates with no ref are named by their place, and a turn with no topic kee
   assert.equal(s.topicOf.get(3), "i1");
 });
 
-test("a step only you can do waits on you while it is recent, then stays open only", () => {
+test("a step only you can do waits on you until it is done, however long ago", () => {
   const s = first();
   s.items.set("i9", {
     id: "i9",
@@ -359,9 +359,8 @@ test("a step only you can do waits on you while it is recent, then stays open on
     links: [],
     writers: {},
   });
-  s.read = 10;
+  s.read = 200;
   assert.ok(listsOf(s).waiting.some((i) => i.id === "i9"));
-  s.read = 2 + TASK_FRESH + 1;
+  s.items.get("i9")!.state = "done";
   assert.ok(!listsOf(s).waiting.some((i) => i.id === "i9"));
-  assert.ok(listsOf(s).open.some((i) => i.id === "i9"));
 });
