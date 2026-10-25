@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { goImports, goModFacts, goModInfo, resolveGo } from "./go.ts";
 import {
   applyHunks,
   composeFacts,
@@ -18,10 +19,17 @@ import {
   sourceFacts,
 } from "./graph.ts";
 import {
+  pyImports,
+  pyprojectFacts,
+  requirementsFacts,
+  resolvePy,
+} from "./python.ts";
+import {
   attach,
   diffGraphs,
   explain,
   extensionOf,
+  isTestFile,
   maskSecrets,
   noStructuralChange,
 } from "./rules.ts";
@@ -44,7 +52,6 @@ describe("fileKind", () => {
     for (const p of [
       "README.md",
       "web/brand.css",
-      "server/main.py",
       "types.d.ts",
       "package-lock.json",
       "tsconfig.json",
@@ -140,9 +147,11 @@ describe("resolveSpecifier", () => {
     });
     expect(resolveSpecifier("a/b.ts", "fs/promises")).toEqual({
       pkg: "node:fs",
+      low: true,
     });
     expect(resolveSpecifier("a/b.ts", "node:path")).toEqual({
       pkg: "node:path",
+      low: true,
     });
     expect(resolveSpecifier("a/b.ts", "https://x.dev/m.js")).toBeNull();
   });
@@ -293,7 +302,11 @@ describe("extract", () => {
     expect(extract("a/b.ts", `import x from "y";`)).not.toBeNull();
     expect(extract("package.json", "{}")).toEqual([]);
     expect(extract("README.md", "# hi")).toBeNull();
-    expect(extract("main.py", "import os")).toBeNull();
+    expect(extract("main.go", "package main")).toEqual([
+      { kind: "module", key: ".", text: "module .", file: "main.go" },
+    ]);
+    expect(extract("go.sum", "x v1 h1:abc")).toBeNull();
+    expect(extract("infra/main.tf", "resource {}")).toBeNull();
     expect(extract("styles.css", "@import 'x.css';")).toBeNull();
   });
 });
@@ -587,5 +600,394 @@ describe("maskSecrets and extensionOf", () => {
     expect(extensionOf("docs/README.MD")).toBe(".md");
     expect(extensionOf("Dockerfile")).toBe("Dockerfile");
     expect(extensionOf(".env")).toBe(".env");
+  });
+});
+
+describe("Go", () => {
+  const ctx = {
+    goModules: [
+      { dir: "", path: "example.com/anur" },
+      { dir: "golib", path: "example.com/anur/golib" },
+    ],
+    goRequires: ["github.com/aws/aws-sdk-go-v2", "go.uber.org/zap"],
+  };
+
+  it("reads single imports, blocks, aliases, dot and blank imports", () => {
+    const src = `package main
+
+// import "commented/out"
+import "fmt"
+import str "strings"
+
+import (
+\t"context"
+\tsdk "github.com/aws/aws-sdk-go-v2/service/s3"
+\t. "example.com/anur/golib/testddb"
+\t_ "embed"
+\t/* "block/comment" */
+)
+
+var tpl = \`import "in/raw/string"\`
+`;
+    expect(goImports(src).sort()).toEqual(
+      [
+        "fmt",
+        "strings",
+        "context",
+        "github.com/aws/aws-sdk-go-v2/service/s3",
+        "example.com/anur/golib/testddb",
+        "embed",
+      ].sort(),
+    );
+  });
+
+  it("resolves the repo's own modules to directory groups", () => {
+    expect(
+      resolveGo("lambda/agents/main.go", "example.com/anur/golib/testddb", ctx),
+    ).toEqual({ group: "golib/testddb" });
+    expect(
+      resolveGo(
+        "lambda/agents/main.go",
+        "example.com/anur/lambda/publisher",
+        ctx,
+      ),
+    ).toEqual({ group: "lambda/publisher" });
+  });
+
+  it("marks the standard library low and names external modules", () => {
+    expect(resolveGo("a/b.go", "net/http", ctx)).toEqual({
+      pkg: "go:net",
+      low: true,
+    });
+    expect(
+      resolveGo("a/b.go", "github.com/aws/aws-sdk-go-v2/service/s3", ctx),
+    ).toEqual({ pkg: "github.com/aws/aws-sdk-go-v2" });
+    expect(resolveGo("a/b.go", "go.uber.org/zap/zapcore", ctx)).toEqual({
+      pkg: "go.uber.org/zap",
+    });
+    expect(resolveGo("a/b.go", "github.com/x/y/z/w", {})).toEqual({
+      pkg: "github.com/x/y",
+    });
+  });
+
+  it("emits edges from a source file, with stdlib edges low", () => {
+    const facts = extract(
+      "lambda/agents/main.go",
+      `package main\nimport (\n"fmt"\n"example.com/anur/golib/testddb"\n)`,
+      ctx,
+    );
+    expect(facts?.map((f) => [f.kind, f.key, f.low])).toEqual([
+      ["module", "lambda/agents", undefined],
+      ["import-edge", "lambda/agents → go:fmt", "stdlib"],
+      ["import-edge", "lambda/agents → golib/testddb", undefined],
+    ]);
+  });
+
+  it("reads go.mod: module, go, require and replace in both forms", () => {
+    const mod = `module example.com/anur/lambda
+
+go 1.23
+toolchain go1.23.2
+
+require github.com/aws/aws-lambda-go v1.47.0
+
+require (
+\tgithub.com/aws/aws-sdk-go-v2 v1.30.0
+\tgolang.org/x/net v0.28.0 // indirect
+)
+
+replace example.com/anur/golib => ../golib
+replace (
+\tgithub.com/old/thing v1.0.0 => github.com/new/thing v1.1.0
+)
+`;
+    expect(
+      goModFacts("go.mod", mod)
+        .filter((x) => x.low)
+        .map((x) => [x.key, x.low]),
+    ).toEqual([["go.mod#require#golang.org/x/net", "indirect"]]);
+    expect(goModInfo(mod)).toEqual({
+      module: "example.com/anur/lambda",
+      requires: [
+        "github.com/aws/aws-lambda-go",
+        "github.com/aws/aws-sdk-go-v2",
+        "golang.org/x/net",
+      ],
+    });
+    expect(
+      goModFacts("lambda/go.mod", mod).map((f) => [f.kind, f.key, f.value]),
+    ).toEqual([
+      ["engine", "lambda/go.mod#engine#go", "1.23"],
+      ["engine", "lambda/go.mod#engine#toolchain", "go1.23.2"],
+      [
+        "dependency",
+        "lambda/go.mod#require#github.com/aws/aws-lambda-go",
+        "v1.47.0",
+      ],
+      [
+        "dependency",
+        "lambda/go.mod#require#github.com/aws/aws-sdk-go-v2",
+        "v1.30.0",
+      ],
+      [
+        "dependency",
+        "lambda/go.mod#require#golang.org/x/net",
+        "v0.28.0 (indirect)",
+      ],
+      [
+        "dependency",
+        "lambda/go.mod#replace#example.com/anur/golib",
+        "=> ../golib",
+      ],
+      [
+        "dependency",
+        "lambda/go.mod#replace#github.com/old/thing",
+        "=> github.com/new/thing v1.1.0",
+      ],
+    ]);
+  });
+
+  it("reads require lines in a go.mod hunk without their block's opening", () => {
+    const h = hunkFacts("go.mod", [
+      {
+        oldStart: 4,
+        oldLines: 2,
+        newStart: 4,
+        newLines: 2,
+        lines: [
+          "-\tgithub.com/aws/aws-sdk-go-v2 v1.30.0",
+          "+\tgithub.com/aws/aws-sdk-go-v2 v1.31.0",
+          " )",
+        ],
+      },
+    ]);
+    expect(h?.after.map((f) => f.value)).toEqual(["v1.31.0"]);
+    expect(diffGraphs(h?.before ?? [], h?.after ?? [])[0].text).toBe(
+      "changed dependency github.com/aws/aws-sdk-go-v2 (require, go.mod): v1.30.0 → v1.31.0",
+    );
+  });
+
+  it("reads import lines in a Go hunk cut inside an import block", () => {
+    const h = hunkFacts("svc/api/main.go", [
+      {
+        oldStart: 3,
+        oldLines: 2,
+        newStart: 3,
+        newLines: 2,
+        lines: [' \t"fmt"', '+\t"github.com/redis/go-redis/v9"'],
+      },
+    ]);
+    expect(keys(h?.after ?? [])).toEqual([
+      "svc/api → go:fmt",
+      "svc/api → github.com/redis/go-redis",
+    ]);
+  });
+});
+
+describe("Python", () => {
+  const files = new Set([
+    "lambda/roar/process_roar/roar_utils.py",
+    "lambda/roar/process_roar/lambda_function.py",
+    "common/__init__.py",
+    "common/db.py",
+    "src/app/core/models.py",
+  ]);
+  const dirs = new Set([
+    "lambda",
+    "lambda/roar",
+    "lambda/roar/process_roar",
+    "common",
+    "src",
+    "src/app",
+    "src/app/core",
+  ]);
+  const ctx = {
+    exists: (p: string) => files.has(p),
+    isDir: (p: string) => dirs.has(p),
+  };
+
+  it("reads every form of import, and not those in strings or comments", () => {
+    const src = `"""Docstring: import fake"""
+from __future__ import annotations
+import os, sys as system
+import common.db
+from common.db import connect
+from . import roar_utils
+from ..shared import helpers
+from .models import (
+    User,
+    Team,
+)
+# import commented
+def f():
+    import json; import boto3
+s = "from nowhere import x"
+`;
+    expect(pyImports(src)).toEqual([
+      { dots: 0, module: "os" },
+      { dots: 0, module: "sys" },
+      { dots: 0, module: "common.db" },
+      { dots: 1, module: "" },
+      { dots: 2, module: "shared" },
+      { dots: 1, module: "models" },
+      { dots: 0, module: "json" },
+      { dots: 0, module: "boto3" },
+    ]);
+  });
+
+  it("resolves in-repo modules: siblings, packages, relative and src/", () => {
+    const from = "lambda/roar/process_roar/lambda_function.py";
+    expect(resolvePy(from, { dots: 0, module: "roar_utils" }, ctx)).toEqual({
+      group: "lambda/roar",
+    });
+    expect(resolvePy(from, { dots: 0, module: "common.db" }, ctx)).toEqual({
+      group: "common",
+    });
+    expect(resolvePy(from, { dots: 2, module: "" }, ctx)).toEqual({
+      group: "lambda/roar",
+    });
+    expect(resolvePy(from, { dots: 4, module: "common" }, ctx)).toEqual({
+      group: "common",
+    });
+    expect(
+      resolvePy("tests/test_x.py", { dots: 0, module: "app.core.models" }, ctx),
+    ).toEqual({ group: "src/app" });
+    // a Lambda layer's python/ directory is on the path when the caller says so
+    const layer = {
+      exists: () => false,
+      isDir: (p: string) => p === "layers/common/python/utils",
+      pyRoots: ["layers/common/python"],
+    };
+    expect(
+      resolvePy("lambda/x/h.py", { dots: 0, module: "utils.dates" }, layer),
+    ).toEqual({ group: "layers/common" });
+  });
+
+  it("names other modules by their top-level name, stdlib low", () => {
+    expect(resolvePy("a/b.py", { dots: 0, module: "os.path" }, ctx)).toEqual({
+      pkg: "py:os",
+      low: true,
+    });
+    expect(
+      resolvePy("a/b.py", { dots: 0, module: "boto3.session" }, ctx),
+    ).toEqual({ pkg: "boto3" });
+  });
+
+  it("reads requirements files", () => {
+    const facts = requirementsFacts(
+      "requirements-dev.txt",
+      `# tools
+-r requirements.txt
+--index-url https://pypi.example/simple
+boto3==1.34.0
+Requests[socks] >= 2.31 ; python_version > "3.8"
+pytest  # latest
+https://example.com/pkg.whl
+`,
+    );
+    expect(facts.map((f) => [f.key, f.value])).toEqual([
+      ["requirements-dev.txt#requirements#boto3", "==1.34.0"],
+      [
+        "requirements-dev.txt#requirements#requests",
+        '>= 2.31 ; python_version > "3.8"',
+      ],
+      ["requirements-dev.txt#requirements#pytest", "any"],
+    ]);
+  });
+
+  it("reads pyproject.toml: project, optional, groups and Poetry tables", () => {
+    const toml = `[project]
+name = "svc"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",  # web
+  'pydantic[email]~=2.6',
+]
+
+[project.optional-dependencies]
+aws = ["boto3"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+httpx = "^0.27"
+mylib = { path = "../mylib", develop = true }
+sqlalchemy = { version = "^2.0", extras = ["asyncio"] }
+
+[tool.poetry.group.test.dependencies]
+pytest-cov = "*"
+
+[tool.ruff]
+line-length = 100
+`;
+    expect(
+      pyprojectFacts("pyproject.toml", toml).map((f) => [
+        f.kind,
+        f.key,
+        f.value,
+      ]),
+    ).toEqual([
+      ["engine", "pyproject.toml#engine#python", ">=3.11"],
+      ["dependency", "pyproject.toml#project#fastapi", ">=0.110"],
+      ["dependency", "pyproject.toml#project#pydantic", "~=2.6"],
+      ["dependency", "pyproject.toml#optional aws#boto3", "any"],
+      ["dependency", "pyproject.toml#group dev#pytest", ">=8"],
+      ["engine", "pyproject.toml#engine#python", "^3.11"],
+      ["dependency", "pyproject.toml#poetry#httpx", "^0.27"],
+      ["dependency", "pyproject.toml#poetry#mylib", "path ../mylib"],
+      ["dependency", "pyproject.toml#poetry#sqlalchemy", "^2.0"],
+      ["dependency", "pyproject.toml#poetry test#pytest-cov", "*"],
+    ]);
+  });
+
+  it("dispatches .py, requirements and pyproject files", () => {
+    expect(fileKind("svc/handler.py")).toBe("python");
+    expect(fileKind("requirements.txt")).toBe("pydeps");
+    expect(fileKind("requirements-dev.txt")).toBe("pydeps");
+    expect(fileKind("pyproject.toml")).toBe("pydeps");
+    expect(fileKind("notes.txt")).toBeNull();
+    expect(
+      keys(extract("lambda/x/handler.py", "import boto3\nimport json", ctx)),
+    ).toEqual(["lambda/x", "lambda/x → boto3", "lambda/x → py:json"]);
+  });
+});
+
+describe("noise rules", () => {
+  it("knows test files across languages", () => {
+    for (const p of [
+      "app/server/auth.test.ts",
+      "src/__tests__/a.tsx",
+      "lambda/agents/main_test.go",
+      "tests/unit/test_handler.py",
+      "pkg/handler_test.py",
+      "test_api.py",
+      "conftest.py",
+    ])
+      expect(isTestFile(p), p).toBe(true);
+    for (const p of [
+      "app/server/auth.ts",
+      "lambda/testddb/db.go",
+      "contest.py",
+    ])
+      expect(isTestFile(p), p).toBe(false);
+  });
+
+  it("marks stdlib edges and test-only changes low, and keeps them", () => {
+    const st = diffGraphs(
+      [],
+      [
+        { ...f("import-edge", "a → go:fmt", "a/x.go"), low: "stdlib" },
+        f("import-edge", "a → b", "a/x_test.go"),
+        f("import-edge", "a → c", "a/x.go"),
+        f("import-edge", "a → b", "tests/test_b.py"),
+      ],
+    );
+    expect(st.map((s) => [s.key, s.low])).toEqual([
+      ["a → b", "tests"],
+      ["a → c", undefined],
+      ["a → go:fmt", "stdlib"],
+    ]);
   });
 });

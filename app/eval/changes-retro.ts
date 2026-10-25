@@ -7,6 +7,9 @@
 //
 //   node eval/changes-retro.ts [N] [out.md]     (N defaults to 20)
 //
+// Each session is read twice, with the first run's extractors and with all
+// of them, so the report can show what Go and Python add.
+//
 // Reads ~/.claude/projects and ~/.claude/file-history, and the current tree
 // of each session's repo: as the baseline for files the session never
 // touched, and as the end state that later edits are stepped back from.
@@ -24,6 +27,9 @@ import {
   extract,
   type Fact,
   fileKind,
+  type FileKind,
+  goModInfo,
+  type GoModule,
   type Hunk,
   hunkFacts,
   hunkShape,
@@ -46,7 +52,7 @@ import {
 const N = Number(process.argv[2]) || 20;
 const OUT =
   process.argv[3] ??
-  "/private/tmp/claude-501/-Users-harshit-Library-Application-Support-Claude-scratch-workspaces-97bbd5f9-5474-4169-a5c8-a1581ac76d8b-47bdff2a-badd-45d0-9887-d133deb3d9ff-scratch-2026-10-23-7c759e/8110f9da-1e9b-4269-b9d5-2a743e0e6d33/scratchpad/research/9-changes-retro.md";
+  "/private/tmp/claude-501/-Users-harshit-Library-Application-Support-Claude-scratch-workspaces-97bbd5f9-5474-4169-a5c8-a1581ac76d8b-47bdff2a-badd-45d0-9887-d133deb3d9ff-scratch-2026-10-23-7c759e/8110f9da-1e9b-4269-b9d5-2a743e0e6d33/scratchpad/research/10-changes-retro-go-py.md";
 const CLAUDE = path.join(os.homedir(), ".claude");
 const PROJECTS = path.join(CLAUDE, "projects");
 const HISTORY = path.join(CLAUDE, "file-history");
@@ -428,9 +434,28 @@ function readDisk(root: string, rel: string): string | null | undefined {
 
 type Baseline = {
   files: Set<string>;
+  dirs: Set<string>;
   facts: Map<string, Fact[]>;
   aliases: Alias[];
+  goModules: GoModule[];
+  goRequires: string[];
 };
+
+// Every directory above the given files ("a/b/c.py" → "a", "a/b").
+function dirsOf(files: Iterable<string>, into = new Set<string>()) {
+  for (const f of files)
+    for (
+      let d = path.posix.dirname(f);
+      d !== "." && !into.has(d);
+      d = path.posix.dirname(d)
+    )
+      into.add(d);
+  return into;
+}
+
+// AWS Lambda layers put <layer>/python/ on the import path.
+const pyRootsOf = (dirs: Set<string>) =>
+  [...dirs].filter((d) => path.posix.basename(d) === "python");
 
 const baseCache = new Map<string, Baseline>();
 // The current tree, read once per repo: the stand-in for files a session never
@@ -466,7 +491,25 @@ function baseline(root: string): Baseline {
       const t = readDisk(root, rel);
       if (t) aliases.push(...parseAliases(t, rel));
     }
-  const ctx: Context = { aliases, exists: (r) => files.has(r) };
+  const goModules: GoModule[] = [];
+  const goRequires: string[] = [];
+  for (const rel of files)
+    if (path.posix.basename(rel) === "go.mod") {
+      const info = goModInfo(readDisk(root, rel) ?? "");
+      const dir = path.posix.dirname(rel);
+      if (info.module)
+        goModules.push({ dir: dir === "." ? "" : dir, path: info.module });
+      goRequires.push(...info.requires);
+    }
+  const dirs = dirsOf(files);
+  const ctx: Context = {
+    aliases,
+    exists: (r) => files.has(r),
+    isDir: (r) => dirs.has(r),
+    goModules,
+    goRequires,
+    pyRoots: pyRootsOf(dirs),
+  };
   const facts = new Map<string, Fact[]>();
   for (const rel of files) {
     if (!fileKind(rel)) continue;
@@ -474,7 +517,7 @@ function baseline(root: string): Baseline {
     const f = typeof t === "string" ? extract(rel, t, ctx) : null;
     if (f) facts.set(rel, f);
   }
-  const b = { files, facts, aliases };
+  const b = { files, dirs, facts, aliases, goModules, goRequires };
   baseCache.set(root, b);
   return b;
 }
@@ -663,6 +706,7 @@ type Result = {
   partial: number;
   turnsWithEdits: number;
   turnsWithStatements: number;
+  turnsWorth: number;
   unseenWrites: number;
   assumedClean: number;
   bashDiffs: number;
@@ -673,8 +717,13 @@ type Result = {
   verdict: Verdict;
 };
 
-function analyse(s: Session, root: string): Result {
+function analyse(s: Session, root: string, kinds?: Set<FileKind>): Result {
   const base = baseline(root);
+  // the kinds this run's extractors read
+  const readable = (rel: string) => {
+    const k = fileKind(rel);
+    return !!k && (!kinds || kinds.has(k));
+  };
   const relOf = (abs: string) => {
     const r = path.relative(root, abs);
     return r.startsWith("..") || path.isAbsolute(r)
@@ -700,15 +749,20 @@ function analyse(s: Session, root: string): Result {
     if (r === null) outside.add(e.abs);
     else steps.set(r, [...(steps.get(r) ?? []), e]);
   }
+  const dirs = dirsOf(steps.keys(), new Set(base.dirs));
   const ctx: Context = {
     aliases: base.aliases,
     exists: (r) => base.files.has(r) || steps.has(r),
+    isDir: (r) => dirs.has(r),
+    goModules: base.goModules,
+    goRequires: base.goRequires,
+    pyRoots: pyRootsOf(dirs),
   };
   const facts = (rel: string, text: string | null): Fact[] | null =>
-    text === null ? [] : extract(rel, text, ctx);
+    !readable(rel) ? null : text === null ? [] : extract(rel, text, ctx);
   const back = new Map<Step, string | null>();
   for (const [rel, list] of steps)
-    if (fileKind(rel))
+    if (readable(rel))
       for (const [st, v] of stepBack(readDisk(root, rel), list))
         back.set(st, v);
 
@@ -721,7 +775,7 @@ function analyse(s: Session, root: string): Result {
   const world = new World();
   const untouched = new World();
   for (const [rel, f] of base.facts)
-    if (!steps.has(rel)) {
+    if (!steps.has(rel) && readable(rel)) {
       world.set(rel, f);
       untouched.set(rel, f);
     }
@@ -730,11 +784,8 @@ function analyse(s: Session, root: string): Result {
   const touch = (rel: string) => {
     let t = touched.get(rel);
     if (!t) {
-      const readable = !!fileKind(rel);
-      touched.set(
-        rel,
-        (t = { rel, readable, rebuilt: readable, why: new Set() }),
-      );
+      const r = readable(rel);
+      touched.set(rel, (t = { rel, readable: r, rebuilt: r, why: new Set() }));
     }
     return t;
   };
@@ -763,8 +814,10 @@ function analyse(s: Session, root: string): Result {
   let turnStart = new Map<string, Fact[]>();
   let turnEdited = false;
   let turnPartial = false;
+  let turnPartialWorth = false;
   let turnsWithEdits = 0;
   let turnsWithStatements = 0;
+  let turnsWorth = 0;
   const closeTurn = () => {
     if (turnEdited) turnsWithEdits++;
     const changes = [...turnStart].map(([file, before]) => ({
@@ -772,10 +825,13 @@ function analyse(s: Session, root: string): Result {
       before,
       after: world.facts.get(file) ?? [],
     }));
-    if (turnPartial || diffIn(world, changes).length) turnsWithStatements++;
+    const st = diffIn(world, changes);
+    if (turnPartial || st.length) turnsWithStatements++;
+    if (turnPartialWorth || st.some((x) => !x.low)) turnsWorth++;
     turnStart = new Map();
     turnEdited = false;
     turnPartial = false;
+    turnPartialWorth = false;
   };
 
   const known = (rel: string, text: string | null) => {
@@ -884,6 +940,7 @@ function analyse(s: Session, root: string): Result {
           { ...ev, partial: true },
         );
         if (st.length) turnPartial = true;
+        if (st.some((x) => !x.low)) turnPartialWorth = true;
         partials.push(...st);
         calls.push(...st);
       }
@@ -964,6 +1021,7 @@ function analyse(s: Session, root: string): Result {
     partial: partials.length,
     turnsWithEdits,
     turnsWithStatements,
+    turnsWorth,
     unseenWrites,
     assumedClean,
     bashDiffs,
@@ -1004,12 +1062,31 @@ function netPartials(partials: Statement[]): Statement[] {
 
 // ---------------------------------------------------------------- report
 
+// The extractors of the first run, kept to compare against on the same
+// sessions.
+const V1 = new Set<FileKind>(["source", "manifest", "compose"]);
+
+type Pair = { v1: Result; v2: Result };
+
 function kindLabel(rel: string): string {
-  const k = fileKind(rel);
-  if (k === "source") return "TS/JS source";
-  if (k === "manifest") return "package.json";
-  if (k === "compose") return "compose";
-  return extensionOf(rel);
+  switch (fileKind(rel)) {
+    case "source":
+      return "TS/JS source";
+    case "manifest":
+      return "package.json";
+    case "compose":
+      return "compose";
+    case "go":
+      return "Go source";
+    case "gomod":
+      return "go.mod";
+    case "python":
+      return "Python source";
+    case "pydeps":
+      return "Python deps";
+    default:
+      return extensionOf(rel);
+  }
 }
 
 function counts<T>(xs: T[]): [T, number][] {
@@ -1034,83 +1111,164 @@ function evidenceLine(ev: Evidence[]): string {
 const pct = (a: number, b: number) =>
   b ? `${Math.round((100 * a) / b)}%` : "-";
 
-const TEST_FILE =
-  /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)(?:__tests__|tests?|e2e)\/)/;
-const onlyTests = (s: Statement) =>
-  s.files.length > 0 && s.files.every((f) => TEST_FILE.test(f));
-const builtin = (s: Statement) =>
-  s.kind === "import-edge" && / → node:/.test(s.key);
-
 const list = (paths: string[], max: number) =>
   paths
     .slice(0, max)
     .map((p) => `\`${p}\``)
     .join(", ") + (paths.length > max ? `, +${paths.length - max} more` : "");
 
-function report(results: Result[], scanned: number, skipped: number): string {
+const worth = (s: Statement) => !s.low;
+const inferred = (s: Statement) =>
+  s.evidence.length > 0 && s.evidence.every((e) => e.partial);
+
+// The numbers compared between the two extractor sets.
+function measures(rs: Result[]) {
+  const all = rs.flatMap((r) => r.statements);
+  const files = rs.flatMap((r) => r.touched);
+  const readable = files.filter((f) => f.readable);
+  const sum = (k: (r: Result) => number) => rs.reduce((a, r) => a + k(r), 0);
+  const zero = rs.filter((r) => !r.statements.length);
+  return {
+    sessions: rs.length,
+    withAny: rs.filter((r) => r.statements.length).length,
+    withWorth: rs.filter((r) => r.statements.some(worth)).length,
+    total: all.length,
+    worth: all.filter(worth).length,
+    lowStdlib: all.filter((s) => s.low === "stdlib").length,
+    lowIndirect: all.filter((s) => s.low === "indirect").length,
+    withWorthRebuilt: rs.filter((r) =>
+      r.statements.some((s) => worth(s) && !inferred(s)),
+    ).length,
+    lowTests: all.filter((s) => s.low === "tests").length,
+    inferred: all.filter(inferred).length,
+    byKind: fmtCounts(counts(all.map((s) => `${s.op} ${s.kind}`))) || "none",
+    worthByKind:
+      fmtCounts(counts(all.filter(worth).map((s) => `${s.op} ${s.kind}`))) ||
+      "none",
+    files: files.length,
+    unreadable: files.length - readable.length,
+    notRebuilt: readable.filter((f) => !f.rebuilt).length,
+    readable: readable.length,
+    turnsEdited: sum((r) => r.turnsWithEdits),
+    turnsAny: sum((r) => r.turnsWithStatements),
+    turnsWorth: sum((r) => r.turnsWorth),
+    sayable: zero.filter((r) => r.verdict.allowed).length,
+    zero: zero.length,
+  };
+}
+
+function report(pairs: Pair[], scanned: number, skipped: number): string {
+  const results = pairs.map((p) => p.v2);
+  const a = measures(pairs.map((p) => p.v1));
+  const b = measures(results);
   const all = results.flatMap((r) => r.statements);
-  const perSession = results.map((r) => r.statements.length);
-  const sorted = [...perSession].sort((a, b) => a - b);
-  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
-  const bucket = (n: number) =>
-    n === 0 ? "0" : n <= 2 ? "1–2" : n <= 5 ? "3–5" : n <= 10 ? "6–10" : ">10";
-  const buckets = ["0", "1–2", "3–5", "6–10", ">10"].map(
-    (b) => `${b}: ${perSession.filter((n) => bucket(n) === b).length}`,
-  );
   const files = results.flatMap((r) => r.touched);
   const unreadable = files.filter((f) => !f.readable);
-  const readable = files.filter((f) => f.readable);
-  const gaps = readable.filter((f) => !f.rebuilt);
-  const withEdits = results.filter((r) => r.touched.length);
+  const gaps = files.filter((f) => f.readable && !f.rebuilt);
   const zero = results.filter((r) => !r.statements.length);
-  const allowed = zero.filter((r) => r.verdict.allowed);
   const blocked = zero.filter((r) => !r.verdict.allowed);
-  const core = results.filter((r) =>
-    r.statements.some((s) => !onlyTests(s) && !builtin(s)),
-  );
+  const perSession = results.map((r) => r.statements.filter(worth).length);
+  const sorted = [...perSession].sort((x, y) => x - y);
+  const bucket = (n: number) =>
+    n === 0 ? "0" : n <= 2 ? "1–2" : n <= 5 ? "3–5" : n <= 10 ? "6–10" : ">10";
   const sum = (k: (r: Result) => number) =>
-    results.reduce((a, r) => a + k(r), 0);
+    results.reduce((acc, r) => acc + k(r), 0);
   const src = (k: keyof Sources) => sum((r) => r.sources[k]);
-  const steps =
-    src("original") +
-    src("chain") +
-    src("created") +
-    src("stepBack") +
-    src("git") +
-    src("unknown") +
-    src("opaque");
   const gapsBy = new Map<string, number>();
   for (const r of results)
     for (const [k, n] of r.bashGaps) gapsBy.set(k, (gapsBy.get(k) ?? 0) + n);
   const fileResults = sum((r) => r.session.stats.fileResults);
   const nullOriginal = sum((r) => r.session.stats.nullOriginal);
+  const row = (name: string, x: string | number, y: string | number) =>
+    `| ${name} | ${x} | ${y} |`;
+  const frac = (n: number, d: number) => `${n} of ${d} (${pct(n, d)})`;
 
   const L: string[] = [];
-  L.push("# 9. What changed: a retro on past sessions");
+  L.push("# 10. What changed, with Go and Python: a retro on past sessions");
   L.push("");
   L.push(
-    `Rebuilt from the ${results.length} most recent Claude Code transcripts whose working folder is inside a git work tree (${scanned} scanned, ${skipped} skipped as outside any work tree). No model calls. Extractors (version 1): TS/JS imports folded to two directory levels, package.json, docker-compose. Statements are the session's net change (first known state → last), each with the tool calls that made it; one marked *(partly inferred)* rests on diff hunks without the whole file, on today's file standing in for an end state Bash left without a diff, or on a file whose end state is unknown. Made by \`app/eval/changes-retro.ts\`; paths and statement lines only.`,
+    `Rebuilt from the ${results.length} most recent Claude Code transcripts whose working folder is inside a git work tree (${scanned} scanned, ${skipped} skipped as outside any work tree). No model calls. Each session is read twice: with the first run's extractors (TS/JS imports, package.json, docker-compose) and with Go and Python added (.go imports, go.mod, .py imports, requirements*.txt, pyproject.toml). Imports fold to two directory levels. Statements are the session's net change (first known state → last), each with the tool calls that made it. **Low** statements are kept but not counted as worth showing: an edge to a standard library or Node builtin (*low: stdlib*), a Go dependency go.mod marks \`// indirect\` (*low: indirect*), or a change only test files make (*low: tests*). A statement marked *(partly inferred)* rests on diff hunks without the whole file, on today's file standing in for an end state Bash left without a diff, or on a file whose end state is unknown. Made by \`app/eval/changes-retro.ts\`; paths and statement lines only.`,
   );
   L.push("");
-  L.push("## Summary");
+  L.push("## Before and after Go and Python");
   L.push("");
   L.push(
-    `- **Sessions with at least one structural statement: ${results.length - zero.length} of ${results.length}** (${withEdits.length} changed any file in their work tree). Leaving out statements that come only from test files or are Node builtins: ${core.length} of ${results.length}.`,
+    "| On the same sessions | First run's extractors | With Go and Python |",
+  );
+  L.push("|---|---|---|");
+  L.push(
+    row(
+      "Sessions with ≥1 statement",
+      frac(a.withAny, a.sessions),
+      frac(b.withAny, b.sessions),
+    ),
   );
   L.push(
-    `- Statements per session: ${buckets.join(" · ")} (median ${median}, max ${sorted.at(-1) ?? 0}, total ${all.length}; ${all.filter(onlyTests).length} only from test files, ${all.filter(builtin).length} Node builtins, ${all.filter((s) => s.evidence.length && s.evidence.every((e) => e.partial)).length} partly inferred).`,
+    row(
+      "**Sessions with ≥1 worth showing (not low)**",
+      frac(a.withWorth, a.sessions),
+      `**${frac(b.withWorth, b.sessions)}**`,
+    ),
   );
   L.push(
-    `- By kind: ${fmtCounts(counts(all.map((s) => `${s.op} ${s.kind}`))) || "none"}.`,
+    row(
+      "Statements: all / worth showing / low stdlib / low indirect / low tests",
+      `${a.total} / ${a.worth} / ${a.lowStdlib} / ${a.lowIndirect} / ${a.lowTests}`,
+      `${b.total} / ${b.worth} / ${b.lowStdlib} / ${b.lowIndirect} / ${b.lowTests}`,
+    ),
   );
   L.push(
-    `- Turns: ${sum((r) => r.turnsWithStatements)} of the ${sum((r) => r.turnsWithEdits)} turns that changed files had a structural statement (${sum((r) => r.turns)} turns in all).`,
+    row(
+      "Sessions with ≥1 worth showing that is not partly inferred",
+      frac(a.withWorthRebuilt, a.sessions),
+      frac(b.withWorthRebuilt, b.sessions),
+    ),
+  );
+  L.push(row("Statements by kind", a.byKind, b.byKind));
+  L.push(row("Worth showing, by kind", a.worthByKind, b.worthByKind));
+  L.push(
+    row(
+      "Changed files of kinds no extractor reads",
+      frac(a.unreadable, a.files),
+      frac(b.unreadable, b.files),
+    ),
   );
   L.push(
-    `- Changed files in work trees: ${files.length}. **Of kinds no extractor reads: ${unreadable.length} (${pct(unreadable.length, files.length)})**. Of the ${readable.length} readable ones, ${gaps.length} (${pct(gaps.length, readable.length)}) could not be rebuilt in full (${fmtCounts(counts(gaps.flatMap((t) => [...t.why])))}). Unreadable kinds: ${fmtCounts(counts(unreadable.map((f) => extensionOf(f.rel))).slice(0, 12))}.`,
+    row(
+      "Readable files not rebuilt in full",
+      frac(a.notRebuilt, a.readable),
+      frac(b.notRebuilt, b.readable),
+    ),
   );
   L.push(
-    `- "No structural change" could truthfully be said in ${allowed.length} of the ${zero.length} sessions with no statement${allowed.length ? ` (${allowed.filter((r) => !r.touched.length).length} of them changed no file)` : ""}. In the other ${blocked.length}: unreadable kinds changed in ${blocked.filter((r) => r.touched.some((t) => !t.readable)).length}, readable files not rebuilt in ${blocked.filter((r) => r.touched.some((t) => t.readable && !t.rebuilt)).length}, unseen Bash writes in ${blocked.filter((r) => r.unseenWrites).length}.`,
+    row(
+      "Turns that changed files with a statement / worth showing",
+      `${a.turnsAny} / ${a.turnsWorth} of ${a.turnsEdited}`,
+      `${b.turnsAny} / ${b.turnsWorth} of ${b.turnsEdited}`,
+    ),
+  );
+  L.push(
+    row(
+      '"No structural change" sayable, of sessions with none',
+      `${a.sayable} of ${a.zero}`,
+      `${b.sayable} of ${b.zero}`,
+    ),
+  );
+  L.push("");
+  L.push(
+    "The first run (research 9) reported 2 of 20 sessions with a statement, 18 statements (added import-edge 17, added module 1), 72% of changed files unreadable and 10 of 187 turns with a statement; the first column recomputes it on this run's sessions with the low rules applied.",
+  );
+  L.push("");
+  L.push("## Summary, with Go and Python");
+  L.push("");
+  L.push(
+    `- Worth-showing statements per session: ${["0", "1–2", "3–5", "6–10", ">10"].map((x) => `${x}: ${perSession.filter((n) => bucket(n) === x).length}`).join(" · ")} (median ${sorted[Math.floor(sorted.length / 2)] ?? 0}, max ${sorted.at(-1) ?? 0}). ${b.inferred} statements are partly inferred.`,
+  );
+  L.push(
+    `- Changed files: ${files.length}; unreadable kinds now: ${fmtCounts(counts(unreadable.map((f) => extensionOf(f.rel))).slice(0, 12)) || "none"}. Readable but not rebuilt in full: ${gaps.length} (${fmtCounts(counts(gaps.flatMap((t) => [...t.why])))}).`,
+  );
+  L.push(
+    `- "No structural change" blocked in ${blocked.length} sessions with no statement: unreadable kinds changed in ${blocked.filter((r) => r.touched.some((t) => !t.readable)).length}, readable files not rebuilt in ${blocked.filter((r) => r.touched.some((t) => t.readable && !t.rebuilt)).length}, unseen Bash writes in ${blocked.filter((r) => r.unseenWrites).length}.`,
   );
   L.push("");
   L.push("### What could and could not be rebuilt");
@@ -1119,19 +1277,16 @@ function report(results: Result[], scanned: number, skipped: number): string {
     `- Edit/Write results: ${fileResults}; ${nullOriginal} (${pct(nullOriginal, fileResults)}) had no \`originalFile\`.`,
   );
   L.push(
-    `- Where each change's "before" came from (${steps} changes to readable files): \`originalFile\` ${src("original")}, the previous call, a full Read or a file-history backup ${src("chain")}, a new file ${src("created")}, stepped back from today's file by undoing later hunks ${src("stepBack")}, the last commit before the session ${src("git")}, unknown ${src("unknown")}, Bash changed it with no diff kept ${src("opaque")} (today's contents stood in as the end state of ${src("today")} files whose last change was such a write). A known "before" whose edit would not apply: ${src("applyFailed")}.`,
+    `- Where each change's "before" came from: \`originalFile\` ${src("original")}, the previous call, a full Read or a file-history backup ${src("chain")}, a new file ${src("created")}, stepped back from today's file by undoing later hunks ${src("stepBack")}, the last commit before the session ${src("git")}, unknown ${src("unknown")}, Bash changed it with no diff kept ${src("opaque")} (today's contents stood in as the end state of ${src("today")} files whose last change was such a write). A known "before" whose edit would not apply: ${src("applyFailed")}.`,
   );
   L.push(
-    `- Cross-check: where a rebuilt state met an \`originalFile\`, they matched ${sum((r) => r.agree[0])} of ${sum((r) => r.agree[1])} times. A Read or backup disagreed with the rebuilt state ${sum((r) => r.drift)} times (a change the transcript does not show: you, another session, or an untracked Bash write).`,
+    `- Cross-check: where a rebuilt state met an \`originalFile\`, they matched ${sum((r) => r.agree[0])} of ${sum((r) => r.agree[1])} times. A Read or backup disagreed with the rebuilt state ${sum((r) => r.drift)} times (a change the transcript does not show).`,
   );
   L.push(
-    `- Bash results with \`bashEditDiff\`: ${sum((r) => r.bashDiffs)}; gaps: ${fmtCounts([...gapsBy]) || "none"} (\`shared\`/\`unavailable\`: no diff at all; \`moreFiles\`: more files changed than listed).`,
+    `- Bash results with \`bashEditDiff\`: ${sum((r) => r.bashDiffs)}; gaps: ${fmtCounts([...gapsBy]) || "none"}. Write-looking Bash commands with no diff: ${sum((r) => r.unseenWrites)} in sessions without diff tracking, ${sum((r) => r.assumedClean)} where tracking was on (taken as having changed no tracked file).`,
   );
   L.push(
-    `- Bash commands that look like writes into the tree and carry no \`bashEditDiff\`: ${sum((r) => r.unseenWrites)} in sessions with no diff tracking (counted against "No structural change"), ${sum((r) => r.assumedClean)} in sessions where tracking was on (taken as having changed no tracked file).`,
-  );
-  L.push(
-    "- Not reconstructable: Bash writes with no diff (redirects, `sed -i`, `npm install` without tracking, `shared`/`unavailable` results), edits made outside Claude Code, git-ignored files Bash changed, and files outside the work tree (counted, never read). Files a session never touched are read from today's tree, so an edge another file held then but not now can be misjudged.",
+    "- Not reconstructable: Bash writes with no diff, edits made outside Claude Code, git-ignored files Bash changed, and files outside the work tree. Files a session never touched are read from today's tree.",
   );
   L.push("");
   L.push("## Sessions");
@@ -1149,43 +1304,53 @@ function report(results: Result[], scanned: number, skipped: number): string {
     L.push(
       `- Files changed: ${r.touched.length}${byKind.length ? ` (${fmtCounts(byKind)})` : ""}${r.outside ? `; ${r.outside} outside the work tree, not read` : ""}.`,
     );
+    const shown = r.statements.filter(worth);
+    const low = r.statements.filter((x) => !worth(x));
     if (r.statements.length) {
       L.push(
-        `- Structural statements: ${r.statements.length} (${r.turnsWithStatements} of ${r.turnsWithEdits} turns with edits had one):`,
+        `- Statements: ${shown.length} worth showing, ${low.length} low (${r.turnsWorth} of ${r.turnsWithEdits} turns with edits had one worth showing):`,
       );
-      for (const st of r.statements) {
+      for (const st of shown) {
         n++;
         L.push(`  - [#${n}] ${st.text} — ${evidenceLine(st.evidence)}`);
         numbered.push(
           `${n}. [ ] worth confirming · [ ] noise — ${name}: ${st.text}`,
         );
       }
-    } else L.push("- Structural statements: none.");
+      const lowBy = counts(low.map((x) => `low: ${x.low}`));
+      if (low.length)
+        L.push(
+          `  - low (${fmtCounts(lowBy)}): ${low
+            .slice(0, 12)
+            .map((x) => x.text)
+            .join("; ")}${low.length > 12 ? `; +${low.length - 12} more` : ""}`,
+        );
+    } else L.push("- Statements: none.");
     const cant = r.touched.filter((t) => !t.readable).map((t) => t.rel);
     if (cant.length)
       L.push(
-        `- Changed files the map can't read (${cant.length}): ${list(cant, 12)}.`,
+        `- Changed files the map can't read (${cant.length}): ${list(cant, 10)}.`,
       );
     const notRebuilt = r.touched.filter((t) => t.readable && !t.rebuilt);
     if (notRebuilt.length)
       L.push(
         `- Readable but not rebuilt in full (${notRebuilt.length}; ${fmtCounts(counts(notRebuilt.flatMap((t) => [...t.why])))}): ${list(
           notRebuilt.map((t) => t.rel),
-          8,
+          6,
         )}.`,
-      );
-    if (r.unseenWrites)
-      L.push(
-        `- Bash commands that may have written files with no diff: ${r.unseenWrites}.`,
       );
     L.push(
       `- "No structural change": ${r.verdict.allowed ? `**can be said** (${r.verdict.reason})` : `can't be said: ${r.verdict.reason}`}.`,
     );
   }
   L.push("");
-  L.push("## All statements, to mark");
+  L.push("## Worth-showing statements, to mark");
   L.push("");
   L.push(numbered.length ? numbered.join("\n") : "None.");
+  L.push("");
+  L.push(
+    `Low statements (${all.length - all.filter(worth).length}) are listed under each session and left out here.`,
+  );
   L.push("");
   return L.join("\n");
 }
@@ -1203,17 +1368,17 @@ async function main() {
         transcripts.push({ file, mtime: fs.statSync(file).mtimeMs });
       }
   }
-  transcripts.sort((a, b) => b.mtime - a.mtime);
-  const results: Result[] = [];
+  transcripts.sort((x, y) => y.mtime - x.mtime);
+  const pairs: Pair[] = [];
   let scanned = 0;
   let skipped = 0;
   for (const t of transcripts) {
-    if (results.length >= N) break;
+    if (pairs.length >= N) break;
     scanned++;
     const s = await readSession(t.file);
     // the most used working folder that is inside a git work tree
     const cwd = [...s.cwds]
-      .sort((a, b) => b[1] - a[1])
+      .sort((x, y) => y[1] - x[1])
       .map(([c]) => c)
       .find((c) => repoRoot(c));
     const root = cwd ? repoRoot(cwd) : null;
@@ -1221,14 +1386,14 @@ async function main() {
       skipped++;
       continue;
     }
-    const r = analyse(s, root);
-    results.push(r);
+    const v2 = analyse(s, root);
+    pairs.push({ v1: analyse(s, root, V1), v2 });
     console.log(
-      `${results.length}/${N} ${path.basename(root)} ${s.id.slice(0, 8)}: ${r.touched.length} files, ${r.statements.length} statements`,
+      `${pairs.length}/${N} ${path.basename(root)} ${s.id.slice(0, 8)}: ${v2.touched.length} files, ${v2.statements.filter(worth).length} worth showing, ${v2.statements.length} in all`,
     );
   }
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, report(results, scanned, skipped));
+  fs.writeFileSync(OUT, report(pairs, scanned, skipped));
   console.log(`→ ${OUT}`);
 }
 

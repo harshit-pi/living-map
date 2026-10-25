@@ -3,55 +3,45 @@
 // list and its path aliases, so the same code reads a snapshot, a transcript
 // reconstruction or a test fixture.
 //
-// Version 1 reads TypeScript/JavaScript imports, package.json and
-// docker-compose files. Every other kind is "unreadable", which is what keeps
-// "No structural change" honest: it may only be said when every changed file
-// is of a kind listed here.
+// Version 2 reads TypeScript/JavaScript, Go and Python imports, package.json,
+// go.mod, requirements files, pyproject.toml and docker-compose files. Every
+// other kind is "unreadable", which is what keeps "No structural change"
+// honest: it may only be said when every changed file is of a kind listed
+// here.
 
 import { builtinModules } from "node:module";
 import { posix } from "node:path";
 
-export type Kind =
-  | "dependency"
-  | "import-edge"
-  | "module"
-  | "service"
-  | "port"
-  | "script"
-  | "engine";
+import {
+  type Alias,
+  type Context,
+  depFact,
+  type Fact,
+  type FileKind,
+  groupOf,
+  moduleFacts,
+  type Target,
+} from "./facts.ts";
+import {
+  goHunkFacts,
+  goModFacts,
+  goModHunkFacts,
+  goSourceFacts,
+} from "./go.ts";
+import { pyprojectFacts, pySourceFacts, requirementsFacts } from "./python.ts";
 
-export type Fact = {
-  kind: Kind;
-  // unique within its kind across the repo; facts with the same key fold
-  // into one node or edge
-  key: string;
-  // a noun phrase a statement is built from
-  text: string;
-  // compared across versions for "changed"; absent for plain presence
-  value?: string;
-  // repo-relative path the fact was read from
-  file: string;
-};
-
-export type FileKind = "source" | "manifest" | "compose";
-
-export type Alias = {
-  // directory whose files the alias applies to ("" = the whole repo)
-  scope: string;
-  // the pattern before its "*" ("@shared/", or "config" for an exact alias)
-  prefix: string;
-  exact: boolean;
-  // repo-relative replacements, also without their "*"
-  targets: string[];
-};
-
-export type Context = {
-  // how many directory levels a module group keeps
-  depth?: number;
-  aliases?: Alias[];
-  // whether a repo-relative path is a file, for extensionless imports
-  exists?: (rel: string) => boolean;
-};
+export type {
+  Alias,
+  Context,
+  Fact,
+  FileKind,
+  GoModule,
+  Kind,
+  Target,
+} from "./facts.ts";
+export { groupOf, groupOfDir } from "./facts.ts";
+export { goImports, goModInfo, resolveGo } from "./go.ts";
+export { pyImports, resolvePy } from "./python.ts";
 
 export type Hunk = {
   oldStart: number;
@@ -65,21 +55,18 @@ const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const COMPOSE = /^(?:docker-)?compose(?:[.-][\w.-]+)?\.ya?ml$/;
 const RESOLVE_EXT = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts"];
 const BUILTINS = new Set(builtinModules);
+const REQUIREMENTS = /^requirements(?:[.-][\w.-]+)?\.txt$/;
 
 export function fileKind(rel: string): FileKind | null {
   const base = posix.basename(rel);
   if (base === "package.json") return "manifest";
   if (COMPOSE.test(base)) return "compose";
   if (SOURCE.test(base) && !base.endsWith(".d.ts")) return "source";
+  if (base === "go.mod") return "gomod";
+  if (base.endsWith(".go")) return "go";
+  if (base.endsWith(".py")) return "python";
+  if (base === "pyproject.toml" || REQUIREMENTS.test(base)) return "pydeps";
   return null;
-}
-
-// A file's group: its directory cut to `depth` levels, so imports between
-// files fold into edges between parts of the system (app/server → app/layer).
-export function groupOf(rel: string, depth = 2): string {
-  const dir = posix.dirname(rel);
-  if (dir === "." || dir === "") return ".";
-  return dir.split("/").slice(0, depth).join("/");
 }
 
 // ---------------------------------------------------------------- imports
@@ -190,8 +177,6 @@ export function importSpecifiers(source: string): string[] {
   return [...found];
 }
 
-export type Target = { group: string } | { pkg: string };
-
 export function resolveSpecifier(
   fromRel: string,
   spec: string,
@@ -213,10 +198,10 @@ export function resolveSpecifier(
   if (clean.startsWith("@/") || clean.startsWith("~/"))
     return { group: `(alias ${clean.slice(0, 2)})` };
   if (clean.startsWith("node:"))
-    return { pkg: `node:${clean.slice(5).split("/")[0]}` };
+    return { pkg: `node:${clean.slice(5).split("/")[0]}`, low: true };
   const parts = clean.split("/");
   const name = clean.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
-  if (BUILTINS.has(name)) return { pkg: `node:${name}` };
+  if (BUILTINS.has(name)) return { pkg: `node:${name}`, low: true };
   return { pkg: name };
 }
 
@@ -300,39 +285,13 @@ export function sourceFacts(
   source: string,
   ctx: Context = {},
 ): Fact[] {
-  const from = groupOf(rel, ctx.depth ?? 2);
-  const facts: Fact[] = [
-    { kind: "module", key: from, text: `module ${from}`, file: rel },
-  ];
-  return facts.concat(importFacts(rel, source, ctx));
+  return moduleFacts(rel, targets(rel, source, ctx), ctx);
 }
 
-function importFacts(rel: string, source: string, ctx: Context): Fact[] {
-  const from = groupOf(rel, ctx.depth ?? 2);
-  const facts = new Map<string, Fact>();
-  for (const spec of importSpecifiers(source)) {
-    const t = resolveSpecifier(rel, spec, ctx);
-    if (!t) continue;
-    if ("group" in t) {
-      if (t.group === from) continue;
-      const key = `${from} → ${t.group}`;
-      facts.set(key, {
-        kind: "import-edge",
-        key,
-        text: `import edge ${key}`,
-        file: rel,
-      });
-    } else {
-      const key = `${from} → ${t.pkg}`;
-      facts.set(key, {
-        kind: "import-edge",
-        key,
-        text: `import edge ${from} → package ${t.pkg}`,
-        file: rel,
-      });
-    }
-  }
-  return [...facts.values()];
+function targets(rel: string, source: string, ctx: Context): Target[] {
+  return importSpecifiers(source)
+    .map((spec) => resolveSpecifier(rel, spec, ctx))
+    .filter((t): t is Target => t !== null);
 }
 
 // ---------------------------------------------------------------- package.json
@@ -377,16 +336,6 @@ export function manifestFacts(rel: string, text: string): Fact[] | null {
     file: rel,
   }));
   return facts;
-}
-
-function depFact(rel: string, section: string, name: string, v: string): Fact {
-  return {
-    kind: "dependency",
-    key: `${rel}#${section}#${name}`,
-    text: `dependency ${name} (${section}, ${rel})`,
-    value: v,
-    file: rel,
-  };
 }
 
 // ---------------------------------------------------------------- compose
@@ -559,6 +508,16 @@ export function extract(
       return manifestFacts(rel, content);
     case "compose":
       return composeFacts(rel, content);
+    case "go":
+      return goSourceFacts(rel, content, ctx);
+    case "gomod":
+      return goModFacts(rel, content);
+    case "python":
+      return pySourceFacts(rel, content, ctx);
+    case "pydeps":
+      return posix.basename(rel) === "pyproject.toml"
+        ? pyprojectFacts(rel, content)
+        : requirementsFacts(rel, content);
     default:
       return null;
   }
@@ -570,28 +529,42 @@ const VERSION_LIKE =
   /^(?:[\^~<>=]*\s*v?\d|\*$|latest$|next$|workspace:|file:|link:|npm:|github:|git\+|https?:)/;
 
 // When a file's full text is unknown, the facts on each side of its hunks:
-// import edges for source, dependency lines for package.json. The result can
-// miss facts outside the hunks, so statements from it are marked partial.
-// Compose structure lives in indentation a hunk cuts off, so it gives null.
+// import edges for source files, dependency lines for manifests. The result
+// can miss facts outside the hunks, so statements from it are marked
+// partial. Compose and pyproject structure lives in context a hunk cuts off,
+// so they give null.
 export function hunkFacts(
   rel: string,
   hunks: Hunk[],
   ctx: Context = {},
 ): { before: Fact[]; after: Fact[] } | null {
   const kind = fileKind(rel);
-  if (kind !== "source" && kind !== "manifest") return null;
+  const read = HUNK_READERS[kind ?? ""];
+  if (!read || posix.basename(rel) === "pyproject.toml") return null;
   const side = (keep: string) =>
     hunks.map((h) =>
       h.lines
         .filter((l) => l[0] === " " || l[0] === keep)
-        .map((l) => l.slice(1)),
+        .map((l) => l.slice(1))
+        .join("\n"),
     );
-  const read = (chunks: string[][]): Fact[] =>
-    kind === "source"
-      ? chunks.flatMap((c) => importFacts(rel, c.join("\n"), ctx))
-      : chunks.flatMap((c) => manifestLines(rel, c));
-  return { before: read(side("-")), after: read(side("+")) };
+  return {
+    before: side("-").flatMap((t) => read(rel, t, ctx)),
+    after: side("+").flatMap((t) => read(rel, t, ctx)),
+  };
 }
+
+const HUNK_READERS: Record<
+  string,
+  (rel: string, text: string, ctx: Context) => Fact[]
+> = {
+  source: (rel, t, ctx) => moduleFacts(rel, targets(rel, t, ctx), ctx, false),
+  manifest: (rel, t) => manifestLines(rel, t.split("\n")),
+  go: goHunkFacts,
+  gomod: (rel, t) => goModHunkFacts(rel, t),
+  python: (rel, t, ctx) => pySourceFacts(rel, t, ctx, false),
+  pydeps: (rel, t) => requirementsFacts(rel, t),
+};
 
 function manifestLines(rel: string, lines: string[]): Fact[] {
   const facts: Fact[] = [];

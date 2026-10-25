@@ -503,7 +503,9 @@ test("tool results keep patches for what changed, never tool output", () => {
 });
 
 test("reading in small chunks, or as the file grows, gives what one read gives", async () => {
-  const long = "x".repeat(50_000);
+  // longer than every chunk size below, short enough that 7-byte reads stay
+  // fast when the whole suite runs at once
+  const long = "x".repeat(5_000);
   const rows = [
     typed("p1", null, "hello"),
     claude("c1", "p1", `long ${long}`),

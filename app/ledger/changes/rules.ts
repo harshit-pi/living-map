@@ -3,7 +3,7 @@
 // says what changed in the system, and its evidence says which files and
 // which tool calls changed it. No model is involved at this layer.
 
-import type { Fact, Kind } from "./graph.ts";
+import type { Fact, Kind } from "./facts.ts";
 
 export type Op = "added" | "removed" | "changed";
 
@@ -26,7 +26,16 @@ export type Statement = {
   // the files whose facts differ between the two graphs
   files: string[];
   evidence: Evidence[];
+  // low signal, kept but not counted as worth showing: an edge to a
+  // standard library, an indirect dependency, or a change only test files
+  // make
+  low?: "stdlib" | "indirect" | "tests";
 };
+
+const TEST_FILE =
+  /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.go$|(?:^|\/)test_[^/]*\.py$|_test\.py$|(?:^|\/)conftest\.py$|(?:^|\/)(?:__tests__|tests?)\/)/;
+
+export const isTestFile = (path: string) => TEST_FILE.test(path);
 
 const KIND_ORDER: Kind[] = [
   "module",
@@ -95,6 +104,11 @@ function statement(
   files: Iterable<string> | Map<string, unknown>,
 ): Statement {
   const list = [...(files instanceof Map ? files.keys() : files)].sort();
+  const low = fact.low
+    ? fact.low
+    : list.length && list.every(isTestFile)
+      ? "tests"
+      : undefined;
   return {
     op,
     kind: fact.kind,
@@ -104,6 +118,7 @@ function statement(
     to,
     files: list,
     evidence: [],
+    ...(low ? { low } : {}),
   };
 }
 
