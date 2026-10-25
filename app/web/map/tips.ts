@@ -20,7 +20,7 @@ export const TIPS: Record<TipId, string> = {
     "Each lens lights its boxes on the map, and its colour matches theirs.",
   topic:
     "A topic: one part of the chat. The arrow folds it, and a dot marks the one Claude is on.",
-  task: "A task: ☐ still to do, ◐ Claude is on it, ☑ done.",
+  task: "A task: ☐ still to do, ◐ Claude is on it, ✓ done.",
   question:
     "An open question. “Claude's to find out” means Claude owes the answer.",
   option: "An option Claude offered. ● marks the one taken.",

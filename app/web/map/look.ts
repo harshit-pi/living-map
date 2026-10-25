@@ -3,7 +3,8 @@ import type { LedgerItem } from "../../shared/ledger.ts";
 // How a box looks: every box is white with the same thin border, and one
 // colour means something: amber, for what waits on you. Everything else says
 // its state with a small glyph (a green ◆ for decided, a green ● for an
-// option taken) and grey text once it is done, settled or dropped.
+// option taken, a ✓ for a task or ask that is done) and grey text once it
+// is done, settled or dropped.
 export type Look = {
   box: string;
   title: string;
@@ -103,7 +104,7 @@ export function lookOf(i: LedgerItem): Look {
             tag: i.owner === "claude" ? "Claude is on it" : "doing",
           }
         : i.state === "done"
-          ? { box: PLAIN, title: DONE, glyph: "☑", mark: DONE, tag: "done" }
+          ? { box: PLAIN, title: DONE, glyph: "✓", mark: DONE, tag: "done" }
           : {
               box: PLAIN,
               title: "text-ink",
@@ -111,8 +112,9 @@ export function lookOf(i: LedgerItem): Look {
               mark: "text-muted",
               tag: i.owner === "you" ? "yours to do" : "to do",
             };
+    // the flag stays for asks still waiting on you; one that is done is ticked
     case "ask":
-      return { box: PLAIN, title: DONE, glyph: "⚑", mark: DONE, tag: i.state };
+      return { box: PLAIN, title: DONE, glyph: "✓", mark: DONE, tag: i.state };
     case "assumption":
       return i.state === "confirmed"
         ? {

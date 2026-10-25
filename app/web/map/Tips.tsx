@@ -11,9 +11,9 @@ const GAP = 6;
 // the tip's text, with its flag and boxes drawn like the map's
 const withGlyphs = (text: string) =>
   text
-    .split(/([⚑☐☑])/)
+    .split(/([⚑☐✓])/)
     .map((part, k) =>
-      /^[⚑☐☑]$/.test(part) ? <Glyph key={k} g={part} /> : part,
+      /^[⚑☐✓]$/.test(part) ? <Glyph key={k} g={part} /> : part,
     );
 
 // One tip: a line and two ways out. Floating, it sits over the map beside
