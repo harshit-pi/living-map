@@ -1,3 +1,4 @@
+import { Glyph } from "./Glyph.tsx";
 import { LENSES, type Lens } from "./lens.ts";
 
 // Each lens wears the mark and colour of the boxes it lights, so the row
@@ -62,7 +63,7 @@ export function Toolbar({
               className={`${tool} gap-1 ${on ? "border-ink bg-surface font-medium text-ink" : `${KEY[l.id].off} hover:bg-panel`}`}
             >
               <span aria-hidden className={KEY[l.id].mark}>
-                {KEY[l.id].glyph}
+                <Glyph g={KEY[l.id].glyph} />
               </span>
               {l.label}
               <span

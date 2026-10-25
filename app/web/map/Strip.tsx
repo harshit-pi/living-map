@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Glyph } from "./Glyph.tsx";
 import type { Snap } from "./since.ts";
 import type { LedgerItem, LedgerView } from "../../shared/ledger.ts";
 
@@ -102,7 +103,9 @@ export function Strip({
             title={`Waiting on you: ${firstWaiting.title}`}
             className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12.5px] text-warning-strong hover:bg-warning-soft"
           >
-            <span aria-hidden>⚑</span>
+            <span aria-hidden>
+              <Glyph g="⚑" />
+            </span>
             <span className="truncate" data-content>
               {firstWaiting.title}
             </span>

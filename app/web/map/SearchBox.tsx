@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Glyph } from "./Glyph.tsx";
 import { search, topicOf } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
@@ -66,9 +67,9 @@ export function SearchBox({
                 >
                   <span
                     aria-hidden
-                    className={`w-3 shrink-0 text-center text-[12px] ${look.title}`}
+                    className={`w-3.5 shrink-0 text-center text-[12px] ${look.title}`}
                   >
-                    {look.glyph || "▸"}
+                    <Glyph g={look.glyph || "▸"} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span

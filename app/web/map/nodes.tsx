@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 
+import { Glyph } from "./Glyph.tsx";
 import { NARROW, type Size } from "./layout.ts";
 import { lookOf } from "./look.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
@@ -86,9 +87,9 @@ export function ItemNode({ data }: NodeProps) {
       ) : (
         <span
           aria-hidden
-          className={`w-3 shrink-0 text-center text-[12px] ${look.mark}`}
+          className={`w-3.5 shrink-0 text-center text-[12px] ${look.mark}`}
         >
-          {look.glyph}
+          <Glyph g={look.glyph} />
         </span>
       )}
       <div className="min-w-0 flex-1">

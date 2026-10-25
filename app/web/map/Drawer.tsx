@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Glyph } from "./Glyph.tsx";
 import { groupsOf, topicOf } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import type {
@@ -143,9 +144,9 @@ export function Drawer({
               >
                 <span
                   aria-hidden
-                  className={`w-3 shrink-0 text-center text-[12px] ${look.mark}`}
+                  className={`w-3.5 shrink-0 text-center text-[12px] ${look.mark}`}
                 >
-                  {look.glyph}
+                  <Glyph g={look.glyph} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span
