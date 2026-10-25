@@ -13,13 +13,6 @@ import type {
 } from "../../shared/ledger.ts";
 import { More } from "../components/More.tsx";
 
-const tokens = (n: number) =>
-  n >= 1_000_000
-    ? `${(n / 1_000_000).toFixed(1)}M`
-    : n >= 1000
-      ? `${(n / 1000).toFixed(1)}k`
-      : String(n);
-
 const button =
   "rounded-lg border border-line-strong px-2.5 py-1 text-[12.5px] text-body hover:bg-panel disabled:cursor-not-allowed disabled:opacity-40";
 const filled =
@@ -115,13 +108,6 @@ export function SideSheet({
         >
           {item?.title ?? side.title}
         </button>
-        <span
-          className="shrink-0 text-[11px] text-muted tabular-nums"
-          title={`${side.tokens.input.toLocaleString()} tokens read, ${side.tokens.output.toLocaleString()} written`}
-        >
-          {tokens(side.tokens.input + side.tokens.output)} tokens · $
-          {side.tokens.usd.toFixed(2)}
-        </span>
         <More
           sections={[
             {

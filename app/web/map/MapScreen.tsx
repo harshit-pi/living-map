@@ -468,16 +468,6 @@ function Screen({
             },
           ],
         },
-        {
-          head: "The map's own work",
-          items: [
-            {
-              label: `Today $${view.spend.todayUsd.toFixed(2)} · in all $${view.spend.usd.toFixed(2)} (${view.spend.calls} reads)`,
-              onClick: () => {},
-              disabled: true,
-            },
-          ],
-        },
       ]}
     />
   );
