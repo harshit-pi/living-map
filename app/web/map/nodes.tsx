@@ -53,7 +53,7 @@ export function ItemNode({ data }: NodeProps) {
       {topic ? (
         <span
           aria-hidden
-          className="w-3 shrink-0 text-center text-[11px] text-muted"
+          className="w-3 shrink-0 text-center text-[14px] text-muted"
         >
           {d.hasKids ? (d.folded ? "▸" : "▾") : ""}
         </span>

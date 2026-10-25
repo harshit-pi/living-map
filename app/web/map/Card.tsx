@@ -39,7 +39,7 @@ function actionsOf(i: LedgerItem): Act[] {
       return i.state === "open" ? [set("answered", "Answered")] : [];
     case "option":
       return i.state === "offered"
-        ? [set("taken", "Take this", "Tell Claude you take this option")]
+        ? [set("taken", "Take this", "Mark this option taken on the map")]
         : [];
     case "task":
       return i.state !== "done" && i.state !== "dropped" && i.owner !== "claude"
@@ -47,7 +47,7 @@ function actionsOf(i: LedgerItem): Act[] {
         : [];
     case "decision":
       return i.state === "decided"
-        ? [set("reopened", "Reopen", "Tell Claude this is open again")]
+        ? [set("reopened", "Reopen", "Mark this open again on the map")]
         : [];
     case "assumption":
       return i.state === "assumed"
@@ -69,6 +69,7 @@ export function Card({
   byId,
   changes,
   primary,
+  beside,
   act,
   onPick,
   onClose,
@@ -77,6 +78,7 @@ export function Card({
   byId: Map<string, LedgerItem>;
   changes: ChangeStatement[];
   primary: boolean;
+  beside: boolean; // the list is open at the right: the card opens left of it
   act: (a: LedgerAction) => Promise<ActResult>;
   onPick: (id: string) => void;
   onClose: () => void;
@@ -121,14 +123,14 @@ export function Card({
     <div
       role="dialog"
       aria-label={item.title}
-      className="absolute top-2 right-2 left-2 z-30 max-h-[calc(100%-16px)] overflow-y-auto rounded-xl bg-surface p-3 shadow-xl ring-1 ring-line sm:left-auto sm:w-[400px]"
+      className={`absolute top-2 ${beside ? "right-[368px]" : "right-2"} left-2 z-30 max-h-[calc(100%-16px)] overflow-y-auto rounded-xl bg-surface p-3 shadow-xl ring-1 ring-line sm:left-auto sm:w-[400px]`}
     >
       <div className="flex items-start gap-2">
         <span className="mt-0.5 rounded-full bg-panel px-2 py-0.5 text-[11px] text-muted">
-          {item.type} · {look.tag}
+          {look.tag === item.type ? item.type : `${item.type} · ${look.tag}`}
         </span>
         {owner && (
-          <span className="mt-0.5 text-[11px] text-faint">{owner}</span>
+          <span className="mt-0.5 text-[11px] text-muted">{owner}</span>
         )}
         <div className="flex-1" />
         <button
@@ -168,7 +170,7 @@ export function Card({
           )}
         </figure>
       )}
-      <div className="mt-2 text-[11px] text-faint">{BASIS[item.basis]}</div>
+      <div className="mt-2 text-[11px] text-muted">{BASIS[item.basis]}</div>
       {item.links.length > 0 && (
         <ul className="mt-2 space-y-0.5">
           {item.links.map((l) => {
@@ -212,7 +214,7 @@ export function Card({
       )}
       {sent === "sent" && (
         <div className="mt-3 rounded-lg bg-success-soft px-2.5 py-1.5 text-[12.5px] text-success-strong">
-          Sent · Claude has it
+          Sent to your chat
         </div>
       )}
       {error && (

@@ -33,6 +33,7 @@ export function Drawer({
   changes,
   changesFirst,
   selected,
+  newIds,
   onPick,
   onReview,
   onClose,
@@ -42,6 +43,7 @@ export function Drawer({
   changes: ChangeStatement[];
   changesFirst: boolean;
   selected: string | null;
+  newIds: Set<string>; // marked new, as on the map
   onPick: (id: string) => void;
   onReview: (a: LedgerAction) => void;
   onClose: () => void;
@@ -146,14 +148,17 @@ export function Drawer({
                   {topic && (
                     <span
                       data-content
-                      className="block truncate text-[11px] text-faint"
+                      className="block truncate text-[11px] text-muted"
                     >
                       {topic.title}
                     </span>
                   )}
                 </span>
-                {i.isNew && (
-                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
+                {newIds.has(i.id) && (
+                  <span
+                    title="New since you looked"
+                    className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary"
+                  />
                 )}
               </button>
             </li>

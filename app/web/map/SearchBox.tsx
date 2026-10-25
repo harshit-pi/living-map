@@ -80,7 +80,7 @@ export function SearchBox({
                     {topic && (
                       <span
                         data-content
-                        className="block truncate text-[11px] text-faint"
+                        className="block truncate text-[11px] text-muted"
                       >
                         {topic.title}
                       </span>

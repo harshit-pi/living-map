@@ -12,6 +12,7 @@ import {
   nowTopic,
   search,
 } from "./lens.ts";
+import { newIds, snapOf } from "./since.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 const item = (
@@ -252,5 +253,23 @@ describe("lenses", () => {
 
   it("ties items to changes by turn or link", () => {
     expect([...changedIds(v.items, v.changes)]).toEqual(["i43"]);
+  });
+});
+
+describe("since you looked", () => {
+  const v = fixtureView();
+  const order = layout(v.items).order;
+
+  it("steps through what is new, in map order", () => {
+    const snap = snapOf(v, order)!;
+    expect(snap.ids.length).toBeGreaterThan(0);
+    expect(new Set(snap.ids)).toEqual(newIds(v));
+    expect(snap.ids).toEqual(order.filter((id) => snap.ids.includes(id)));
+  });
+
+  it("has nothing new on a chat you have never looked at", () => {
+    const never = { ...v, lookedTurn: 0 };
+    expect(newIds(never).size).toBe(0);
+    expect(snapOf(never, order)).toBeNull();
   });
 });

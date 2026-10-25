@@ -11,6 +11,7 @@ export function Toolbar({
   onList,
   listOpen,
   canNow,
+  following,
 }: {
   lens: Lens | null;
   counts: Record<Lens, number>;
@@ -20,6 +21,7 @@ export function Toolbar({
   onList: () => void;
   listOpen: boolean;
   canNow: boolean;
+  following: boolean; // the camera is on Now's topic, following it
 }) {
   const tool =
     "flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-[12px]";
@@ -71,8 +73,13 @@ export function Toolbar({
       <button
         onClick={onNow}
         disabled={!canNow}
-        title="Go to the topic Claude is on now, and follow it"
-        className={`${tool} border-line text-body hover:bg-panel disabled:opacity-40`}
+        aria-pressed={following}
+        title={
+          following
+            ? "Following the topic Claude is on; move the map to stop"
+            : "Go to the topic Claude is on now, and follow it"
+        }
+        className={`${tool} disabled:opacity-40 ${following ? "border-ink bg-surface text-ink" : "border-line text-body hover:bg-panel"}`}
       >
         Now
       </button>

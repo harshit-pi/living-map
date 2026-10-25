@@ -11,6 +11,7 @@ import { useMemo } from "react";
 
 import { COL, NODE_H, NODE_W, ROOT, type Layout } from "./layout.ts";
 import { countsOf, countsText, descendants } from "./lens.ts";
+import { lookOf } from "./look.ts";
 import { ItemNode, type ItemData } from "./nodes.tsx";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
@@ -27,6 +28,13 @@ function Branch({ sourceX, sourceY, targetX, targetY, style }: EdgeProps) {
   return <BaseEdge path={path} style={style} />;
 }
 const edgeTypes = { branch: Branch };
+
+// what a screen reader says on a node; React Flow's own words speak of
+// selecting, deleting and dragging, none of which the map does
+const ARIA = {
+  "node.a11yDescription.default": "Enter opens an item or folds a topic.",
+  "node.a11yDescription.keyboardDisabled": "",
+};
 
 const LINE = "var(--color-line-strong)";
 const LINK = "var(--color-faint)";
@@ -46,6 +54,7 @@ export function Canvas({
   onNode,
   onPane,
   onUserMove,
+  onMoveEnd,
 }: {
   title: string;
   items: LedgerItem[];
@@ -59,6 +68,7 @@ export function Canvas({
   onNode: (id: string) => void;
   onPane: () => void;
   onUserMove: () => void;
+  onMoveEnd: (v: Viewport) => void;
 }) {
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const nodes = useMemo((): Node[] => {
@@ -96,6 +106,15 @@ export function Canvas({
         data,
         draggable: false,
         selectable: false,
+        focusable: !!item,
+        ...(item
+          ? {
+              ariaRole: "button" as const,
+              ariaLabel: `${item.title}: ${lookOf(item).tag}`,
+            }
+          : {}),
+        className:
+          "rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
       };
     });
   }, [laid, byId, items, title, folded, lit, selected, newIds]);
@@ -147,6 +166,18 @@ export function Canvas({
         if (n.id !== ROOT) onNode(n.id);
       }}
       onPaneClick={onPane}
+      // Enter or Space on a focused node does what a click does
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const el = e.target as HTMLElement;
+        const id = el.classList.contains("react-flow__node")
+          ? el.dataset.id
+          : undefined;
+        if (!id || id === ROOT) return;
+        e.preventDefault();
+        onNode(id);
+      }}
+      onMoveEnd={(_, v) => onMoveEnd(v)}
       // a move with an event behind it is yours (a drag, the wheel, a pinch);
       // the camera moving for Now or a step has none
       onMoveStart={(e) => {
@@ -157,6 +188,9 @@ export function Canvas({
       zoomOnScroll={false}
       minZoom={0.2}
       maxZoom={1.6}
+      edgesFocusable={false}
+      deleteKeyCode={null}
+      ariaLabelConfig={ARIA}
       proOptions={{ hideAttribution: true }}
     >
       <Background color="var(--color-line-strong)" gap={22} />

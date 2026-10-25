@@ -26,7 +26,7 @@ import {
   type Lens,
 } from "./lens.ts";
 import { SearchBox } from "./SearchBox.tsx";
-import { snapOf, type Snap } from "./since.ts";
+import { newIds, snapOf, type Snap } from "./since.ts";
 import { SinceBar, Strip } from "./Strip.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 import { useLedger } from "./useLedger.ts";
@@ -44,6 +44,18 @@ const AWAY_MS = 5 * 60_000;
 // below this width the card covers the top of the map instead of its side
 const NARROW = 640;
 const CARD_W = 400;
+const DRAWER_W = 360;
+// from this width the card opens beside the open list instead of over it
+const SIDE_BY_SIDE = CARD_W + DRAWER_W + 320;
+
+// what a lens with nothing in it says, so a map dimmed all over reads as
+// "none", not as broken
+const NONE: Record<Lens, string> = {
+  waiting: "Nothing is waiting on you",
+  open: "Nothing is open",
+  decided: "Nothing is decided yet",
+  changed: "Nothing here is tied to a change in your system yet",
+};
 
 // The map of your chat: the strip, the lenses, and the mind map itself,
 // with a card for the item you click and the list as a drawer.
@@ -109,7 +121,8 @@ function Screen({
   const [step, setStep] = useState(-1);
   const [following, setFollowing] = useState(false);
   const [error, setError] = useState("");
-  const [start] = useState(() => startAt(initial));
+  // where the camera was, so the map comes back there after strip-only
+  const [camera, setCamera] = useState(() => startAt(initial));
 
   const items = view.items;
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
@@ -140,17 +153,14 @@ function Screen({
     }
     return lens ? matcher(lens, changed) : null;
   }, [searching, query, items, lens, changed]);
-  const newIds = useMemo(
-    () =>
-      new Set([
-        ...(snap?.ids ?? []),
-        ...items.filter((i) => i.isNew).map((i) => i.id),
-      ]),
-    [snap, items],
+  const marked = useMemo(
+    () => new Set([...(snap?.ids ?? []), ...newIds(view)]),
+    [snap, view],
   );
   // an item that left the map (Not right, or merged) closes its card
   const card = selected ? (byId.get(selected) ?? null) : null;
   const now = nowTopic(items);
+  const beside = drawer && width >= SIDE_BY_SIDE;
   const firstWaiting =
     view.strip.waiting.map((id) => byId.get(id)).find(Boolean) ??
     items.find((i) => i.waiting) ??
@@ -217,15 +227,17 @@ function Screen({
       if (!p) return;
       const zoom = clampZoom(rf.getZoom());
       const narrow = width < NARROW;
-      // with the card open, the item lands beside it, not under it
-      const dx = withCard && !narrow ? CARD_W / 2 / zoom : 0;
+      // with the card open, the item lands beside it (and the list), not
+      // under it
+      const dx =
+        withCard && !narrow ? (CARD_W + (beside ? DRAWER_W : 0)) / 2 / zoom : 0;
       const dy = withCard && narrow ? (height * 0.25) / zoom : 0;
       void rf.setCenter(p.x + NODE_W / 2 + dx, p.y + NODE_H / 2 - dy, {
         zoom,
         duration: 300,
       });
     },
-    [rf, width, height],
+    [rf, width, height, beside],
   );
   const frameLeft = useCallback(
     (id: string, l: Layout, duration = 300) => {
@@ -380,7 +392,13 @@ function Screen({
         view={view}
         firstWaiting={firstWaiting}
         onWaiting={pick}
-        onWaitingLens={() => setLens(lens === "waiting" ? null : "waiting")}
+        onWaitingLens={() => {
+          // from the strip alone: the map comes back to show them
+          if (compact) {
+            setStrip(false);
+            setLens("waiting");
+          } else setLens(lens === "waiting" ? null : "waiting");
+        }}
         waitingLens={lens === "waiting"}
         more={more}
       />
@@ -446,23 +464,36 @@ function Screen({
         }}
         listOpen={drawer}
         canNow={!!now}
+        following={following}
       />
-      <main className="relative min-h-0 flex-1 overflow-hidden">
+      {/* clipped, not hidden: focus or find-in-page can scroll a hidden box
+          sideways, shifting the whole map with no way back */}
+      <main className="relative min-h-0 flex-1 overflow-clip">
         <Canvas
           title={view.title}
           items={items}
           laid={laid}
           folded={folded}
           lit={lit}
-          newIds={newIds}
+          newIds={marked}
           selected={selected}
-          initial={start}
+          initial={camera}
           onNode={onNode}
           onPane={() => setSelected(null)}
           onUserMove={() => setFollowing(false)}
+          onMoveEnd={setCamera}
         />
         {items.length === 0 && <Empty view={view} />}
         {/* floats over the map, so turning the lens on moves nothing */}
+        {lens &&
+          counts[lens] === 0 &&
+          !(lens === "changed" && view.changes.length > 0) &&
+          !searching &&
+          !drawer && (
+            <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 max-w-[calc(100%-24px)] -translate-x-1/2 truncate rounded-full bg-surface px-3 py-1 text-[12.5px] text-body shadow-md ring-1 ring-line">
+              {NONE[lens]}
+            </div>
+          )}
         {lens === "changed" && view.changes.length > 0 && !drawer && (
           <div className="absolute bottom-3 left-1/2 z-10 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 rounded-full bg-surface px-3 py-1 text-[12.5px] whitespace-nowrap text-body shadow-md ring-1 ring-line">
             <span className="truncate">
@@ -503,6 +534,7 @@ function Screen({
             byId={byId}
             changes={view.changes}
             primary
+            beside={beside}
             act={act}
             onPick={pick}
             onClose={() => setSelected(null)}
@@ -514,9 +546,10 @@ function Screen({
           changes={view.changes}
           changesFirst={changesFirst}
           selected={selected}
+          newIds={marked}
           onPick={(id) => {
-            // on a narrow pane the list covers the map: it steps aside
-            if (width < NARROW) setDrawer(false);
+            // without room for the card beside it, the list steps aside
+            if (width < SIDE_BY_SIDE) setDrawer(false);
             pick(id);
           }}
           onReview={(a) => void run(a)}

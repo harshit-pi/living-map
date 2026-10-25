@@ -73,7 +73,8 @@ export function Strip({
   return (
     <div className="flex min-h-10 items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
       <div
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-[12.5px]"
+        // idle, it gives the room to what waits on you
+        className={`flex min-w-0 items-center gap-1.5 text-[12.5px] ${view.strip.doing || !firstWaiting ? "flex-1" : ""}`}
         title={view.strip.doing ?? undefined}
       >
         <span
