@@ -66,9 +66,22 @@ export function ItemNode({ data }: NodeProps) {
       {topic ? (
         <span
           aria-hidden
-          className="w-3 shrink-0 text-center text-[14px] text-muted"
+          className="flex w-3 shrink-0 justify-center text-muted"
         >
-          {d.hasKids ? (d.folded ? "▸" : "▾") : ""}
+          {d.hasKids && (
+            // a thin chevron: right when folded, down when open
+            <svg
+              viewBox="0 0 16 16"
+              className={`h-3 w-3 transition-transform ${d.folded ? "" : "rotate-90"}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M6 3.5 10.5 8 6 12.5" />
+            </svg>
+          )}
         </span>
       ) : (
         <span
