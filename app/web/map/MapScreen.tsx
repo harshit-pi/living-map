@@ -110,13 +110,13 @@ function startAt(
   h = typeof window === "undefined" ? 768 : window.innerHeight,
 ): Viewport {
   const size = sizeFor(w);
-  const opening = startFolds(v.items);
+  const opening = startFolds(v.items, v.now);
   const l = layout(
     mapItems(v.items),
     (id) => opening[id] ?? !!v.items.find((i) => i.id === id)?.folded,
     size,
   );
-  const t = nowTopic(v.items);
+  const t = nowTopic(v.items, v.now);
   const root = l.nodes.get(ROOT)!;
   const p = (t && l.nodes.get(t.id)) || root;
   let wide = 0;
@@ -156,7 +156,7 @@ function Screen({
   // folds you set here, over the server's, so a fold shows at once; the
   // page opens with every topic but Claude's folded (shown.ts)
   const [folds, setFolds] = useState<Record<string, boolean>>(() =>
-    startFolds(initial.items),
+    startFolds(initial.items, initial.now),
   );
   // the list group to show on top (the Decided lens opens the list there)
   const [listFirst, setListFirst] = useState<string | null>(null);
@@ -224,7 +224,7 @@ function Screen({
   );
   // an item that left the map (Not right, or merged) closes its card
   const card = selected ? (byId.get(selected) ?? null) : null;
-  const now = nowTopic(items);
+  const now = nowTopic(items, view.now);
   const beside = drawer && width >= SIDE_BY_SIDE;
   // a side chat you ended (here or on another page) is no longer shown
   const side =

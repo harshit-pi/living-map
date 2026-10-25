@@ -30,6 +30,23 @@ export type Facts = {
 const first = (i: Item) => i.src[0] ?? 0;
 const n = (id: string) => Number(id.slice(1)) || 0;
 
+// The topic of the latest turn the map filed (the extractor names one for
+// every turn), still live; else the newest topic.
+function nowOf(s: State): string | null {
+  const { store } = s;
+  const turns = [...store.topicOf.keys()].sort((a, b) => b - a);
+  for (const t of turns) {
+    const id = store.topicOf.get(t)!;
+    const i = store.items.get(id);
+    if (i && !i.retired) return id;
+  }
+  return (
+    live(store)
+      .filter((i) => i.type === "topic")
+      .sort((a, b) => n(b.id) - n(a.id))[0]?.id ?? null
+  );
+}
+
 export function buildView(s: State, f: Facts): LedgerView {
   const { conv, store } = s;
   const looked = conv.lookedTurn;
@@ -79,6 +96,7 @@ export function buildView(s: State, f: Facts): LedgerView {
     read: store.read,
     lookedTurn: looked,
     items,
+    now: nowOf(s),
     strip: {
       doing,
       waiting: waiting.map((i) => i.id),

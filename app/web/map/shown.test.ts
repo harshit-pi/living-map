@@ -56,3 +56,7 @@ test("what sat under a hidden item hangs from the nearest one still drawn", () =
 test("the page opens with every topic folded but the one Claude is on", () => {
   assert.deepEqual(startFolds(ITEMS), { t1: true });
 });
+
+test("the server's topic wins over a guess from the items", () => {
+  assert.deepEqual(startFolds(ITEMS, "t1"), { t2: true });
+});

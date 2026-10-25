@@ -33,8 +33,11 @@ export function mapItems(items: LedgerItem[]): LedgerItem[] {
 // The folds the page opens with: every topic but the one Claude is on.
 // Worked out once, when the page opens, so a topic never folds under you
 // while you look; topics that come later stay open.
-export function startFolds(items: LedgerItem[]): Record<string, boolean> {
-  const now = nowTopic(items)?.id;
+export function startFolds(
+  items: LedgerItem[],
+  told?: string | null,
+): Record<string, boolean> {
+  const now = nowTopic(items, told)?.id;
   const out: Record<string, boolean> = {};
   for (const i of items)
     if (i.type === "topic" && i.id !== now && !i.parent) out[i.id] = true;

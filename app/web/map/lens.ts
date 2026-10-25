@@ -144,7 +144,13 @@ export function foldsAbove(
 // The topic the chat is on: the one whose items came up most recently. A
 // topic's "active" state also counts a task left in progress long ago, so
 // it can't say where the chat is now.
-export function nowTopic(items: LedgerItem[]): LedgerItem | null {
+export function nowTopic(
+  items: LedgerItem[],
+  // the server's answer, from the topic it filed the latest turn under
+  now?: string | null,
+): LedgerItem | null {
+  const told = now ? items.find((i) => i.id === now) : undefined;
+  if (told) return told;
   const topics = items
     .filter((i) => i.type === "topic")
     .sort((a, b) => (a.order < b.order ? -1 : 1));

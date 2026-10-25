@@ -114,3 +114,20 @@ test("nothing in progress: no doing", () => {
     reading: { done: 3, total: 40 },
   });
 });
+
+test("the topic the chat is on is the one its latest filed turn belongs to", () => {
+  const s = state();
+  s.store.items.set("i9", item("i9", "topic", "", 9));
+  s.store.topicOf.set(3, "i9");
+  s.store.topicOf.set(5, "i1");
+  const f = {
+    turns: 5,
+    behind: 0,
+    following: true,
+    spend: { calls: 0, usd: 0, todayUsd: 0 },
+  };
+  assert.equal(buildView(s, f).now, "i1");
+  // retired, it gives way to the topic of the turn before
+  s.store.items.get("i1")!.retired = "merged";
+  assert.equal(buildView(s, f).now, "i9");
+});

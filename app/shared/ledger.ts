@@ -50,6 +50,8 @@ export type LedgerView = {
   read: number; // the last turn the map has filed
   lookedTurn: number; // the last turn when you last looked
   items: LedgerItem[]; // live items, flat; the page builds the tree by parent
+  // the topic the chat is on: the one its latest filed turn belongs to
+  now?: string | null;
   strip: {
     doing: string | null; // what Claude is on, from its task list
     waiting: string[]; // ids, oldest first
