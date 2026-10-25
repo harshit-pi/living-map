@@ -35,8 +35,9 @@ const engine = createEngine({
 follow(engine, { refreshView, on: experimental });
 
 // the living-map skill, if you installed it, follows this copy of the app;
-// a copy run with a home of its own (a test, a second server) leaves it alone
-if (!process.env.LIVING_MAP_HOME)
+// a second copy run beside it (its own home, another port: a test server)
+// leaves it alone, so the skill never points at a server about to stop
+if (!process.env.LIVING_MAP_HOME || PORT === 4317)
   try {
     installSkill(PORT);
   } catch (e) {
