@@ -29,6 +29,9 @@ node eval/moves-compare.ts <label> <label>                  # those runs side by
 node eval/read-format.ts             # can models read mermaid+ as well as one line per item (calls the model, ~$0.50; only when asked)
 node eval/transcripts.ts [N]         # the transcript adapter over your N largest Claude Code chats (local, no model)
 node eval/changes-retro.ts [N] [out] # what changed, rebuilt from your N latest sessions (local, no model)
+node eval/extract-run.ts --pick 15 [--max-usd 40] [--fresh]  # the extractor over your own chats, offline, with 5 checkpoints each (calls the model; only when asked)
+node eval/extract-label.ts [--fresh] <dir>...   # Opus labels each checkpoint (calls the model; only when asked)
+node eval/extract-score.ts [<dir>...]           # recall and precision against the labels, and settle.md for your marks
 ```
 
 The pre-commit hook (husky, `app/.husky/pre-commit`) runs lint-staged, then the full checks.
