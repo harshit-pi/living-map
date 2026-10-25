@@ -21,12 +21,14 @@ const withGlyphs = (text: string) =>
 export function Tip({
   tip,
   floating = true,
+  more = false,
   style,
   onDone,
   onOff,
 }: {
   tip: TipId;
   floating?: boolean;
+  more?: boolean; // another tip waits after this one: its button says Next
   style?: React.CSSProperties;
   onDone: () => void;
   onOff: () => void;
@@ -56,7 +58,7 @@ export function Tip({
           onClick={onDone}
           className="rounded-md border border-line-strong px-2 py-0.5 text-[12px] text-ink hover:bg-panel"
         >
-          Got it
+          {more ? "Next" : "Got it"}
         </button>
       </div>
     </div>
@@ -109,10 +111,12 @@ export function MapTips({
   if (!next) return null;
 
   const done = () => onSeen(next.tip);
+  const more = !!nextTip(onScreen, lenses, new Set([...seen, next.tip]));
   if (!next.item)
     return (
       <Tip
         tip={next.tip}
+        more={more}
         style={{ top: GAP, left: 12, width: W }}
         onDone={done}
         onOff={onOff}
@@ -125,6 +129,7 @@ export function MapTips({
   return (
     <Tip
       tip={next.tip}
+      more={more}
       style={
         below
           ? { top: b.y + b.h + GAP, left, width: W }
