@@ -91,6 +91,9 @@ export interface Entry {
   hookEvent?: string;
   filePath?: string;
   change?: ToolChange;
+  // calls to Claude's own task list, in order (see tasks.ts): kept whole,
+  // as they are small and say what Claude is on with no model
+  plan?: { tool: string; input: unknown }[];
 }
 
 export interface Transcript {
@@ -302,6 +305,11 @@ function toolChange(d: Raw, entry: string, tools: Map<string, string>) {
   return c;
 }
 
+// the tools that hold Claude's task list: the desktop app's plan (and its
+// wrap-up, which ticks it off), TodoWrite, and the Task tools
+export const PLAN_TOOL =
+  /(?:^|__)(?:update_plan|wrap_up)$|^TodoWrite$|^Task(?:Create|Update)$/;
+
 export function toEntry(
   d: Raw,
   tools = new Map<string, string>(),
@@ -328,8 +336,12 @@ export function toEntry(
     e.kind = "assistant";
     const content = d.message?.content;
     for (const b of blocks(content))
-      if (b.type === "tool_use" && typeof b.id === "string")
-        tools.set(b.id, str(b.name) ?? "");
+      if (b.type === "tool_use" && typeof b.id === "string") {
+        const name = str(b.name) ?? "";
+        tools.set(b.id, name);
+        if (PLAN_TOOL.test(name))
+          (e.plan ??= []).push({ tool: name, input: b.input });
+      }
     const text = textOf(content).trim();
     if (text) e.text = text;
     const stop = str(d.message?.stop_reason);

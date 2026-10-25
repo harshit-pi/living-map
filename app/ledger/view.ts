@@ -22,6 +22,9 @@ export type Facts = {
   told?: Map<string, { at: number; heard: boolean }>;
   proposals?: Map<string, number>; // pending side-chat proposals per item
   sides?: LedgerView["sides"];
+  // what Claude is on from its own task list (tasks.ts); absent when it
+  // keeps none, and a task of Claude's the map filed stands in
+  doing?: string | null;
 };
 
 const first = (i: Item) => i.src[0] ?? 0;
@@ -54,12 +57,21 @@ export function buildView(s: State, f: Facts): LedgerView {
     .filter((i) => isWaiting(i, store.read))
     .sort((a, b) => first(a) - first(b) || n(a.id) - n(b.id));
   // what Claude is on: its own task in progress, the newest if several
+  // what Claude is on: its own task list says; else a task of Claude's the
+  // map filed as in progress, only while it came up in the last few turns
+  // (the map is slow to see a task finish)
   const doing =
-    live(store)
-      .filter(
-        (i) => i.type === "task" && i.state === "doing" && i.owner !== "you",
-      )
-      .sort((a, b) => n(b.id) - n(a.id))[0]?.title ?? null;
+    f.doing !== undefined
+      ? f.doing
+      : (live(store)
+          .filter(
+            (i) =>
+              i.type === "task" &&
+              i.state === "doing" &&
+              i.owner !== "you" &&
+              store.read - (i.src.at(-1) ?? 0) <= 3,
+          )
+          .sort((a, b) => n(b.id) - n(a.id))[0]?.title ?? null);
   return {
     conv: conv.root,
     title: conv.title,

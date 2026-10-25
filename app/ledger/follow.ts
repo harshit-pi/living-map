@@ -24,6 +24,7 @@ import {
   place,
   type Acted,
 } from "./apply.ts";
+import type { Compared, Shadow } from "./changes/snapshot.ts";
 import type { Conv, LedgerDb, State } from "./db.ts";
 import {
   asksSomething,
@@ -33,6 +34,7 @@ import {
   SYSTEM,
   type Answer,
 } from "./extract.ts";
+import { planOf, type Plan } from "./tasks.ts";
 import {
   emptyTranscript,
   readMore,
@@ -52,7 +54,6 @@ import type {
   LedgerEvent,
   LedgerView,
 } from "../shared/ledger.ts";
-import type { Compared, Shadow } from "./changes/snapshot.ts";
 
 export const TICK_MS = 2000;
 export const QUIET_MS = 20_000;
@@ -113,6 +114,8 @@ type Follower = {
   shadow?: Shadow | null;
   snap?: string;
   snapped: number;
+  // Claude's own task list, as its calls left it
+  plan?: Plan;
 };
 
 const mtimeOf = (file: string) => {
@@ -254,6 +257,7 @@ export function createLedger(deps: LedgerDeps) {
         }
       }
       const v = readView(f.t, t - f.grewAt);
+      f.plan = planOf(v.path);
       f.turns = v.turns;
       f.sealed = v.sealed;
       if (grew) db.setSource(f.file, f.s.conv.root, f.t.offset, t);
@@ -510,6 +514,8 @@ export function createLedger(deps: LedgerDeps) {
           : undefined,
       spend: db.spend(root, startOfDay(now())),
       changes: db.changes(root),
+      // what Claude is on from its own list, when it keeps one
+      ...(f?.plan?.steps.length ? { doing: f.plan.doing } : {}),
     });
   }
 

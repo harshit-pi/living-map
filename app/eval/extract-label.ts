@@ -70,7 +70,7 @@ const EFFORT = "medium";
 const MAX_CHARS = 600_000;
 const POOL = Number(process.env.LIVING_MAP_EVAL_POOL) || 3;
 
-const SYSTEM = `You label a conversation between a person (YOU) and Claude Code (CLAUDE), a coding assistant, to check a tool that keeps track of it. You read the conversation up to some turn and write down where things stand as of the last turn shown: not where they stood earlier, and not where they will end up.
+export const LABEL_SYSTEM = `You label a conversation between a person (YOU) and Claude Code (CLAUDE), a coding assistant, to check a tool that keeps track of it. You read the conversation up to some turn and write down where things stand as of the last turn shown: not where they stood earlier, and not where they will end up.
 
 Write four lists.
 
@@ -241,7 +241,7 @@ async function main(dirs: string[]) {
       jobs.push(async () => {
         const { text, from, chars, cut } = render(await turns, cp.turn);
         const r = await provider.extract!({
-          system: SYSTEM,
+          system: LABEL_SYSTEM,
           message: `${cut ? `${cut}\n\n` : ""}THE CONVERSATION, TURNS ${from}–${cp.turn}:\n\n${text}\n\nWrite the four lists as of turn ${cp.turn}.`,
           schema: SCHEMA,
           model: MODEL,
