@@ -141,13 +141,26 @@ export function foldsAbove(
 }
 
 // the topic Now goes to: the newest active one, else the newest topic
+// The topic the chat is on: the one whose items came up most recently. A
+// topic's "active" state also counts a task left in progress long ago, so
+// it can't say where the chat is now.
 export function nowTopic(items: LedgerItem[]): LedgerItem | null {
   const topics = items
     .filter((i) => i.type === "topic")
     .sort((a, b) => (a.order < b.order ? -1 : 1));
-  return (
-    topics.filter((t) => t.state === "active").at(-1) ?? topics.at(-1) ?? null
-  );
+  let best: LedgerItem | null = null;
+  let latest = -1;
+  for (const t of topics) {
+    const turn = Math.max(
+      ...t.src,
+      ...descendants(items, t.id).flatMap((i) => i.src),
+    );
+    if (turn >= latest) {
+      latest = turn;
+      best = t;
+    }
+  }
+  return best;
 }
 
 // the top-level topic an item belongs to

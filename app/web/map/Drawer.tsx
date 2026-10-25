@@ -32,6 +32,7 @@ export function Drawer({
   items,
   changes,
   changesFirst,
+  first,
   selected,
   newIds,
   onPick,
@@ -42,6 +43,8 @@ export function Drawer({
   items: LedgerItem[];
   changes: ChangeStatement[];
   changesFirst: boolean;
+  // a group to show on top (the Decided lens opens the list there)
+  first?: string | null;
   selected: string | null;
   newIds: Set<string>; // marked new, as on the map
   onPick: (id: string) => void;
@@ -49,7 +52,13 @@ export function Drawer({
   onClose: () => void;
 }) {
   const [minor, setMinor] = useState(false);
-  const groups = groupsOf(items);
+  const all = groupsOf(items);
+  const groups = first
+    ? [
+        ...all.filter((g) => g.id === first),
+        ...all.filter((g) => g.id !== first),
+      ]
+    : all;
   const low = changes.filter((c) => c.low).length;
   const shown = changes.filter((c) => minor || !c.low);
   const modules = [...new Set(shown.map((c) => c.module))];

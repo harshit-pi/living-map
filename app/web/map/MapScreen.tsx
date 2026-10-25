@@ -35,6 +35,7 @@ import {
   type Lens,
 } from "./lens.ts";
 import { SearchBox } from "./SearchBox.tsx";
+import { mapItems, startFolds } from "./shown.ts";
 import { Chip, SideSheet } from "./SideSheet.tsx";
 import { newIds, snapOf, type Snap } from "./since.ts";
 import { SinceBar, Strip } from "./Strip.tsx";
@@ -109,9 +110,10 @@ function startAt(
   h = typeof window === "undefined" ? 768 : window.innerHeight,
 ): Viewport {
   const size = sizeFor(w);
+  const opening = startFolds(v.items);
   const l = layout(
-    v.items,
-    (id) => !!v.items.find((i) => i.id === id)?.folded,
+    mapItems(v.items),
+    (id) => opening[id] ?? !!v.items.find((i) => i.id === id)?.folded,
     size,
   );
   const t = nowTopic(v.items);
@@ -151,15 +153,20 @@ function Screen({
 
   const [lens, setLens] = useState<Lens | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  // folds you set here, over the server's, so a fold shows at once
-  const [folds, setFolds] = useState<Record<string, boolean>>({});
+  // folds you set here, over the server's, so a fold shows at once; the
+  // page opens with every topic but Claude's folded (shown.ts)
+  const [folds, setFolds] = useState<Record<string, boolean>>(() =>
+    startFolds(initial.items),
+  );
+  // the list group to show on top (the Decided lens opens the list there)
+  const [listFirst, setListFirst] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [changesFirst, setChangesFirst] = useState(false);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [compact, setCompact] = useState(() => stored("map.compact", false));
   const [snap, setSnap] = useState<Snap | null>(() =>
-    snapOf(initial, layout(initial.items).order),
+    snapOf(initial, layout(mapItems(initial.items)).order),
   );
   const [step, setStep] = useState(-1);
   const [following, setFollowing] = useState(false);
@@ -180,12 +187,16 @@ function Screen({
     (id: string) => folds[id] ?? !!byId.get(id)?.folded,
     [folds, byId],
   );
+  // what the map draws: findings and settled decisions stay in the card
+  // and the list
+  const mapped = useMemo(() => mapItems(items), [items]);
   const laid = useMemo(
-    () => layout(items, folded, size),
-    [items, folded, size],
+    () => layout(mapped, folded, size),
+    [mapped, folded, size],
   );
-  // every item in map order, folds open: the order the since bar steps in
-  const order = useMemo(() => layout(items).order, [items]);
+  // every item on the map in order, folds open: the order the since bar and
+  // a lens step in
+  const order = useMemo(() => layout(mapped).order, [mapped]);
   const changed = useMemo(
     () => changedIds(items, view.changes),
     [items, view.changes],
@@ -204,7 +215,8 @@ function Screen({
       const ids = new Set(search(items, query).map((i) => i.id));
       return (i) => ids.has(i.id);
     }
-    return lens ? matcher(lens, changed) : null;
+    // decided items are off the map: that lens shows them in the list
+    return lens && lens !== "decided" ? matcher(lens, changed) : null;
   }, [searching, query, items, lens, changed]);
   const marked = useMemo(
     () => new Set([...(snap?.ids ?? []), ...newIds(view)]),
@@ -222,7 +234,7 @@ function Screen({
   const otherSides = view.sides.filter((x) => x.id !== side?.id);
   // what the lens lights up, in map order, for its stepper
   const lensIds = useMemo(() => {
-    if (!lens) return [];
+    if (!lens || lens === "decided") return [];
     const m = matcher(lens, changed);
     return order.filter((id) => {
       const i = byId.get(id);
@@ -341,7 +353,7 @@ function Screen({
       void run({ type: "fold", item: f, folded: false });
     }
     setFolds(next);
-    return layout(items, (x) => next[x] ?? !!byId.get(x)?.folded, size);
+    return layout(mapped, (x) => next[x] ?? !!byId.get(x)?.folded, size);
   };
 
   const setStrip = (on: boolean) => {
@@ -548,11 +560,18 @@ function Screen({
           if (l === "changed" && view.changes.length) {
             setChangesFirst(true);
           }
+          // the decisions in force live in the list, not on the map
+          if (l === "decided") {
+            setChangesFirst(false);
+            setListFirst("decided");
+            setDrawer(true);
+          } else if (lens === "decided") setListFirst(null);
         }}
         onSearch={() => setSearching(true)}
         onNow={goNow}
         onList={() => {
           setChangesFirst(false);
+          setListFirst(null);
           setDrawer(!drawer);
         }}
         listOpen={drawer}
@@ -672,6 +691,7 @@ function Screen({
           items={items}
           changes={view.changes}
           changesFirst={changesFirst}
+          first={listFirst}
           selected={selected}
           newIds={marked}
           onPick={(id) => {

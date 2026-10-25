@@ -277,7 +277,9 @@ describe("lenses", () => {
 
   it("finds the folds above an item, and the topic Now goes to", () => {
     expect(foldsAbove(v.items, "i9", (id) => id === "i5")).toEqual(["i5"]);
-    expect(nowTopic(v.items)?.id).toBe("i19");
+    // the topic whose items came up last (turns 120–131), not the one
+    // still holding a task in progress
+    expect(nowTopic(v.items)?.id).toBe("i36");
   });
 
   it("ties items to changes by turn or link", () => {

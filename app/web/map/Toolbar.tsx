@@ -29,8 +29,10 @@ export function Toolbar({
   const tool =
     "flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-[12px]";
   return (
-    <div className="flex items-center gap-1.5 border-b border-line bg-canvas px-3 py-1.5">
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+    // on a narrow pane the lenses take a row of their own rather than
+    // scrolling out of sight
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-canvas px-3 py-1.5">
+      <div className="flex min-w-0 flex-[1_1_100%] flex-wrap items-center gap-1 min-[560px]:flex-[1_1_0%]">
         {LENSES.map((l) => {
           const on = lens === l.id;
           return (
@@ -55,69 +57,71 @@ export function Toolbar({
           );
         })}
       </div>
-      {step && step.n > 0 && (
-        <div className="flex shrink-0 items-center gap-0.5">
-          <button
-            className={`${tool} w-7 border-line px-0 text-body hover:bg-panel disabled:opacity-40`}
-            disabled={step.at <= 0}
-            onClick={() => step.onStep(step.at - 1)}
-            aria-label="Previous lit item"
-          >
-            ‹
-          </button>
-          <span className="min-w-8 text-center text-[11px] text-muted tabular-nums">
-            {step.at < 0 ? step.n : `${step.at + 1}/${step.n}`}
-          </span>
-          <button
-            className={`${tool} w-7 border-line px-0 text-body hover:bg-panel disabled:opacity-40`}
-            disabled={step.at >= step.n - 1}
-            onClick={() => step.onStep(step.at + 1)}
-            aria-label="Next lit item"
-            title="Go to each lit item in turn"
-          >
-            ›
-          </button>
-        </div>
-      )}
-      <button
-        onClick={onSearch}
-        title="Search titles (⌘F)"
-        aria-label="Search"
-        className={`${tool} border-line text-body hover:bg-panel`}
-      >
-        <svg
-          viewBox="0 0 16 16"
-          className="h-3.5 w-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          aria-hidden
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {step && step.n > 0 && (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              className={`${tool} w-7 border-line px-0 text-body hover:bg-panel disabled:opacity-40`}
+              disabled={step.at <= 0}
+              onClick={() => step.onStep(step.at - 1)}
+              aria-label="Previous lit item"
+            >
+              ‹
+            </button>
+            <span className="min-w-8 text-center text-[11px] text-muted tabular-nums">
+              {step.at < 0 ? `–/${step.n}` : `${step.at + 1}/${step.n}`}
+            </span>
+            <button
+              className={`${tool} w-7 border-line px-0 text-body hover:bg-panel disabled:opacity-40`}
+              disabled={step.at >= step.n - 1}
+              onClick={() => step.onStep(step.at + 1)}
+              aria-label="Next lit item"
+              title="Go to each lit item in turn"
+            >
+              ›
+            </button>
+          </div>
+        )}
+        <button
+          onClick={onSearch}
+          title="Search titles (⌘F)"
+          aria-label="Search"
+          className={`${tool} border-line text-body hover:bg-panel`}
         >
-          <circle cx="7" cy="7" r="4.5" />
-          <path d="M10.5 10.5 14 14" strokeLinecap="round" />
-        </svg>
-      </button>
-      <button
-        onClick={onNow}
-        disabled={!canNow}
-        aria-pressed={following}
-        title={
-          following
-            ? "Following the topic Claude is on; move the map to stop"
-            : "Go to the topic Claude is on now, and follow it"
-        }
-        className={`${tool} disabled:opacity-40 ${following ? "border-ink bg-surface text-ink" : "border-line text-body hover:bg-panel"}`}
-      >
-        Now
-      </button>
-      <button
-        onClick={onList}
-        aria-pressed={listOpen}
-        title="The same items as a list"
-        className={`${tool} ${listOpen ? "border-ink bg-surface text-ink" : "border-line text-body hover:bg-panel"}`}
-      >
-        List
-      </button>
+          <svg
+            viewBox="0 0 16 16"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            aria-hidden
+          >
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="M10.5 10.5 14 14" strokeLinecap="round" />
+          </svg>
+        </button>
+        <button
+          onClick={onNow}
+          disabled={!canNow}
+          aria-pressed={following}
+          title={
+            following
+              ? "Following the topic Claude is on; move the map to stop"
+              : "Go to the topic Claude is on now, and follow it"
+          }
+          className={`${tool} disabled:opacity-40 ${following ? "border-ink bg-surface text-ink" : "border-line text-body hover:bg-panel"}`}
+        >
+          Now
+        </button>
+        <button
+          onClick={onList}
+          aria-pressed={listOpen}
+          title="The same items as a list"
+          className={`${tool} ${listOpen ? "border-ink bg-surface text-ink" : "border-line text-body hover:bg-panel"}`}
+        >
+          List
+        </button>
+      </div>
     </div>
   );
 }
