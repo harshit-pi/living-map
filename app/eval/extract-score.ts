@@ -274,8 +274,12 @@ async function scoreChat(dir: string): Promise<Result | null> {
         n === "open" && asked.has(k.replace(".open.", ".waiting."))
           ? k.replace(".open.", ".waiting.")
           : k;
+      // ids are handed out afresh when a chat is filed again, so a map
+      // line's key carries its title too: a mark never lands on another item
       const mapKeys = lm.mapOnly.map((i) =>
-        own(`t${cp.turn}.${n}.map.${i.id}`),
+        own(
+          `t${cp.turn}.${n}.map.${i.id}.${hash(i.title.toLowerCase().replace(/\s+/g, " ").trim())}`,
+        ),
       );
       const labelKeys = lm.labelOnly.map((l) => own(labelKey(cp.turn, n, l)));
       if (n === "waiting")
@@ -291,7 +295,15 @@ async function scoreChat(dir: string): Promise<Result | null> {
           return body.push(`- as under waiting · ${text}`);
         lines++;
         if (mark) marked++;
-        body.push(`${boxes(mark)} · ${text} <!-- k:${k} -->`);
+        // who settled it and why stays with the mark (extract-settle.ts)
+        const note = mark
+          ? / · settled by Opus: (.*?) <!-- k:/.exec(
+              old.get(k)?.line ?? "",
+            )?.[1]
+          : undefined;
+        body.push(
+          `${boxes(mark)} · ${text}${note ? ` · settled by Opus: ${note}` : ""} <!-- k:${k} -->`,
+        );
       };
       body.push(
         `### ${n} · ${lm.pairs.length} matched, ${lm.mapOnly.length} map only, ${lm.labelOnly.length} label only`,
