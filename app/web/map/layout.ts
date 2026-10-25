@@ -15,7 +15,7 @@ export const ROOT = "root"; // the chat itself, left of every topic
 // and rows. The size follows the pane's width class only, never its exact
 // width, so a resize within the class moves nothing.
 export type Size = { col: number; row: number; w: number; h: number };
-export const WIDE: Size = { col: 260, row: 60, w: 224, h: 46 };
+export const WIDE: Size = { col: 284, row: 66, w: 248, h: 52 };
 // a pane beside the chat: a topic, its items and theirs fit side by side at
 // 480 px, with room for three lines of title in each
 export const NARROW: Size = { col: 160, row: 66, w: 146, h: 54 };

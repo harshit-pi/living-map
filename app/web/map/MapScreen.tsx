@@ -84,7 +84,10 @@ export default function MapScreen({
   );
 }
 
-const clampZoom = (z: number) => Math.min(1, Math.max(0.7, z));
+// the camera never starts or moves below this zoom: a box stays readable,
+// and a column that runs off the right is a drag away
+const MIN_ZOOM = 0.85;
+const clampZoom = (z: number) => Math.min(1, Math.max(MIN_ZOOM, z));
 
 // the window is the pane the map sits in; only crossing NARROW_PANE re-renders
 const onResize = (f: () => void) => {
@@ -103,9 +106,9 @@ const marginY = (narrow: boolean, h: number) =>
 
 // Where the camera starts. On a narrow pane, the topic Claude is on at the
 // top left, at full size, so its items read beside it. Wider, the whole tree
-// from the chat's root, zoomed so its columns fill the width instead of
-// leaving the right of the pane empty; scrolled down to that topic only when
-// it would start below the fold.
+// from the chat's root, zoomed so its columns fill the width (never below
+// MIN_ZOOM) instead of leaving the right of the pane empty; scrolled down to
+// that topic only when it would start below the fold.
 function startAt(
   v: LedgerView,
   w = typeof window === "undefined" ? 1024 : window.innerWidth,
@@ -126,7 +129,7 @@ function startAt(
   const narrow = w < NARROW_PANE;
   const zoom = narrow
     ? 1
-    : Math.min(1.15, Math.max(0.7, (w - 32) / Math.max(1, wide)));
+    : Math.min(1.15, Math.max(MIN_ZOOM, (w - 32) / Math.max(1, wide)));
   const left = narrow ? p : root;
   // the top of the map when that keeps the topic well in view
   const top = 16 + p.y * zoom < h * (narrow ? 0.4 : 0.6);

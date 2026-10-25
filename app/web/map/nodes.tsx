@@ -27,7 +27,7 @@ export type ItemData = {
 const textOf = (d: ItemData) =>
   d.size === NARROW
     ? { title: "text-[12px] leading-[14px]", lines: 3, pad: "gap-1.5 px-2" }
-    : { title: "text-[12.5px] leading-[15px]", lines: 2, pad: "gap-2 px-2.5" };
+    : { title: "text-[13px] leading-[16px]", lines: 2, pad: "gap-2 px-3" };
 const CLAMP = ["", "line-clamp-1", "line-clamp-2", "line-clamp-3"];
 
 const hidden = { opacity: 0, pointerEvents: "none" as const };
