@@ -24,6 +24,14 @@ const BINARY =
 
 export type Shadow = { root: string; gitDir: string };
 
+// git as these calls ask, never steered by the GIT_ variables of whatever
+// started the server: inside a git hook GIT_INDEX_FILE names the work tree's
+// own index, and the snapshot's `add` would stage into it
+export const gitEnv = () =>
+  Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
+  );
+
 const git = (sh: Shadow, args: string[], input?: string) =>
   execFileSync(
     "git",
@@ -40,7 +48,12 @@ const git = (sh: Shadow, args: string[], input?: string) =>
       "commit.gpgsign=false",
       ...args,
     ],
-    { maxBuffer: 256 * 1024 * 1024, input, stdio: ["pipe", "pipe", "ignore"] },
+    {
+      maxBuffer: 256 * 1024 * 1024,
+      input,
+      stdio: ["pipe", "pipe", "ignore"],
+      env: gitEnv(),
+    },
   ).toString();
 
 // The shadow repository for the work tree `cwd` is in, or null when it is in
@@ -50,6 +63,7 @@ export function shadowFor(home: string, cwd: string): Shadow | null {
   try {
     root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       stdio: ["ignore", "pipe", "ignore"],
+      env: gitEnv(),
     })
       .toString()
       .trim();
@@ -61,7 +75,10 @@ export function shadowFor(home: string, cwd: string): Shadow | null {
   const gitDir = path.join(home, "shadow", id);
   if (!fs.existsSync(path.join(gitDir, "HEAD"))) {
     fs.mkdirSync(gitDir, { recursive: true, mode: 0o700 });
-    execFileSync("git", ["init", "--bare", "-q", gitDir], { stdio: "ignore" });
+    execFileSync("git", ["init", "--bare", "-q", gitDir], {
+      stdio: "ignore",
+      env: gitEnv(),
+    });
     fs.writeFileSync(path.join(gitDir, "living-map-root"), root);
   }
   return { root, gitDir };

@@ -1,7 +1,9 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 
+import { Glyph } from "./Glyph.tsx";
 import { NARROW, type Size } from "./layout.ts";
-import { lookOf } from "./look.ts";
+import type { Lens } from "./lens.ts";
+import { LENS_LOOK, lookOf } from "./look.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 // What a node on the map is drawn from: its item (none for the chat's
@@ -14,9 +16,11 @@ export type ItemData = {
   counts: string | null; // "2 waiting · 5 settled", on a folded topic
   lensCount: number; // matches inside a fold, while a lens is on
   lit: boolean;
+  lens: Lens | null; // the lens lighting the map, if it isn't a search
   dim: boolean;
   selected: boolean;
   isNew: boolean;
+  now: boolean; // the topic the chat is on, marked with a dot
   size: Size;
 };
 
@@ -25,7 +29,7 @@ export type ItemData = {
 const textOf = (d: ItemData) =>
   d.size === NARROW
     ? { title: "text-[12px] leading-[14px]", lines: 3, pad: "gap-1.5 px-2" }
-    : { title: "text-[12.5px] leading-[15px]", lines: 2, pad: "gap-2 px-2.5" };
+    : { title: "text-[12.5px] leading-[15px]", lines: 3, pad: "gap-2 px-3" };
 const CLAMP = ["", "line-clamp-1", "line-clamp-2", "line-clamp-3"];
 
 const hidden = { opacity: 0, pointerEvents: "none" as const };
@@ -33,7 +37,7 @@ const hidden = { opacity: 0, pointerEvents: "none" as const };
 const ring = (d: ItemData) =>
   d.selected
     ? "ring-2 ring-ink ring-offset-2 ring-offset-canvas"
-    : d.lit
+    : d.lit && !d.lens
       ? "ring-2 ring-primary ring-offset-2 ring-offset-canvas"
       : "";
 
@@ -53,28 +57,43 @@ export function ItemNode({ data }: NodeProps) {
   const look = lookOf(i);
   const topic = i.type === "topic";
   const text = textOf(d);
-  // a folded topic keeps a line for what it holds
-  const lines = topic && d.folded ? text.lines - 1 : text.lines;
+  // a topic keeps a line for what it holds
+  const lines = topic && d.counts ? text.lines - 1 : text.lines;
+  // a lens colours the boxes it lights
+  const box = d.lit && d.lens ? LENS_LOOK[d.lens].box : look.box;
   return (
     <div
       style={{ width: d.size.w, height: d.size.h }}
-      className={`relative flex items-center ${text.pad} rounded-lg transition-opacity ${look.box} ${ring(d)} ${d.dim ? "opacity-25" : ""}`}
+      className={`relative flex items-center ${text.pad} rounded-lg transition-opacity ${box} ${ring(d)} ${d.dim ? "opacity-25" : ""}`}
       title={`${i.title}: ${look.tag}`}
     >
       <Handles />
       {topic ? (
         <span
           aria-hidden
-          className="w-3 shrink-0 text-center text-[14px] text-muted"
+          className="flex w-3 shrink-0 justify-center text-muted"
         >
-          {d.hasKids ? (d.folded ? "▸" : "▾") : ""}
+          {d.hasKids && (
+            // a thin chevron: right when folded, down when open
+            <svg
+              viewBox="0 0 16 16"
+              className={`h-3 w-3 transition-transform ${d.folded ? "" : "rotate-90"}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M6 3.5 10.5 8 6 12.5" />
+            </svg>
+          )}
         </span>
       ) : (
         <span
           aria-hidden
-          className={`w-3 shrink-0 text-center text-[12px] ${look.title}`}
+          className={`w-3.5 shrink-0 text-center text-[12px] ${look.mark}`}
         >
-          {look.glyph}
+          <Glyph g={look.glyph} />
         </span>
       )}
       <div className="min-w-0 flex-1">
@@ -83,12 +102,20 @@ export function ItemNode({ data }: NodeProps) {
           // a long name with no spaces breaks instead of running off the box
           className={`${text.title} ${CLAMP[lines]} wrap-break-word ${look.title}`}
         >
+          {topic && d.now && (
+            <span
+              title="The topic the chat is on"
+              className="mr-1.5 inline-block h-2 w-2 rounded-full bg-primary align-[1px]"
+            />
+          )}
           {i.title}
         </div>
-        {topic && d.folded && (
+        {topic && d.counts && (
           <div className="truncate text-[10.5px] leading-[13px] text-muted">
             {d.lensCount > 0 ? (
-              <span className="font-medium text-primary-strong">
+              <span
+                className={`font-medium ${d.lens ? LENS_LOOK[d.lens].text : "text-primary-strong"}`}
+              >
                 {d.lensCount} inside ·{" "}
               </span>
             ) : null}
@@ -119,7 +146,7 @@ function RootNode({ d }: { d: ItemData }) {
   return (
     <div
       style={{ width: d.size.w, height: d.size.h }}
-      className={`flex items-center justify-center rounded-full border-2 border-ink bg-surface ${d.size === NARROW ? "px-3" : "px-4"} ${d.dim ? "opacity-60" : ""}`}
+      className={`flex items-center justify-center rounded-full border border-line-strong bg-surface ${d.size === NARROW ? "px-3" : "px-4"} ${d.dim ? "opacity-60" : ""}`}
     >
       <Handles />
       <div

@@ -1,6 +1,7 @@
 import {
   Background,
   BaseEdge,
+  Position,
   ReactFlow,
   type Edge,
   type EdgeProps,
@@ -10,7 +11,7 @@ import {
 import { useMemo } from "react";
 
 import { ROOT, type Layout, type Size } from "./layout.ts";
-import { countsOf, countsText, descendants } from "./lens.ts";
+import { countsOf, countsText, descendants, type Lens } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import { ItemNode, type ItemData } from "./nodes.tsx";
 import type { LedgerItem } from "../../shared/ledger.ts";
@@ -56,9 +57,11 @@ export function Canvas({
   size,
   folded,
   lit,
+  lens,
   newIds,
   selected,
   initial,
+  now,
   onNode,
   onPane,
   onUserMove,
@@ -71,29 +74,58 @@ export function Canvas({
   folded: (id: string) => boolean;
   // null: no lens or search on, nothing dims
   lit: ((i: LedgerItem) => boolean) | null;
+  lens: Lens | null; // the lens behind lit, null for a search
   newIds: Set<string>;
   selected: string | null;
   initial: Viewport;
+  now?: string | null; // the topic the chat is on
   onNode: (id: string) => void;
   onPane: () => void;
   onUserMove: () => void;
   onMoveEnd: (v: Viewport) => void;
 }) {
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  // Where lines meet a box, given rather than measured: React Flow forgets
+  // its measurements whenever the nodes change, and draws no line until it
+  // has measured again, which never happens while the pane is hidden.
+  const handles = useMemo(
+    (): Node["handles"] => [
+      {
+        type: "target",
+        position: Position.Left,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: size.h,
+      },
+      {
+        type: "source",
+        position: Position.Right,
+        x: size.w - 1,
+        y: 0,
+        width: 1,
+        height: size.h,
+      },
+    ],
+    [size],
+  );
   const nodes = useMemo((): Node[] => {
     return laid.order.map((id) => {
       const p = laid.nodes.get(id)!;
       const item = id === ROOT ? null : (byId.get(id) ?? null);
       const isFolded = !!item && item.type === "topic" && folded(id);
       const under = isFolded ? descendants(items, id) : [];
+      const all = item?.type === "topic" ? descendants(items, id) : [];
       const data: ItemData = {
         item,
         title: item?.title ?? title,
         folded: isFolded,
         hasKids: item ? items.some((i) => i.parent === id) : true,
-        counts: isFolded ? countsText(countsOf(under)) : null,
+        // what a topic holds, folded or open
+        counts: all.length ? countsText(countsOf(all)) : null,
         lensCount: isFolded && lit ? under.filter(lit).length : 0,
         lit: !!item && !!lit && lit(item),
+        lens,
         dim:
           !!lit &&
           (!item ||
@@ -105,6 +137,7 @@ export function Canvas({
             )),
         selected: selected === id,
         isNew: newIds.has(id),
+        now: id === now,
         size,
       };
       return {
@@ -113,6 +146,7 @@ export function Canvas({
         position: { x: p.x, y: p.y },
         width: size.w,
         height: size.h,
+        handles,
         data,
         draggable: false,
         selectable: false,
@@ -127,7 +161,20 @@ export function Canvas({
           "rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
       };
     });
-  }, [laid, byId, items, title, folded, lit, selected, newIds, size]);
+  }, [
+    laid,
+    byId,
+    items,
+    title,
+    folded,
+    lit,
+    lens,
+    selected,
+    newIds,
+    size,
+    now,
+    handles,
+  ]);
 
   const edges = useMemo((): Edge[] => {
     const dimmed = new Set(
@@ -141,7 +188,7 @@ export function Canvas({
       data: { gap: size.col - size.w },
       style: {
         stroke: LINE,
-        strokeWidth: 1.5,
+        strokeWidth: 1,
         opacity: dimmed.has(e.to) ? 0.3 : 1,
       },
     }));
@@ -155,7 +202,7 @@ export function Canvas({
       labelBgStyle: { fill: "var(--color-canvas)" },
       style: {
         stroke: LINK,
-        strokeWidth: 1.25,
+        strokeWidth: 1,
         strokeDasharray: "5 4",
         opacity: dimmed.has(l.from) && dimmed.has(l.to) ? 0.3 : 1,
       },

@@ -6,19 +6,28 @@ echo "Running lint-staged (ESLint fix + Prettier on staged files)..."
 npx lint-staged || { echo "❌ lint-staged failed. Commit aborted."; exit 1; }
 
 echo "Running full app checks in parallel (ESLint, TypeScript, Prettier, Vitest)..."
-npx eslint . --max-warnings=0 --cache 2>&1 | sed 's/^/[eslint] /' &
-PID_ESLINT=$!
-npx tsc --noEmit 2>&1 | sed 's/^/[tsc] /' &
-PID_TSC=$!
-npx prettier --check . --cache 2>&1 | sed 's/^/[prettier] /' &
-PID_PRETTIER=$!
-npx vitest run --silent 2>&1 | sed 's/^/[vitest] /' &
-PID_TEST=$!
+# Each check writes its own exit code: a pipe's status is sed's, which passes.
+STATUS=$(mktemp -d)
+trap 'rm -rf "$STATUS"' EXIT
+check() {
+  name=$1
+  shift
+  {
+    code=0
+    "$@" 2>&1 || code=$?
+    echo "$code" >"$STATUS/$name"
+  } | sed "s/^/[$name] /"
+}
+check eslint npx eslint . --max-warnings=0 --cache &
+check tsc npx tsc --noEmit &
+check prettier npx prettier --check . --cache &
+check vitest npx vitest run --silent &
+wait
 
 FAILED=0
-wait $PID_ESLINT || { echo "❌ ESLint found errors."; FAILED=1; }
-wait $PID_TSC || { echo "❌ TypeScript errors found."; FAILED=1; }
-wait $PID_PRETTIER || { echo "❌ Prettier formatting issues found."; FAILED=1; }
-wait $PID_TEST || { echo "❌ Tests failed."; FAILED=1; }
+[ "$(cat "$STATUS/eslint")" = 0 ] || { echo "❌ ESLint found errors."; FAILED=1; }
+[ "$(cat "$STATUS/tsc")" = 0 ] || { echo "❌ TypeScript errors found."; FAILED=1; }
+[ "$(cat "$STATUS/prettier")" = 0 ] || { echo "❌ Prettier formatting issues found."; FAILED=1; }
+[ "$(cat "$STATUS/vitest")" = 0 ] || { echo "❌ Tests failed."; FAILED=1; }
 [ $FAILED -eq 0 ] || { echo "Commit aborted due to errors above."; exit 1; }
 echo "✅ All checks passed."

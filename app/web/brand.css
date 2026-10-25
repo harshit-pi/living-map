@@ -25,7 +25,7 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* surfaces */
-  --color-canvas: #f9f9f7; /* page background (bg-100) */
+  --color-canvas: #ffffff; /* page background: white, like surfaces; cards keep their borders */
   --color-surface: #ffffff; /* cards, panels, inputs (bg-000) */
   --color-panel: #f3f3f0; /* subtle fills: headers, chips, hover (bg-200) */
   --color-bubble: #f0efec; /* your messages (bg-300) */
@@ -69,6 +69,11 @@
   --color-hint-strong: #4a3aa7; /* (accent-pro-000) */
   --color-hint-soft: #f2f1fe;
   --color-hint-line: #dfdbfd; /* (accent-pro-900) */
+
+  --color-open: #a38500; /* the map's Open lens: boxes still in play */
+  --color-open-strong: #5c4b00;
+  --color-open-soft: #fdf9e1;
+  --color-open-line: #f1e391;
 }
 
 :root {
@@ -119,5 +124,10 @@
     --color-hint-strong: #c6bffb;
     --color-hint-soft: #3d3c45;
     --color-hint-line: #5a5678;
+
+    --color-open: #dcbf3f;
+    --color-open-strong: #f0db7a;
+    --color-open-soft: #3f3b28;
+    --color-open-line: #6a6030;
   }
 }

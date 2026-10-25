@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Glyph } from "./Glyph.tsx";
 import type { Snap } from "./since.ts";
 import type { LedgerItem, LedgerView } from "../../shared/ledger.ts";
 
@@ -102,7 +103,9 @@ export function Strip({
             title={`Waiting on you: ${firstWaiting.title}`}
             className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12.5px] text-warning-strong hover:bg-warning-soft"
           >
-            <span aria-hidden>⚑</span>
+            <span aria-hidden>
+              <Glyph g="⚑" />
+            </span>
             <span className="truncate" data-content>
               {firstWaiting.title}
             </span>
@@ -124,8 +127,8 @@ export function Strip({
   );
 }
 
-// Back after a while: what happened since you last looked, and arrows that
-// step through exactly those items.
+// Back after a while: arrows that step through what was filed since you
+// last looked.
 export function SinceBar({
   snap,
   at,
@@ -139,54 +142,40 @@ export function SinceBar({
   onStep: (to: number) => void;
   onClose: () => void;
 }) {
-  const parts = [
-    snap.turns ? plural(snap.turns, "turn") : "",
-    snap.waiting ? `${snap.waiting} on you` : "",
-    snap.changes ? plural(snap.changes, "change") : "",
-    !snap.waiting && snap.ids.length ? `${snap.ids.length} new` : "",
-  ].filter(Boolean);
   const n = snap.ids.length;
   const arrow =
     "flex h-6 min-w-6 items-center justify-center rounded-md border border-line-strong px-1.5 text-[12px] text-body hover:bg-panel disabled:opacity-40";
   return (
-    <div className="flex items-center gap-2 border-b border-primary-line bg-primary-soft px-3 py-1">
-      <div className="min-w-0 flex-1 truncate text-[12.5px] text-primary-strong">
-        <span className="font-medium">Since you looked:</span>{" "}
-        {parts.join(" · ")}
-      </div>
-      {n > 0 && (
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            className={arrow}
-            disabled={at <= 0}
-            onClick={() => onStep(at - 1)}
-            aria-label="Previous new item"
-          >
-            ‹
-          </button>
-          <span className="min-w-9 text-center text-[11px] text-primary-strong tabular-nums">
-            {at < 0 ? `${n} new` : `${at + 1}/${n}`}
-          </span>
-          <button
-            data-primary={primary || undefined}
-            className={
-              primary
-                ? "flex h-6 items-center justify-center rounded-md bg-primary px-2 text-[12px] font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
-                : arrow
-            }
-            disabled={at >= n - 1}
-            onClick={() => onStep(at + 1)}
-            aria-label="Next new item"
-          >
-            {at < 0 ? "Show ›" : "›"}
-          </button>
-        </div>
-      )}
+    <div className="flex items-center justify-end gap-1 border-b border-primary-line bg-primary-soft px-3 py-1">
+      <button
+        className={arrow}
+        disabled={at <= 0}
+        onClick={() => onStep(at - 1)}
+        aria-label="Previous new item"
+      >
+        ‹
+      </button>
+      <span className="min-w-9 text-center text-[11px] text-primary-strong tabular-nums">
+        {at < 0 ? `${n} new` : `${at + 1}/${n}`}
+      </span>
+      <button
+        data-primary={primary || undefined}
+        className={
+          primary
+            ? "flex h-6 items-center justify-center rounded-md bg-primary px-2 text-[12px] font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
+            : arrow
+        }
+        disabled={at >= n - 1}
+        onClick={() => onStep(at + 1)}
+        aria-label="Next new item"
+      >
+        {at < 0 ? "Show ›" : "›"}
+      </button>
       <button
         onClick={onClose}
         aria-label="Close"
         title="Done looking"
-        className="shrink-0 px-1 text-[14px] leading-none text-primary-strong"
+        className="ml-1 shrink-0 px-1 text-[14px] leading-none text-primary-strong"
       >
         ×
       </button>

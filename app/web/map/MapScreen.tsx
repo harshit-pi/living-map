@@ -39,6 +39,8 @@ import { mapItems, startFolds } from "./shown.ts";
 import { Chip, SideSheet } from "./SideSheet.tsx";
 import { newIds, snapOf, type Snap } from "./since.ts";
 import { SinceBar, Strip } from "./Strip.tsx";
+import type { TipId } from "./tips.ts";
+import { MapTips, Tip } from "./Tips.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 import { useLedger } from "./useLedger.ts";
 import type {
@@ -82,7 +84,10 @@ export default function MapScreen({
   );
 }
 
-const clampZoom = (z: number) => Math.min(1, Math.max(0.7, z));
+// the camera never starts or moves below this zoom: a box stays readable,
+// and a column that runs off the right is a drag away
+const MIN_ZOOM = 0.85;
+const clampZoom = (z: number) => Math.min(1, Math.max(MIN_ZOOM, z));
 
 // the window is the pane the map sits in; only crossing NARROW_PANE re-renders
 const onResize = (f: () => void) => {
@@ -101,9 +106,9 @@ const marginY = (narrow: boolean, h: number) =>
 
 // Where the camera starts. On a narrow pane, the topic Claude is on at the
 // top left, at full size, so its items read beside it. Wider, the whole tree
-// from the chat's root, zoomed so its columns fill the width instead of
-// leaving the right of the pane empty; scrolled down to that topic only when
-// it would start below the fold.
+// from the chat's root, zoomed so its columns fill the width (never below
+// MIN_ZOOM) instead of leaving the right of the pane empty; scrolled down to
+// that topic only when it would start below the fold.
 function startAt(
   v: LedgerView,
   w = typeof window === "undefined" ? 1024 : window.innerWidth,
@@ -124,7 +129,7 @@ function startAt(
   const narrow = w < NARROW_PANE;
   const zoom = narrow
     ? 1
-    : Math.min(1.15, Math.max(0.7, (w - 32) / Math.max(1, wide)));
+    : Math.min(1, Math.max(MIN_ZOOM, (w - 32) / Math.max(1, wide)));
   const left = narrow ? p : root;
   // the top of the map when that keeps the topic well in view
   const top = 16 + p.y * zoom < h * (narrow ? 0.4 : 0.6);
@@ -165,6 +170,24 @@ function Screen({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [compact, setCompact] = useState(() => stored("map.compact", false));
+  // the one-time tips you have seen, and whether you turned them all off
+  const [tipsSeen, setTipsSeen] = useState(
+    () => new Set(stored<string[]>("map.tips.seen", [])),
+  );
+  const [tipsOff, setTipsOff] = useState(() => stored("map.tips.off", false));
+  const seeTip = (tip: TipId) => {
+    const next = new Set([...tipsSeen, tip]);
+    setTipsSeen(next);
+    store("map.tips.seen", [...next]);
+  };
+  const tipsAgain = (off: boolean) => {
+    setTipsOff(off);
+    store("map.tips.off", off);
+    if (!off) {
+      setTipsSeen(new Set());
+      store("map.tips.seen", []);
+    }
+  };
   const [snap, setSnap] = useState<Snap | null>(() =>
     snapOf(initial, layout(mapItems(initial.items)).order),
   );
@@ -466,16 +489,9 @@ function Screen({
               label: compact ? "Show the map" : "Strip only",
               onClick: () => setStrip(!compact),
             },
-          ],
-        },
-        {
-          head: "The map's own work",
-          items: [
-            {
-              label: `Today $${view.spend.todayUsd.toFixed(2)} · in all $${view.spend.usd.toFixed(2)} (${view.spend.calls} reads)`,
-              onClick: () => {},
-              disabled: true,
-            },
+            ...(tipsOff || tipsSeen.size
+              ? [{ label: "Show tips again", onClick: () => tipsAgain(false) }]
+              : []),
           ],
         },
       ]}
@@ -488,8 +504,6 @@ function Screen({
         Say <code>/living-map</code> in your Claude Code chat to link it again.
       </Notice>
     );
-
-  const showSince = !!snap && (snap.ids.length > 0 || snap.waiting > 0);
 
   const top = (
     <>
@@ -507,7 +521,7 @@ function Screen({
         waitingLens={lens === "waiting"}
         more={more}
       />
-      {showSince && snap && (
+      {snap && (
         <SinceBar
           snap={snap}
           at={step}
@@ -593,15 +607,34 @@ function Screen({
           size={size}
           folded={folded}
           lit={lit}
+          lens={searching && query.trim() ? null : lens}
           newIds={marked}
           selected={selected}
           initial={camera}
+          now={now?.id ?? null}
           onNode={onNode}
           onPane={() => setSelected(null)}
           onUserMove={() => setFollowing(false)}
           onMoveEnd={setCamera}
         />
         {items.length === 0 && <Empty view={view} />}
+        {!tipsOff &&
+          !compact &&
+          !card &&
+          !side &&
+          !drawer &&
+          !searching &&
+          items.length > 0 && (
+            <MapTips
+              laid={laid}
+              byId={byId}
+              size={size}
+              lenses
+              seen={tipsSeen}
+              onSeen={seeTip}
+              onOff={() => tipsAgain(true)}
+            />
+          )}
         {/* floats over the map, so turning the lens on moves nothing */}
         {lens &&
           counts[lens] === 0 &&
@@ -658,6 +691,16 @@ function Screen({
             onPick={pick}
             onAsk={() => void openSide(card.id)}
             onClose={() => setSelected(null)}
+            tip={
+              !tipsOff && !tipsSeen.has("card") ? (
+                <Tip
+                  tip="card"
+                  floating={false}
+                  onDone={() => seeTip("card")}
+                  onOff={() => tipsAgain(true)}
+                />
+              ) : null
+            }
           />
         )}
         {side ? (

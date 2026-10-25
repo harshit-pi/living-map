@@ -55,11 +55,12 @@ export type LedgerView = {
   strip: {
     doing: string | null; // what Claude is on, from its task list
     waiting: string[]; // ids, oldest first
-    since: { turns: number; waiting: number; changes: number };
   };
   changes: ChangeStatement[];
   // side chats still open, oldest first: the page shows one, the rest as chips
   sides: { id: string; item: string; title: string; busy: boolean }[];
+  // kept for measuring; the page doesn't show it, as Claude Code's
+  // subscription covers these calls
   spend: { calls: number; usd: number; todayUsd: number };
   health: {
     following: boolean;
@@ -97,7 +98,7 @@ export type SideChat = {
   messages: SideMessage[]; // the reply under way is the last, while busy
   busy: boolean;
   proposals: SideProposal[];
-  tokens: { input: number; output: number; usd: number };
+  tokens: { input: number; output: number; usd: number }; // measured, not shown
   error?: string;
 };
 
