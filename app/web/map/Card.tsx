@@ -76,6 +76,7 @@ export function Card({
   onPick,
   onAsk,
   onClose,
+  tip,
 }: {
   item: LedgerItem;
   byId: Map<string, LedgerItem>;
@@ -87,6 +88,7 @@ export function Card({
   onPick: (id: string) => void;
   onAsk: () => void;
   onClose: () => void;
+  tip?: React.ReactNode; // a one-time tip, over the actions
 }) {
   const [text, setText] = useState("");
   const [sent, setSent] = useState<"" | "sending" | "sent">("");
@@ -239,6 +241,7 @@ export function Card({
         </div>
       )}
 
+      {!removing && tip}
       {removing ? (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className="mr-1 text-[12.5px] text-body">

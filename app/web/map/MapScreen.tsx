@@ -39,6 +39,8 @@ import { mapItems, startFolds } from "./shown.ts";
 import { Chip, SideSheet } from "./SideSheet.tsx";
 import { newIds, snapOf, type Snap } from "./since.ts";
 import { SinceBar, Strip } from "./Strip.tsx";
+import type { TipId } from "./tips.ts";
+import { MapTips, Tip } from "./Tips.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 import { useLedger } from "./useLedger.ts";
 import type {
@@ -165,6 +167,24 @@ function Screen({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [compact, setCompact] = useState(() => stored("map.compact", false));
+  // the one-time tips you have seen, and whether you turned them all off
+  const [tipsSeen, setTipsSeen] = useState(
+    () => new Set(stored<string[]>("map.tips.seen", [])),
+  );
+  const [tipsOff, setTipsOff] = useState(() => stored("map.tips.off", false));
+  const seeTip = (tip: TipId) => {
+    const next = new Set([...tipsSeen, tip]);
+    setTipsSeen(next);
+    store("map.tips.seen", [...next]);
+  };
+  const tipsAgain = (off: boolean) => {
+    setTipsOff(off);
+    store("map.tips.off", off);
+    if (!off) {
+      setTipsSeen(new Set());
+      store("map.tips.seen", []);
+    }
+  };
   const [snap, setSnap] = useState<Snap | null>(() =>
     snapOf(initial, layout(mapItems(initial.items)).order),
   );
@@ -466,6 +486,9 @@ function Screen({
               label: compact ? "Show the map" : "Strip only",
               onClick: () => setStrip(!compact),
             },
+            ...(tipsOff || tipsSeen.size
+              ? [{ label: "Show tips again", onClick: () => tipsAgain(false) }]
+              : []),
           ],
         },
       ]}
@@ -591,6 +614,23 @@ function Screen({
           onMoveEnd={setCamera}
         />
         {items.length === 0 && <Empty view={view} />}
+        {!tipsOff &&
+          !compact &&
+          !card &&
+          !side &&
+          !drawer &&
+          !searching &&
+          items.length > 0 && (
+            <MapTips
+              laid={laid}
+              byId={byId}
+              size={size}
+              lenses
+              seen={tipsSeen}
+              onSeen={seeTip}
+              onOff={() => tipsAgain(true)}
+            />
+          )}
         {/* floats over the map, so turning the lens on moves nothing */}
         {lens &&
           counts[lens] === 0 &&
@@ -647,6 +687,16 @@ function Screen({
             onPick={pick}
             onAsk={() => void openSide(card.id)}
             onClose={() => setSelected(null)}
+            tip={
+              !tipsOff && !tipsSeen.has("card") ? (
+                <Tip
+                  tip="card"
+                  floating={false}
+                  onDone={() => seeTip("card")}
+                  onOff={() => tipsAgain(true)}
+                />
+              ) : null
+            }
           />
         )}
         {side ? (
