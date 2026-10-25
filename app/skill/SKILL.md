@@ -8,7 +8,7 @@ argument-hint: "[explore|learn|design] [question or topic]"
 
 # Living Map
 
-Living Map is a local web app on http://localhost:{{PORT}} that draws **this conversation** as a map the user works by clicking. One conversation, several views: Explore (a decision board), Learn (a path of steps) and Design (a system design), picked from what the conversation is doing and switched in the map's header. Beside every view, a rail follows this conversation as it goes: what waits on the user, what Claude still has to do, what was decided, and the side chats the user starts from any of it. Moves on a view and side chats resume this conversation (forked, never written to), so they know everything said here; what the user does on the map comes back to you (see 4). You start the server, link this conversation, open the map beside the chat, and read it back when asked.
+Living Map is a local web app on http://localhost:{{PORT}} that draws **this conversation** as a map the user works by clicking. One conversation, several views: Explore (a decision board), Learn (a path of steps) and Design (a system design), picked from what the conversation is doing (`/living-map learn` and the like switch it; the map has no switcher of its own). Beside every view, a rail follows this conversation as it goes: what waits on the user, what Claude still has to do, what was decided, and the side chats the user starts from any of it. Moves on a view and side chats resume this conversation (forked, never written to), so they know everything said here; what the user does on the map comes back to you (see 4). You start the server, link this conversation, open the map beside the chat, and read it back when asked.
 
 App folder: `{{APP_DIR}}`
 

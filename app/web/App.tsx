@@ -20,7 +20,6 @@ import type { Workspace } from "./lib/workspace.ts";
 import { modeOf, PLUGINS, pluginFor } from "./plugins.ts";
 import { LoadingScreen } from "./screens/LoadingScreen.tsx";
 import { StartScreen } from "./screens/StartScreen.tsx";
-import { LAYER_ID } from "../layer/shared.ts";
 import { Frame } from "../layer/web/Rail.tsx";
 
 const DEFAULTS: Settings = { model: "", effort: "" };
@@ -210,11 +209,9 @@ function MapApp() {
   // every mode is a plugin with its own screen
   const plugin = modeOf(map.purpose);
   const switching = live.busy || !!live.working || live.waiting.length > 0;
-  // the modes this map can switch between (Explore and Learn share their
-  // map); a map of your conversation is one view of it, and offers them all
+  // the modes this map can switch between (Explore and Learn share their map)
   const switches = PLUGINS.filter(
     (p) =>
-      !!map.linked ||
       p.id === map.purpose ||
       p.switchesWith?.includes(map.purpose) ||
       pluginFor(map.purpose)?.switchesWith?.includes(p.id),
@@ -262,64 +259,71 @@ function MapApp() {
             compact={simple}
           />
         </div>
-        <div className="flex items-center justify-end gap-2">
-          {modes.length > 1 ? (
-            // off while a move runs or waits: switched late, the screen
-            // changed under the pointer and the next click landed on
-            // Explore's Next, a paid move
-            <Segmented
-              value={map.purpose}
-              options={modes}
-              disabled={switching}
-              title={
-                switching
-                  ? "Claude is working: switch once the map settles"
-                  : undefined
-              }
-              onChange={(purpose) => {
-                if (switching) return;
-                void run(
-                  map.linked
-                    ? {
-                        type: "plugin",
-                        plugin: LAYER_ID,
-                        name: "view",
-                        args: { mode: purpose },
-                      }
-                    : { type: "purpose", purpose },
-                );
-              }}
-            />
-          ) : (
-            <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
-              {plugin.label}
-            </span>
-          )}
-          {plugin.Header && <plugin.Header ws={ws} />}
-          {!simple && <UpdateButton steps={live.updateSteps} update={update} />}
-          {/* the simpler header keeps the update inside Maps, a dot on it
+        {/* a map of your chat is the chat itself: the view is picked from
+            what the chat is doing (/living-map learn switches it), and there
+            is no other map to open or start, so none of those controls */}
+        {map.linked ? (
+          <div className="flex items-center justify-end gap-2">
+            {plugin.Header && <plugin.Header ws={ws} />}
+            <UpdateButton steps={live.updateSteps} update={update} />
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            {modes.length > 1 ? (
+              // off while a move runs or waits: switched late, the screen
+              // changed under the pointer and the next click landed on
+              // Explore's Next, a paid move
+              <Segmented
+                value={map.purpose}
+                options={modes}
+                disabled={switching}
+                title={
+                  switching
+                    ? "Claude is working: switch once the map settles"
+                    : undefined
+                }
+                onChange={(purpose) => {
+                  if (switching) return;
+                  void run({ type: "purpose", purpose });
+                }}
+              />
+            ) : (
+              <span className="rounded-lg bg-panel px-3 py-1 text-[13px] text-ink">
+                {plugin.label}
+              </span>
+            )}
+            {plugin.Header && <plugin.Header ws={ws} />}
+            {!simple && (
+              <UpdateButton steps={live.updateSteps} update={update} />
+            )}
+            {/* the simpler header keeps the update inside Maps, a dot on it
               saying one is out */}
-          <MapsMenu
-            onOpen={(id) => {
-              void openMap(id);
-            }}
-            onNew={simple ? startNew : undefined}
-            update={
-              simple ? (
-                <UpdateButton steps={live.updateSteps} update={update} inMenu />
-              ) : undefined
-            }
-            dot={simple && !!update.info?.available}
-          />
-          {!simple && (
-            <button
-              onClick={startNew}
-              className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
-            >
-              New
-            </button>
-          )}
-        </div>
+            <MapsMenu
+              onOpen={(id) => {
+                void openMap(id);
+              }}
+              onNew={simple ? startNew : undefined}
+              update={
+                simple ? (
+                  <UpdateButton
+                    steps={live.updateSteps}
+                    update={update}
+                    inMenu
+                  />
+                ) : undefined
+              }
+              dot={simple && !!update.info?.available}
+            />
+            {!simple && (
+              <button
+                onClick={startNew}
+                className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-body hover:bg-panel"
+              >
+                New
+              </button>
+            )}
+          </div>
+        )}
       </header>
       <WorkingBar
         working={live.working}
