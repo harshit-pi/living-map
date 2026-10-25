@@ -119,7 +119,11 @@ const filing = (req: ExtractRequest): ExtractResult => {
   };
 };
 
-function setup(script: Script = filing, dbFile?: string) {
+function setup(
+  script: Script = filing,
+  dbFile?: string,
+  changes?: Parameters<typeof createLedger>[0]["changes"],
+) {
   let clock = Date.now();
   const calls: ExtractRequest[] = [];
   const events: LedgerEvent[] = [];
@@ -137,6 +141,7 @@ function setup(script: Script = filing, dbFile?: string) {
     now: () => clock,
     everyMs: 0,
     findSuccessor: () => null,
+    changes,
   });
   return {
     db,
@@ -250,7 +255,7 @@ test("a failure is tried again later and later, its error shown until one works"
 // Waits for what a tick starts (file reads, then the call) without guessing
 // how long that takes on a busy machine; settle() leaves room for anything
 // that should NOT start to show up.
-async function until(cond: () => boolean, ms = 5000) {
+async function until(cond: () => boolean, ms = 20_000) {
   const end = Date.now() + ms;
   while (!cond() && Date.now() < end)
     await new Promise((r) => setTimeout(r, 10));
@@ -263,31 +268,33 @@ test("one run per chat at a time, two at most overall", async () => {
   const t = setup(
     (req) => new Promise((done) => release.push(() => done(filing(req)))),
   );
+  // well past the 5 s still: the files' real write times can trail the
+  // fake clock by seconds on a busy machine
   for (const c of chats) {
     t.link(c);
     c.turn("Pick one?", "A or B?");
   }
-  t.advance(6000);
+  t.advance(60_000);
   const round = t.ledger.tick();
   await until(() => t.calls.length >= 2);
   await settle();
   assert.equal(t.calls.length, 2, "the third chat waits");
   // the first chat's next turn arrives while its run is out
   chats[0]!.turn("And then?", "C?");
-  t.advance(6000);
+  t.advance(60_000);
   void t.ledger.tick();
   await settle();
   assert.equal(t.calls.length, 2);
   for (const r of release.splice(0)) r();
   await round;
   // now the third chat, and the first one's next turn
-  t.advance(6000);
+  t.advance(60_000);
   const next = t.ledger.tick();
   await until(() => t.calls.length >= 4);
   assert.equal(t.calls.length, 4);
   for (const r of release.splice(0)) r();
   await next;
-});
+}, 30_000);
 
 test("a long chat linked late reads its newest 40 turns first", async () => {
   const c = chat();
@@ -442,4 +449,67 @@ test("your actions land as yours, and an answer reaches the chat", async () => {
   const s = t.db.load(root)!;
   assert.equal(s.store.items.get(q1.id)!.writers.state, "you");
   assert.equal(s.meta.get(v.items[0]!.id)!.folded, true);
+});
+
+// ---- what changed ------------------------------------------------------------
+
+test("a snapshot when following starts and after each sealed turn; what differs is filed against the turn", async () => {
+  const snaps: string[] = [];
+  const compared: [string, string, number][] = [];
+  const c = chat();
+  const t = setup(filing, undefined, {
+    shadowFor: () => ({ root: tmp, gitDir: tmp }),
+    snapshot: (_sh, label) => {
+      snaps.push(label);
+      return `c${snaps.length}`;
+    },
+    compare: (_sh, a, b, turn) => {
+      compared.push([a, b, turn]);
+      return {
+        changed: [{ file: "app/server/x.ts", status: "M", readable: true }],
+        statements: [
+          {
+            op: "added",
+            kind: "import-edge",
+            key: "app/server→app/layer",
+            text: "app/server imports app/layer",
+            from: "app/server",
+            to: "app/layer",
+            files: ["app/server/x.ts"],
+            evidence: [{ file: "app/server/x.ts", turn }],
+          },
+        ],
+      };
+    },
+  });
+  const root = t.link(c);
+  await t.ledger.tick();
+  assert.deepEqual(snaps, ["start"]);
+  c.turn("Wire the layer in.", "Done: the server now imports the layer.");
+  // read as it grows, sealed once the file has been still 5 s
+  await t.ledger.tick();
+  assert.deepEqual(snaps, ["start"]);
+  t.advance(6000);
+  await t.ledger.tick();
+  assert.deepEqual(snaps, ["start", "after turn 1"]);
+  assert.deepEqual(compared, [["c1", "c2", 1]]);
+  const v = t.ledger.view(root)!;
+  assert.equal(v.changes.length, 1);
+  assert.deepEqual(
+    { ...v.changes[0], id: "" },
+    {
+      id: "",
+      change: "added",
+      kind: "import-edge",
+      text: "app/server imports app/layer",
+      module: "app/server",
+      file: "app/server/x.ts",
+      turn: 1,
+      low: false,
+    },
+  );
+  assert.equal(v.strip.since.changes, 1);
+  // the same turn read again files nothing twice
+  await t.ledger.tick();
+  assert.equal(t.ledger.view(root)!.changes.length, 1);
 });

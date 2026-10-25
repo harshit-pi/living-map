@@ -11,6 +11,7 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 
+import { compare, shadowFor, snapshot } from "./changes/snapshot.ts";
 import { openDb, type Conv } from "./db.ts";
 import { createLedger, type Ledger } from "./follow.ts";
 import { post } from "../layer/core.ts";
@@ -66,6 +67,11 @@ export function startLedger(
     emit: (e) => hub.emit(e),
     tell: tellChat,
     model: () => ledgerModel(),
+    changes: {
+      shadowFor: (cwd) => shadowFor(HOME, cwd),
+      snapshot,
+      compare,
+    },
   });
   ledger.resume();
 

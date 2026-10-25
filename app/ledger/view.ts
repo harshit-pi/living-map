@@ -5,7 +5,11 @@
 
 import type { State } from "./db.ts";
 import { isOpen, isWaiting, live, topicState, type Item } from "./items.ts";
-import type { LedgerItem, LedgerView } from "../shared/ledger.ts";
+import type {
+  ChangeStatement,
+  LedgerItem,
+  LedgerView,
+} from "../shared/ledger.ts";
 
 export type Facts = {
   turns: number; // turns in the chat so far
@@ -14,6 +18,7 @@ export type Facts = {
   error?: string;
   reading?: { done: number; total: number };
   spend: LedgerView["spend"];
+  changes?: ChangeStatement[];
 };
 
 const first = (i: Item) => i.src[0] ?? 0;
@@ -63,11 +68,11 @@ export function buildView(s: State, f: Facts): LedgerView {
       since: {
         turns: Math.max(0, f.turns - looked),
         waiting: waiting.filter((i) => first(i) > looked).length,
-        changes: 0,
+        changes: (f.changes ?? []).filter((c) => !c.low && c.turn > looked)
+          .length,
       },
     },
-    // what changed in the system comes with phase 6
-    changes: [],
+    changes: f.changes ?? [],
     spend: f.spend,
     health: {
       following: f.following,

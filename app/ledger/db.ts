@@ -13,6 +13,7 @@ import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { emptyStore, type Item, type Store, type Writer } from "./items.ts";
+import type { ChangeStatement } from "../shared/ledger.ts";
 
 // one of your chats as the store keeps it, under the first id it had
 export type Conv = {
@@ -490,7 +491,32 @@ export function openDb(file: string) {
       }));
     },
 
-    // a change statement's review, by you (phase 6 files the statements)
+    // what changed in the system, filed per turn by the follower's snapshots
+    addChanges(conv: string, list: ChangeStatement[]) {
+      const put = db.prepare(
+        "INSERT OR IGNORE INTO changes (conv, id, turn, statement) VALUES (?, ?, ?, ?)",
+      );
+      for (const c of list) put.run(conv, c.id, c.turn, JSON.stringify(c));
+    },
+
+    changes(conv: string): ChangeStatement[] {
+      return (
+        db
+          .prepare(
+            "SELECT statement, review FROM changes WHERE conv = ? ORDER BY turn, id",
+          )
+          .all(conv) as Row[]
+      ).flatMap((r) => {
+        const c = parse<ChangeStatement | null>(r.statement, null);
+        if (!c) return [];
+        const review = text(r.review);
+        return [
+          review ? { ...c, review: review as ChangeStatement["review"] } : c,
+        ];
+      });
+    },
+
+    // a change statement's review, by you
     review(conv: string, id: string, review: string | null): boolean {
       const r = db
         .prepare("UPDATE changes SET review = ? WHERE conv = ? AND id = ?")

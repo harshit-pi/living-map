@@ -13,6 +13,7 @@
 // - A long chat linked late reads its newest 40 turns first; older ones are
 //   skipped for now.
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -45,6 +46,7 @@ import type {
   LedgerEvent,
   LedgerView,
 } from "../shared/ledger.ts";
+import type { Compared, Shadow } from "./changes/snapshot.ts";
 
 export const TICK_MS = 2000;
 export const QUIET_MS = 20_000;
@@ -69,6 +71,13 @@ export type LedgerDeps = {
   now?: () => number;
   everyMs?: number; // 0: no timer (tests call tick)
   findSuccessor?: (file: string, id: string) => string | null;
+  // what changed in the system: snapshots at each newly sealed turn (absent
+  // in tests that don't need it)
+  changes?: {
+    shadowFor: (cwd: string) => Shadow | null;
+    snapshot: (sh: Shadow, label: string) => string | null;
+    compare: (sh: Shadow, a: string, b: string, turn: number) => Compared;
+  };
 };
 
 type Follower = {
@@ -89,6 +98,12 @@ type Follower = {
   backlog?: { from: number; to: number };
   nudged: boolean; // the page opened: run what is waiting now
   lookedForNext: number;
+  // the shadow repository (null: the chat isn't in a git work tree;
+  // undefined: not looked for yet), its last snapshot, and the sealed
+  // turns it covers
+  shadow?: Shadow | null;
+  snap?: string;
+  snapped: number;
 };
 
 const mtimeOf = (file: string) => {
@@ -139,6 +154,7 @@ export function createLedger(deps: LedgerDeps) {
       retryAt: 0,
       nudged: false,
       lookedForNext: now(),
+      snapped: 0,
     };
     followers.set(c.root, f);
     return f;
@@ -239,11 +255,51 @@ export function createLedger(deps: LedgerDeps) {
         recover(f);
         lateLink(f);
       }
+      snapChanges(f);
       if (before.turns !== f.turns.length || before.sealed !== f.sealed)
         push(f.s.conv.root);
     } finally {
       f.readBusy = false;
     }
+  }
+
+  // A snapshot when following starts, and one after each newly sealed turn;
+  // what differs between two in a way the readers see is filed against the
+  // turn. Changes from before the chat was followed are not claimed.
+  function snapChanges(f: Follower) {
+    const ch = deps.changes;
+    if (!ch) return;
+    if (f.shadow === undefined) {
+      f.shadow = ch.shadowFor(f.s.conv.cwd);
+      if (f.shadow) f.snap = ch.snapshot(f.shadow, "start") ?? undefined;
+      f.snapped = f.sealed;
+      return;
+    }
+    if (!f.shadow || !f.snap || f.sealed <= f.snapped) return;
+    const turn = f.turns[f.sealed - 1]?.n ?? f.sealed;
+    const next = ch.snapshot(f.shadow, `after turn ${turn}`);
+    if (!next) return;
+    const r = ch.compare(f.shadow, f.snap, next, turn);
+    f.snap = next;
+    f.snapped = f.sealed;
+    if (!r.statements.length) return;
+    db.addChanges(
+      f.s.conv.root,
+      r.statements.map((s) => ({
+        id: crypto
+          .createHash("sha1")
+          .update(`${s.op}|${s.kind}|${s.key}|${turn}`)
+          .digest("hex")
+          .slice(0, 12),
+        change: s.op,
+        kind: s.kind,
+        text: s.text,
+        module: s.from ?? path.posix.dirname(s.files[0] ?? "."),
+        file: s.files[0] ?? "",
+        turn,
+        low: !!s.low,
+      })),
+    );
   }
 
   // Answers saved before a stop that never got applied: applied now, once.
@@ -432,6 +488,7 @@ export function createLedger(deps: LedgerDeps) {
             }
           : undefined,
       spend: db.spend(root, startOfDay(now())),
+      changes: db.changes(root),
     });
   }
 
