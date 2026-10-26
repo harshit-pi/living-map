@@ -73,9 +73,8 @@ With the switch off, the map of a chat is one of these views, picked from what t
 ## Updates
 
 Every push to `main` that passes CI publishes a release (`v0.1.<n>`).
-
-- **Older views:** the header shows **Update available**. One click pulls it (`git pull --rebase`), installs (`npm ci`), builds and restarts, on a clean checkout of `main`.
-- **Map of your chat:** its page has no update button yet. Ask Claude Code to "update Living Map in ~/living-map: `git pull`, then `npm ci` in `app/`, then stop the server on port 4317", then say `/living-map` to start the new one. The installed skill is rewritten from the new copy when the server starts.
+When a newer one is out, the page shows **Update available** (in the top bar of the map of your chat, in the header of the older views). One click pulls it (`git pull --rebase`), installs (`npm ci`), builds and restarts, and the page reloads into it. The installed skill is rewritten from the new copy as the server starts.
+It runs only on a clean checkout of `main`; otherwise the popover says what is in the way.
 
 ## How it works
 

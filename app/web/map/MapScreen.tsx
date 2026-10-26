@@ -50,6 +50,8 @@ import type {
 } from "../../shared/ledger.ts";
 import { Mark } from "../components/Logo.tsx";
 import { More } from "../components/More.tsx";
+import { UpdateButton } from "../components/UpdateButton.tsx";
+import { useUpdate } from "../lib/api.ts";
 import { store, stored } from "../lib/storage.ts";
 
 // coming back to the page after this long counts as a new look
@@ -147,7 +149,11 @@ function Screen({
   initial: LedgerView;
   fixture: boolean;
 }) {
-  const { view, sides, online, linked, act } = useLedger(initial, fixture);
+  const { view, sides, online, linked, updates, act } = useLedger(
+    initial,
+    fixture,
+  );
+  const update = useUpdate();
   const rf = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
@@ -481,21 +487,29 @@ function Screen({
   }, [searching, selected, drawer, sideId]);
 
   const more = (
-    <More
-      sections={[
-        {
-          items: [
-            {
-              label: compact ? "Show the map" : "Strip only",
-              onClick: () => setStrip(!compact),
-            },
-            ...(tipsOff || tipsSeen.size
-              ? [{ label: "Show tips again", onClick: () => tipsAgain(false) }]
-              : []),
-          ],
-        },
-      ]}
-    />
+    <>
+      <UpdateButton steps={updates} update={update} />
+      <More
+        sections={[
+          {
+            items: [
+              {
+                label: compact ? "Show the map" : "Strip only",
+                onClick: () => setStrip(!compact),
+              },
+              ...(tipsOff || tipsSeen.size
+                ? [
+                    {
+                      label: "Show tips again",
+                      onClick: () => tipsAgain(false),
+                    },
+                  ]
+                : []),
+            ],
+          },
+        ]}
+      />
+    </>
   );
 
   if (!linked)

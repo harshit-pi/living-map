@@ -81,10 +81,18 @@ export function UpdateButton({
         className="flex items-center gap-1.5 rounded-lg bg-primary-soft px-2.5 py-1.5 text-sm font-medium text-primary-strong ring-1 ring-primary-line hover:bg-primary-line"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-        {started ? "Updating…" : "Update available"}
+        {started ? (
+          "Updating…"
+        ) : (
+          <span>
+            Update<span className="max-sm:hidden"> available</span>
+          </span>
+        )}
       </button>
+      {/* on a narrow pane it spans the pane: hung from the button, it would
+          run off the left edge */}
       {open && info && (
-        <div className="absolute top-10 right-0 z-40 w-[400px] rounded-xl bg-surface p-4 shadow-xl ring-1 ring-line">
+        <div className="fixed inset-x-3 top-12 z-40 rounded-xl sm:absolute sm:inset-x-auto sm:top-10 sm:right-0 sm:w-[400px] bg-surface p-4 shadow-xl ring-1 ring-line">
           {details}
         </div>
       )}
