@@ -66,7 +66,7 @@ For a UI change, also run `npm start` and try it in the browser: Explore and Lea
 
 ## Releases
 
-Every push to `main` that passes CI publishes a GitHub release `v0.1.<run>` (the `release` job in `.github/workflows/ci.yml`). Running copies show **Update available** and install it with one click, so `main` is always shippable.
+Every push to `main` that passes CI publishes a GitHub release `v0.1.<run>` (the `release` job in `.github/workflows/ci.yml`). Running copies show **New version available** and install it with one click, so `main` is always shippable.
 
 ## Conventions
 

@@ -8,7 +8,7 @@ import { api } from "../lib/session.ts";
 
 type Update = ReturnType<typeof useUpdate>;
 
-// "Update available" when a newer release is out. One click pulls it,
+// "New version available" when a newer release is out. One click pulls it,
 // installs, builds and restarts; the page then reloads into the new version.
 // In the header by default; `inMenu`, a row inside Maps ▾ that opens its
 // details in place: a red-dotted button on every screen read to a newcomer
@@ -68,7 +68,7 @@ export function UpdateButton({
           className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-sm text-primary-strong hover:bg-panel"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-          {started ? "Updating…" : "Update available"}
+          {started ? "Updating…" : "New version available"}
         </button>
         {open && <div className="px-3 pb-3">{details}</div>}
       </div>
@@ -85,7 +85,7 @@ export function UpdateButton({
           "Updating…"
         ) : (
           <span>
-            Update<span className="max-sm:hidden"> available</span>
+            New version<span className="max-sm:hidden"> available</span>
           </span>
         )}
       </button>

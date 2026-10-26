@@ -73,7 +73,7 @@ With the switch off, the map of a chat is one of these views, picked from what t
 ## Updates
 
 Every push to `main` that passes CI publishes a release (`v0.1.<n>`).
-When a newer one is out, the page shows **Update available** (in the top bar of the map of your chat, in the header of the older views). One click pulls it (`git pull --rebase`), installs (`npm ci`), builds and restarts, and the page reloads into it. The installed skill is rewritten from the new copy as the server starts.
+When a newer one is out, the page shows **New version available** (in the top bar of the map of your chat, in the header of the older views). One click pulls it (`git pull --rebase`), installs (`npm ci`), builds and restarts, and the page reloads into it. The installed skill is rewritten from the new copy as the server starts.
 It runs only on a clean checkout of `main`; otherwise the popover says what is in the way.
 
 ## How it works
