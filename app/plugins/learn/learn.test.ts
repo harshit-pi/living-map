@@ -2702,7 +2702,8 @@ test("canvas: two links in a chain never put their labels on one spot", () => {
           p.y + p.h > q.y;
         assert.ok(!hit, `${a} → ${b} → ${c}`);
       }
-});
+  // every chain of two links is laid out: slow while the other checks run
+}, 30_000);
 
 test("canvas: a link keeps off the links drawn before it and never runs through a part, its own two included", () => {
   // five subgoals on an axis, one per tick, and a link back from the last

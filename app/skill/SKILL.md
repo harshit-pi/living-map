@@ -23,7 +23,7 @@ It returns at once if the server already runs; otherwise it installs and builds 
 ## 2. Link this conversation
 
 - **View**: the first argument if it is `explore`, `learn` or `design`; otherwise leave it out (send `""`): the map reads the conversation first and opens the view it needs. Explore is for "lay out my options"; Learn is for "teach me" / "help me understand"; Design is for practising a system design.
-- **Question**: the rest of the arguments if any; otherwise leave it out (send `""`): the map works it out from the conversation. If the conversation is brand new and there are no arguments, ask the user in one short question what to map, then send that.
+- **Question**: the rest of the arguments if any; otherwise leave it out (send `""`): the map works it out from the conversation. Do this even in a brand-new conversation: never ask the user what to map first. The map starts following this conversation and fills in as you talk.
 - **cwd**: the folder this conversation started in (your primary working directory), not a subfolder you moved into.
 
 Send it, building the JSON with a tool that escapes it (here Python):
