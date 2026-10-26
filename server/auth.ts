@@ -7,7 +7,7 @@
 //   ~/.living-map/token (readable only by you). The skill, hooks and scripts
 //   read it from there and send it as X-LM-Token.
 // - The page gets it by a one-time sign-in link the skill opens
-//   (/auth?n=<code>, valid 60 s), which sets an HttpOnly cookie; the page
+//   (/auth?n=<code>, valid 5 min), which sets an HttpOnly cookie; the page
 //   then asks /api/session for the token to send on writes. SameSite does not
 //   separate localhost ports, so a cookie alone never allows a write.
 // - A request whose Host isn't this server (DNS rebinding), or a write whose
@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const COOKIE = "lm_token";
-const NONCE_MS = 60_000;
+const NONCE_MS = 5 * 60_000;
 
 export type Auth = {
   token: string;

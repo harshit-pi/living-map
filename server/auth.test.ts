@@ -184,7 +184,7 @@ test("the sign-in link works once, and its cookie reads but never writes", async
 test("an expired sign-in link is refused", async () => {
   const realNow = Date.now;
   const code = auth.signInCode();
-  Date.now = () => realNow() + 61_000;
+  Date.now = () => realNow() + 5 * 60_000 + 1_000;
   try {
     assert.equal(auth.redeem(code), null);
   } finally {
