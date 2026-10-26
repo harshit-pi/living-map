@@ -3,7 +3,7 @@
 <p align="center"><b>A live map of your Claude Code chat, beside it.</b><br>
 What waits on you, what is still open and what was decided, kept up to date as you talk, with nothing to ask for.</p>
 
-https://github.com/user-attachments/assets/5310e726-ee2f-4876-9324-3dee512b2bd5
+https://github.com/user-attachments/assets/73b3762c-e3b1-4c2b-9492-965592b0af54
 
 ---
 
