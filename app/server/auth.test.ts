@@ -126,7 +126,7 @@ test("another name for localhost is refused, even with the token", async () => {
     `localhost:${port + 1}`,
     `127.0.0.1.nip.io:${port}`,
   ]) {
-    const r = await call("GET", "/api/maps", {
+    const r = await call("GET", "/api/inbox/wait", {
       host,
       "x-lm-token": auth.token,
     });
@@ -151,9 +151,11 @@ test("a page on another site is refused, even with the token", async () => {
 });
 
 test("the token lets you in, from the page itself or from no page", async () => {
-  const bare = await call("GET", "/api/maps", { "x-lm-token": auth.token });
+  const bare = await call("GET", "/api/inbox/wait", {
+    "x-lm-token": auth.token,
+  });
   assert.equal(bare.status, 200);
-  const page = await call("GET", "/api/maps", {
+  const page = await call("GET", "/api/inbox/wait", {
     "x-lm-token": auth.token,
     origin: `http://localhost:${port}`,
   });
@@ -175,7 +177,7 @@ test("the sign-in link works once, and its cookie reads but never writes", async
   assert.equal(session.status, 200);
   assert.equal(JSON.parse(session.body).token, auth.token);
   // a write needs the header: a cookie is sent by any page on localhost
-  for (const url of ["/api/update", "/api/action", "/api/link"])
+  for (const url of ["/api/update", "/api/ledger/act", "/api/link"])
     assert.equal((await call("POST", url, { cookie: jar })).status, 401, url);
 });
 
