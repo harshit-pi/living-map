@@ -146,10 +146,16 @@ export function createAuth({
 
 // The sign-in link and the page's way to its token.
 export function authRoutes(app: express.Express, auth: Auth) {
+  const grant = (res: express.Response) =>
+    res.cookie(COOKIE, auth.token, {
+      httpOnly: true,
+      sameSite: "strict",
+      path: "/",
+      maxAge: COOKIE_MS,
+    });
   app.get("/auth", (req, res) => {
     const code = typeof req.query.n === "string" ? req.query.n : "";
-    const token = auth.redeem(code);
-    if (!token) {
+    if (!auth.redeem(code)) {
       res
         .status(401)
         .type("text/plain")
@@ -158,14 +164,23 @@ export function authRoutes(app: express.Express, auth: Auth) {
         );
       return;
     }
-    res.cookie(COOKIE, token, {
-      httpOnly: true,
-      sameSite: "strict",
-      path: "/",
-      maxAge: COOKIE_MS,
-    });
+    grant(res);
     const conv = convOf(req.query.conv);
     res.redirect(302, conv ? `/?conv=${encodeURIComponent(conv)}` : "/");
+  });
+  // A browser on this machine signs itself in from the bare address (the
+  // Show my maps button). Only the page itself can post here: the guard has
+  // refused any other Origin, and a request with no Origin at all (not a
+  // browser page) is refused too. Another site cannot press this button for
+  // you, and a top-level visit from a link elsewhere is a GET, not a post.
+  app.post("/auth/here", (req, res) => {
+    const origin = req.headers.origin;
+    if (!origin || req.headers["sec-fetch-site"] === "cross-site") {
+      res.status(403).json({ error: "Not from this page." });
+      return;
+    }
+    grant(res);
+    res.json({ ok: true });
   });
   // only a page already signed in (its cookie) can read this, and no other
   // page can read the answer: the server sends no CORS headers

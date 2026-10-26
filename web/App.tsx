@@ -9,8 +9,9 @@ import { useLedgerProbe, wantedConv, wantsFixture } from "./map/probe.ts";
 const MapScreen = lazy(() => import("./map/MapScreen.tsx"));
 
 // Not signed in (the page was opened without the skill's one-time link):
-// nothing of your chats is shown, only how to open it. Signed in, /?conv=<chat>
-// is that chat's map and the bare address lists every chat with one.
+// nothing of your chats is shown, only how to open it, and a button that signs
+// this browser in from here (POST /auth/here). Signed in, /?conv=<chat> is
+// that chat's map and the bare address lists every chat with one.
 // ?fixture=1 draws the fixture map; a dev build lets it past the sign-in, so
 // the page can be worked on with no server behind it.
 export default function App() {
@@ -18,17 +19,44 @@ export default function App() {
   const [fixture] = useState(wantsFixture);
   const [conv] = useState(wantedConv);
   const open = signedIn || (fixture && import.meta.env.DEV);
-  if (!open && signedIn === false)
-    return (
-      <Notice title="Open Living Map from Claude Code">
-        Say <code>/living-map</code> in your Claude Code chat. It opens this
-        page signed in, with the map of that chat. To have it here too, choose ⋯
-        → <b>Open in your browser</b> on that map.
-      </Notice>
-    );
+  if (!open && signedIn === false) return <SignIn />;
   if (!open) return <div className="h-full bg-canvas" />;
   if (!conv && !fixture) return <Chats />;
   return <Chooser conv={conv} fixture={fixture} />;
+}
+
+function SignIn() {
+  const [failed, setFailed] = useState(false);
+  const signIn = async () => {
+    try {
+      const r = await fetch("/auth/here", { method: "POST" });
+      if (!r.ok) throw new Error(String(r.status));
+      // the cookie is set: the page starts again, signed in
+      window.location.replace("/");
+    } catch {
+      setFailed(true);
+    }
+  };
+  return (
+    <Notice title="Living Map">
+      Say <code>/living-map</code> in a Claude Code chat: its map opens beside
+      the chat, signed in. Or sign this browser in to see every map from here.
+      <span className="mt-5 block">
+        <button
+          data-primary
+          onClick={() => void signIn()}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary-strong"
+        >
+          Show my maps
+        </button>
+      </span>
+      {failed && (
+        <span className="mt-3 block text-xs text-warning-strong">
+          Couldn&apos;t sign in. Is the Living Map server running?
+        </span>
+      )}
+    </Notice>
+  );
 }
 
 function Chooser({ conv, fixture }: { conv: string; fixture: boolean }) {
