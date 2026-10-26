@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { applyLocal, localSide } from "./fixture.ts";
+import { viewUrl } from "./probe.ts";
 import type {
   LedgerAction,
   LedgerEvent,
@@ -59,7 +60,7 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
     let dropped = false;
 
     const refetch = () =>
-      api("/api/ledger/view")
+      api(viewUrl(conv.current))
         .then(async (r) => {
           if (closed) return;
           if (r.status === 404) return setLinked(false);

@@ -4,7 +4,8 @@
 import express from "express";
 import path from "node:path";
 
-import { authRoutes, type Auth } from "./auth.ts";
+import { authRoutes, convOf, signInPath, type Auth } from "./auth.ts";
+import { openInBrowser } from "./browser.ts";
 import { STATIC_DIR } from "./config.ts";
 import type { Hub } from "./events.ts";
 import type { ModelProvider } from "./providers/types.ts";
@@ -21,6 +22,8 @@ export function createApp(
   hub: Hub,
   auth: Auth,
   map: LedgerServer,
+  // how a link is opened in your browser (POST /api/open); tests stub it
+  { launch = openInBrowser }: { launch?: (url: string) => Promise<void> } = {},
 ) {
   const app = express();
   app.disable("x-powered-by");
@@ -68,10 +71,12 @@ export function createApp(
         map.ledger,
         (req.body ?? {}) as Record<string, unknown>,
       );
-      // the page to open: signed in by a one-time link
+      // the page to open: this chat's map, signed in by a one-time link
       res
         .status(r.error ? 400 : 200)
-        .json(r.error ? r : { ...r, url: `/auth?n=${auth.signInCode()}` });
+        .json(
+          r.error ? r : { ...r, url: signInPath(auth.signInCode(), r.conv) },
+        );
     } catch (e) {
       console.error("[link] failed:", e);
       res
@@ -130,6 +135,29 @@ export function createApp(
   });
 
   app.use("/api/ledger", map.router);
+
+  // A fresh sign-in link for another browser of yours, asked by a page that
+  // is signed in (the token): opened in your default browser, or with
+  // {launch: false} only returned, for the page to copy. The host is one of
+  // ours: the guard let it through.
+  app.post("/api/open", async (req, res) => {
+    const body = (req.body ?? {}) as { conv?: unknown; launch?: unknown };
+    const url = `http://${req.headers.host}${signInPath(auth.signInCode(), convOf(body.conv))}`;
+    if (body.launch === false) {
+      res.json({ url });
+      return;
+    }
+    try {
+      await launch(url);
+      res.json({ url });
+    } catch (e) {
+      console.error("[open] could not open a browser:", e);
+      res.status(500).json({
+        error: "Couldn't open your browser. Copy a link instead.",
+        url,
+      });
+    }
+  });
 
   // is a newer release out? (?refresh=1 asks GitHub again now)
   app.get("/api/update", async (req, res) => {

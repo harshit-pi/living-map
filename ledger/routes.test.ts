@@ -104,7 +104,13 @@ const port = await new Promise<number>((done) => {
   });
 });
 const auth = createAuth({ home: process.env.LIVING_MAP_HOME, port });
-const server = createApp(provider, hub, auth, map).listen(port, "127.0.0.1");
+// what /api/open would have opened in your browser
+const launched: string[] = [];
+const server = createApp(provider, hub, auth, map, {
+  launch: async (url) => {
+    launched.push(url);
+  },
+}).listen(port, "127.0.0.1");
 await new Promise((r) => server.once("listening", r));
 afterAll(async () => {
   map.ledger.close();
@@ -169,12 +175,41 @@ test("every route needs the token, and with nothing linked there is no map", asy
   assert.equal((await call("GET", "/api/ledger/view")).status, 404);
 });
 
+test("a signed-in page hands the map to another browser by a fresh link", async () => {
+  const opened = await call("POST", "/api/open", { conv: "chat-1" });
+  assert.equal(opened.status, 200);
+  const url = String(opened.json.url);
+  assert.match(
+    url,
+    new RegExp(`^http://localhost:${port}/auth\\?n=[\\w-]+&conv=chat-1$`),
+  );
+  assert.deepEqual(launched, [url]);
+  // the link signs that browser in and lands on the chat's map
+  const landed = await call("GET", new URL(url).pathname + new URL(url).search);
+  assert.equal(landed.status, 302);
+  // a link to copy is only returned, never opened here
+  const copy = await call("POST", "/api/open", {
+    conv: "chat-1",
+    launch: false,
+  });
+  assert.equal(copy.status, 200);
+  assert.match(String(copy.json.url), /&conv=chat-1$/);
+  assert.equal(launched.length, 1);
+  // a cookie alone cannot ask for one (any page on localhost sends it)
+  assert.equal(
+    (await call("POST", "/api/open", { conv: "chat-1" }, null)).status,
+    401,
+  );
+});
+
 test("a chat linked through /api/link is followed, filed and acted on", async () => {
   const linked = await call("POST", "/api/link", { session: "chat-1" });
   assert.equal(linked.status, 200);
   assert.equal(linked.json.created, true);
   assert.equal(linked.json.listen, true);
-  assert.match(String(linked.json.url), /^\/auth\?n=/);
+  // the link lands on this chat's map
+  assert.match(String(linked.json.url), /^\/auth\?n=[\w-]+&conv=chat-1$/);
+  assert.equal(linked.json.conv, "chat-1");
   assert.equal(
     (await call("POST", "/api/link", { session: "chat-1" })).json.created,
     false,
@@ -198,6 +233,20 @@ test("a chat linked through /api/link is followed, filed and acted on", async ()
     ((await call("GET", "/api/ledger/view")).json as LedgerView).conv,
     "chat-1",
   );
+  // the list the bare page shows
+  const chats = (await call("GET", "/api/ledger/chats")).json as unknown as {
+    conv: string;
+    title: string;
+    waiting: number;
+    turns: number;
+    following: boolean;
+  }[];
+  assert.equal(chats.length, 1);
+  assert.equal(chats[0].conv, "chat-1");
+  assert.equal(chats[0].title, "Shipping");
+  assert.equal(chats[0].waiting, 1);
+  assert.equal(chats[0].turns, 1);
+  assert.equal(chats[0].following, true);
 
   const bad = await call("POST", "/api/ledger/act", {
     conv: "chat-1",

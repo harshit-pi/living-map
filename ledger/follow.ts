@@ -664,6 +664,7 @@ export function createLedger(deps: LedgerDeps) {
     rootOf: (ids: string[]) => db.findConv(unique(ids))?.root ?? null,
     // the one linked last
     latest: () => db.conversations()[0]?.root ?? null,
+    conversations: () => db.conversations(),
     following: () => [...followers.keys()],
     close() {
       if (timer) clearInterval(timer);
