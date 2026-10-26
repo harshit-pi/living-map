@@ -29,10 +29,12 @@ The **Update** button always installs releases from this repository, even when y
 You need Node.js 23.6 or later (the server's TypeScript runs directly, with no build step) and Claude Code signed in.
 
 ```bash
-cd app
 npm install          # also installs the pre-commit hook
-npm run dev          # server with reload on :4317, plus Vite on :5173
+npm run dev          # server with reload on :4317, plus Vite on :5173 (?fixture=1 draws a fixture map, no server)
+npm start            # build, then serve :4317 under the launcher, which restarts it after an update
 ```
+
+`npm run skill` installs the `living-map` skill into `~/.claude/skills/` from your checkout, so `/living-map` in a Claude Code chat runs your copy.
 
 ## Before you open a pull request
 
@@ -42,18 +44,18 @@ npm run check        # ESLint, TypeScript, Prettier, tests
 
 The same checks run in the pre-commit hook and in CI. Please don't bypass the hook with `--no-verify`.
 
-- Add or update a test for any behaviour you change. The map's logic lives in `app/ledger/`; its tests run against a scripted model and transcripts written on the spot, so they need no network or API key.
-- Changing what Claude is asked to do (the prompts in `app/server/core/prompts.ts`)? Describe what you tried and what changed in the PR. `npm run eval` measures diagram choice and speed on 12 questions; it calls the model and costs about $1.
+- Add or update a test for any behaviour you change. The map's logic lives in `ledger/`; its tests run against a scripted model and transcripts written on the spot, so they need no network or API key.
+- Changing what Claude is asked to do (the extractor's prompt in `ledger/extract.ts`, a side chat's in `ledger/sides.ts`)? Describe what you tried and what changed in the PR. `node eval/extract-run.ts` runs the extractor over your own chats offline and `node eval/extract-score.ts` scores it; they call the model and cost real money.
 - Keep changes focused: one fix or feature per pull request.
 
 ## Conventions
 
 The full list is in [AGENTS.md](AGENTS.md). The main ones:
 
-- Shared types live in `app/shared/`, used by both server and browser.
-- Anything model-specific stays in `app/server/providers/`.
+- Shared types live in `shared/`, used by both server and browser.
+- Anything model-specific stays in `server/providers/`.
 - Treat the model's output as untrusted: check it before it reaches the map.
-- Colours come only from the roles in `app/web/brand.css`.
+- Colours come only from the roles in `web/brand.css`.
 - Text people read says "you", in plain words.
 
 ## Issues

@@ -17,7 +17,7 @@ App folder: `{{APP_DIR}}`
 PORT={{PORT}} node "{{APP_DIR}}/skill/start.ts"
 ```
 
-It returns at once if the server already runs; otherwise it installs and builds what is missing and starts the server detached, so it keeps running after this conversation ends (the first start takes up to a minute). Run it in the foreground, not with `run_in_background`. If it fails, show the user what it printed. If `{{APP_DIR}}` is missing, clone it first: `git clone https://github.com/harshit-pi/living-map.git ~/living-map`, then run `~/living-map/app/skill/start.ts` the same way. It needs Node 23.6 or newer and the `claude` command.
+It returns at once if the server already runs; otherwise it installs and builds what is missing and starts the server detached, so it keeps running after this conversation ends (the first start takes up to a minute). Run it in the foreground, not with `run_in_background`. If it fails, show the user what it printed. If `{{APP_DIR}}` is missing, clone it first: `git clone https://github.com/harshit-pi/living-map.git ~/living-map`, then run `~/living-map/skill/start.ts` the same way. It needs Node 23.6 or newer and the `claude` command.
 
 ## 2. Link this conversation
 

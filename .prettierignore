@@ -2,4 +2,8 @@ dist
 coverage
 node_modules
 package-lock.json
-eval/forms-results.*
+out
+cache
+data
+lm
+.claude

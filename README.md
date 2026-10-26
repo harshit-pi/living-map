@@ -1,4 +1,4 @@
-<p align="center"><img src="app/docs/logo.svg" alt="Living Map" width="260"></p>
+<p align="center"><img src="docs/logo.svg" alt="Living Map" width="260"></p>
 
 <p align="center"><b>A live map of your Claude Code chat, beside it.</b><br>
 What waits on you, what is still open and what was decided, kept up to date as you talk, with nothing to ask for.</p>
@@ -28,8 +28,8 @@ Paste this into a Claude Code chat:
 ```text
 Install Living Map for me from https://github.com/harshit-pi/living-map:
 1. Check that `node -v` is 23.6 or newer and that `claude` is on my PATH. If not, stop and tell me what to install.
-2. Clone it to ~/living-map (if that folder already exists, run `git pull` there instead), then run `npm install` in ~/living-map/app.
-3. In ~/living-map/app, run `npm run skill -- --hook` to install the living-map skill and its hook.
+2. Clone it to ~/living-map (if that folder already exists, run `git pull` there instead), then run `npm install` in ~/living-map.
+3. In ~/living-map, run `npm run skill -- --hook` to install the living-map skill and its hook.
 4. Tell me it is done, and that I type /living-map in any Claude Code chat to open its map.
 ```
 
@@ -39,7 +39,7 @@ Then type **/living-map** in any chat: in the desktop app, the terminal or an ID
 
 ```bash
 git clone https://github.com/harshit-pi/living-map.git ~/living-map
-cd ~/living-map/app
+cd ~/living-map
 npm install
 npm run skill -- --hook
 ```
@@ -73,16 +73,19 @@ your chat ◄──answers, picks, ticks───────┤◄────�
 - The server reads your chat's transcript as it grows, and never tool output. A fresh `claude -p` call with no tools turns the new turns into typed changes, and code checks each one before it is stored.
 - The map never re-reads the whole chat: each call is sent only the turns since the last one.
 - Side chats run as their own `claude -p`, read-only and kept to your project folder, with no web.
-- The model sits behind one interface (`app/server/providers/types.ts`). Claude Code is the default; another model is one new file.
+- The model sits behind one interface (`server/providers/types.ts`). Claude Code is the default; another model is one new file.
 
 ## Project layout
 
-| Path                | What it holds                                                                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `app/`              | the Living Map app: server, browser, tests. Its [README](app/README.md) covers development; [AGENTS.md](AGENTS.md) the conventions. |
-| `app/ledger/`       | the map of your chat: following the transcript, the store, side chats                                                               |
-| `app/web/map/`      | the map's page                                                                                                                      |
-| `app/web/brand.css` | every colour and font, by role: restyle the app in one place                                                                        |
+| Path            | What it holds                                                         |
+| --------------- | --------------------------------------------------------------------- |
+| `ledger/`       | the map of your chat: following the transcript, the store, side chats |
+| `server/`       | routes, the token, the one-click update, the model providers          |
+| `web/map/`      | the map's page                                                        |
+| `web/brand.css` | every colour and font, by role: restyle the app in one place          |
+| `skill/`        | the `living-map` skill, its installer, starter, hook and listener     |
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers development; [AGENTS.md](AGENTS.md) the conventions.
 
 ## Contributing
 

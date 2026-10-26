@@ -1,7 +1,3 @@
-# Only the app is checked; commits that touch nothing under app/ pass straight through.
-git diff --cached --name-only | grep -q '^app/' || exit 0
-cd app || exit 1
-
 echo "Running lint-staged (ESLint fix + Prettier on staged files)..."
 npx lint-staged || { echo "❌ lint-staged failed. Commit aborted."; exit 1; }
 

@@ -2,18 +2,15 @@
 
 A local web app that keeps one live mind map of your Claude Code chat, beside it. Linked from a chat with `/living-map`, it follows the chat's transcript as it grows, files what is new (what waits on you, tasks, decisions, what changed in the code) with your own Claude Code, and draws it on a page you work by clicking: lenses for what is waiting, open, decided and changed; answers sent back to the chat; side chats on any box that know the whole chat.
 
-The app lives in `app/`; run every npm command there.
-
 ## Stack
 
 - Node 23.6+ runs the server's TypeScript directly (type stripping): no build step for the server.
-- Server: Express 5, server-sent events, `node:sqlite`. Browser: React 19, Vite 8, Tailwind 4 (every colour and font in `app/web/brand.css`), React Flow 12.
-- TypeScript 6, strict, one `app/tsconfig.json` for server, browser and shared code. Tests: Vitest. Lint: ESLint 10 flat config. Format: Prettier (defaults).
+- Server: Express 5, server-sent events, `node:sqlite`. Browser: React 19, Vite 8, Tailwind 4 (every colour and font in `web/brand.css`), React Flow 12.
+- TypeScript 6, strict, one `tsconfig.json` for server, browser and shared code. Tests: Vitest. Lint: ESLint 10 flat config. Format: Prettier (defaults).
 
 ## Commands
 
 ```bash
-cd app
 npm install
 npm start              # build, then serve http://localhost:4317 under server/launcher.ts
                        # (exit code 75 = restart after a one-click update)
@@ -30,31 +27,31 @@ node eval/extract-label.ts [--fresh] <dir>...   # Opus labels each checkpoint (c
 node eval/extract-score.ts [<dir>...]           # recall and precision against the labels, and settle.md for your marks
 ```
 
-The pre-commit hook (husky, `app/.husky/pre-commit`) runs lint-staged, then the full checks; each check's own exit code decides.
+The pre-commit hook (husky, `.husky/pre-commit`) runs lint-staged, then the full checks; each check's own exit code decides.
 
 ## Verify
 
 ```bash
-cd app && npm run check && npm run build && cd .. && python3 .github/agent-docs/check.py
+npm run check && npm run build && python3 .github/agent-docs/check.py
 ```
 
 For a UI change, also try it in the browser on a test server (below), on a linked chat.
 
 ## Layout
 
-- `app/ledger/`: the map of a chat.
+- `ledger/`: the map of a chat.
   - `transcript.ts` reads a Claude Code transcript incrementally (uuid dedupe, compactions through `logicalParentUuid`, queued prompts, sealing, edit patches, never tool output).
   - `extract.ts` files new turns as ops: `extract()` on the provider, a fresh `claude -p` with its own system prompt, no tools, no cache and a JSON schema, on Claude Code's default model unless `{"ledgerModel": …}` in `~/.living-map/settings.json` names one; never Haiku for judgment. `apply.ts` checks every op (quotes, server-minted ids, who may write what) before it is stored.
   - `db.ts` is the store (`~/.living-map/ledger.db`, `node:sqlite`, migrated by `PRAGMA user_version`): a run's raw answer is saved first, then one transaction applies it and moves the read point.
-  - `follow.ts` follows every linked chat; `view.ts` builds `LedgerView` (`app/shared/ledger.ts`); `tasks.ts` replays Claude's own task list; `mermaid.ts` writes and parses mermaid+, the map's text form; `changes/` lifts file diffs into system-level change statements with no model.
+  - `follow.ts` follows every linked chat; `view.ts` builds `LedgerView` (`shared/ledger.ts`); `tasks.ts` replays Claude's own task list; `mermaid.ts` writes and parses mermaid+, the map's text form; `changes/` lifts file diffs into system-level change statements with no model.
   - `routes.ts` starts it all and serves `/api/ledger/view` and `/api/ledger/act`; `link.ts` answers `POST /api/link`; `outbox.ts` holds what the chat should hear (`~/.living-map/conversations/<first id>.json`).
   - `sides.ts` runs side chats: one long-lived `claude -p` per side chat with `sideArgs` (read-only `Read,Grep,Glob`, `--restricted`, no web, the chat's project as cwd plus `~/.living-map/sides/<chat>/` holding the rendered `items.md` and `turns.md`, never a transcript; `sides.test.ts` holds those args). Its fenced `proposal` block is checked by `checkProposal` and applied only on `apply-proposal`.
-- `app/server/`: `index.ts` starts the provider, the ledger and the routes (`http.ts`). Every `/api` route but `GET /api/health` needs the local token (`auth.ts`): kept in `~/.living-map/token` (0600), sent as `X-LM-Token` by the skill, hook and scripts. The page signs in once by the link `/api/link` answers (`/auth?n=<code>`, 60 s), which sets an HttpOnly cookie; the cookie alone allows only reads, and the page gets the token for writes from `/api/session` (`app/web/lib/session.ts`). A Host that is not localhost, or an Origin that is another page, is refused. New routes are listed in `auth.test.ts`, which fails until they are.
-- The chat hears the map two ways: `POST /api/inbox` from `app/skill/hook.ts` with your next message, or at once through `GET /api/inbox/wait`, where `app/skill/wait.ts` (a listener the chat keeps running in the background) waits for anything marked `wake`. `GET /api/outline` is the map as text.
-- `app/server/providers/`: the model. `types.ts` is the only seam; `claude-code.ts` implements it (`extract`, finding your chats with `claude-sessions.ts`, `childEnv` dropping the session variables of the chat that started the server). Pick another with `LIVING_MAP_PROVIDER`.
-- `app/server/update.ts` and `app/server/launcher.ts`: the one-click update (compare with the latest GitHub release, pull, `npm ci`, build, restart).
-- `app/web/`: `App.tsx` signs in and asks `GET /api/ledger/view` once (`map/probe.ts`), then lazy-loads `map/MapScreen.tsx`. `map/layout.ts` places nodes from the items alone (column = depth, rows in tree order by `order` key), so an appended item never moves a node above it; `layout.test.ts` holds that over a 300-step growth. Node size follows the pane's width class (`sizeFor`: narrower than 640 px gets `NARROW`), never its exact width.
-- `app/skill/`: the `living-map` skill for users' own Claude Code. `SKILL.md` is a template (`{{APP_DIR}}`, `{{PORT}}`), `install.ts` writes it to `~/.claude/skills/living-map/` (the server rewrites an installed copy on start), `start.ts` starts the server detached so it outlives the chat that asked.
+- `server/`: `index.ts` starts the provider, the ledger and the routes (`http.ts`). Every `/api` route but `GET /api/health` needs the local token (`auth.ts`): kept in `~/.living-map/token` (0600), sent as `X-LM-Token` by the skill, hook and scripts. The page signs in once by the link `/api/link` answers (`/auth?n=<code>`, 60 s), which sets an HttpOnly cookie; the cookie alone allows only reads, and the page gets the token for writes from `/api/session` (`web/lib/session.ts`). A Host that is not localhost, or an Origin that is another page, is refused. New routes are listed in `auth.test.ts`, which fails until they are.
+- The chat hears the map two ways: `POST /api/inbox` from `skill/hook.ts` with your next message, or at once through `GET /api/inbox/wait`, where `skill/wait.ts` (a listener the chat keeps running in the background) waits for anything marked `wake`. `GET /api/outline` is the map as text.
+- `server/providers/`: the model. `types.ts` is the only seam; `claude-code.ts` implements it (`extract`, finding your chats with `claude-sessions.ts`, `childEnv` dropping the session variables of the chat that started the server). Pick another with `LIVING_MAP_PROVIDER`.
+- `server/update.ts` and `server/launcher.ts`: the one-click update (compare with the latest GitHub release, pull, `npm ci`, build, restart).
+- `web/`: `App.tsx` signs in and asks `GET /api/ledger/view` once (`map/probe.ts`), then lazy-loads `map/MapScreen.tsx`. `map/layout.ts` places nodes from the items alone (column = depth, rows in tree order by `order` key), so an appended item never moves a node above it; `layout.test.ts` holds that over a 300-step growth. Node size follows the pane's width class (`sizeFor`: narrower than 640 px gets `NARROW`), never its exact width.
+- `skill/`: the `living-map` skill for users' own Claude Code. `SKILL.md` is a template (`{{APP_DIR}}`, `{{PORT}}`), `install.ts` writes it to `~/.claude/skills/living-map/` (the server rewrites an installed copy on start), `start.ts` starts the server detached so it outlives the chat that asked.
 - A test server: `LIVING_MAP_HOME=<test home> PORT=<not 4317> node server/index.ts` keeps its own store and token and leaves the installed skill alone.
 
 ## Releases
@@ -66,9 +63,9 @@ Every push to `main` that passes CI publishes a GitHub release `v0.1.<run>` (the
 - Imports carry their extension (`./follow.ts`, `./App.tsx`); Node needs it for the server, and the browser follows the same rule. ESLint orders them: external, blank line, internal. <!-- agent-docs: ignore -->
 - Anything model-specific lives in a provider.
 - The model's output is untrusted: check every op before it reaches the store (`apply.ts`, `checkProposal`).
-- Colours come only from the roles in `app/web/brand.css` (`bg-canvas`, `text-ink`, `bg-primary`, `border-success-line`, …): no Tailwind palette colours or hex codes in components. Every role has a light value and a dark one (under `prefers-color-scheme: dark`); set both, with text at 4.5:1 or more on the surfaces it sits on. The logo mark is `app/web/lib/mark.ts`; the favicon is drawn from it at startup.
+- Colours come only from the roles in `web/brand.css` (`bg-canvas`, `text-ink`, `bg-primary`, `border-success-line`, …): no Tailwind palette colours or hex codes in components. Every role has a light value and a dark one (under `prefers-color-scheme: dark`); set both, with text at 4.5:1 or more on the surfaces it sits on. The logo mark is `web/lib/mark.ts`; the favicon is drawn from it at startup.
 - No `setState` inside effects: derive the value, or reset state when its key changes during render.
-- One filled button per screen, marked `data-primary` (an open card or side chat owns it); everything else is outlined or behind a ⋯ (`app/web/components/More.tsx`). Subject matter Claude wrote (titles, quotes, answers) carries `data-content`, so interface words can be counted apart.
+- One filled button per screen, marked `data-primary` (an open card or side chat owns it); everything else is outlined or behind a ⋯ (`web/components/More.tsx`). Subject matter Claude wrote (titles, quotes, answers) carries `data-content`, so interface words can be counted apart.
 - Copy the user reads says "you", in plain words.
 
 ## Never
