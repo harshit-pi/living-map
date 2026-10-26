@@ -7,6 +7,7 @@ import type {
   LedgerView,
   SideChat,
 } from "../../shared/ledger.ts";
+import type { ServerEvent, UpdateStep } from "../../shared/model.ts";
 import { api } from "../lib/session.ts";
 
 export type ActResult = { ok: boolean; error?: string; side?: SideChat };
@@ -17,6 +18,7 @@ export type Ledger = {
   sides: Record<string, SideChat>;
   online: boolean;
   linked: boolean; // false once the server says no chat is linked any more
+  updates: UpdateStep[]; // a one-click update's progress, step by step
   act: (a: LedgerAction) => Promise<ActResult>;
 };
 
@@ -44,6 +46,7 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
   const localSides = useRef<Record<string, SideChat>>({});
   const [online, setOnline] = useState(true);
   const [linked, setLinked] = useState(true);
+  const [updates, setUpdates] = useState<UpdateStep[]>([]);
   const conv = useRef(initial.conv);
   const local = useRef(initial);
 
@@ -90,11 +93,24 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
         heard = Date.now();
         setOnline(true);
         let ev: Partial<Extract<LedgerEvent, { type: "side" }>> &
-          Partial<Extract<LedgerEvent, { type: "ledger" }>>;
+          Partial<Extract<LedgerEvent, { type: "ledger" }>> &
+          Partial<Extract<ServerEvent, { type: "update" }>>;
         try {
           ev = JSON.parse(m.data as string) as typeof ev;
         } catch {
           return;
+        }
+        // an update's progress, the same on every page
+        if (ev?.type === "update" && typeof ev.step === "string") {
+          const s: UpdateStep = {
+            step: ev.step,
+            state: ev.state!,
+            message: ev.message,
+          };
+          return setUpdates((all) => [
+            ...all.filter((x) => x.step !== s.step),
+            s,
+          ]);
         }
         if (ev.conv && ev.conv !== conv.current) return;
         if (ev?.type === "side" && ev.side && typeof ev.side.id === "string")
@@ -169,5 +185,5 @@ export function useLedger(initial: LedgerView, fixture: boolean): Ledger {
     [fixture, keepSide],
   );
 
-  return { view, sides, online, linked, act };
+  return { view, sides, online, linked, updates, act };
 }
