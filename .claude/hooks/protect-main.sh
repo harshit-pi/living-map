@@ -17,6 +17,18 @@ deny() {
 dir=$(printf '%s' "$cmd" | sed -n 's/.*git[[:space:]]\{1,\}-C[[:space:]]\{1,\}\([^[:space:];&|]*\).*/\1/p' | head -1)
 [ -n "$dir" ] || dir=$(printf '%s' "$cmd" | sed -n 's/^[[:space:]]*cd[[:space:]]\{1,\}"\{0,1\}\([^"[:space:];&|]*\)"\{0,1\}.*/\1/p' | head -1)
 [ -n "$dir" ] || dir=.
+
+# Only this repository is guarded. Another checkout the session works in (an
+# ideas vault, a dotfiles repo) may move on main by design, so a command on
+# it is allowed whatever its branch. Worktrees of this repository share its
+# common git dir, so they are judged like the main checkout.
+own=$(git -C "$(dirname "$0")" rev-parse --git-common-dir 2>/dev/null)
+target=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)
+[ -n "$own" ] && [ -n "$target" ] || exit 0
+own=$(cd "$(dirname "$0")" && cd "$own" && pwd -P)
+target=$(cd "$dir" && cd "$target" && pwd -P)
+[ "$own" = "$target" ] || exit 0
+
 branch=$(git -C "$dir" branch --show-current 2>/dev/null)
 
 # A commit while HEAD is on main. Checked at the moment of the commit, because
