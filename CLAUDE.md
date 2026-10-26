@@ -16,6 +16,7 @@
 - Never commit on `main` or push to it; `.claude/hooks/protect-main.sh` blocks both. Branch first (`git switch -c <branch>`), push the branch, open a PR.
 - Every merge to `main` publishes a release that running copies offer as an update, so `main` only moves through a reviewed PR.
 - Other sessions may share this working tree. Check `git status` and the current branch before you start, and do not switch branches or reset under someone else's changes.
+- After you pull `main` yourself (`git pull`, a rebase), run `npm run skill`: the installed skill is a copy of `skill/SKILL.md`, and the server rewrites it only on its own start or one-click update.
 
 ## Pull requests
 

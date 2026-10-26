@@ -19,6 +19,11 @@ export const APP_DIR = path.join(
 );
 // the built browser app
 export const STATIC_DIR = path.join(APP_DIR, "dist");
+// the server that keeps your installed living-map skill current: the usual
+// one, on the default port with the default home. A second copy run beside it
+// (its own home, another port: a test server) leaves the skill alone, so it
+// never points at a server about to stop.
+export const OWNS_SKILL = !process.env.LIVING_MAP_HOME || PORT === 4317;
 // set by the launcher (npm start), which restarts the server after an update
 export const UNDER_LAUNCHER = process.env.LIVING_MAP_LAUNCHER === "1";
 // the exit code that asks the launcher to start the server again

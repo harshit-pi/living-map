@@ -8,7 +8,7 @@
 // Run with Node 23.6+ (types are stripped natively): node server/index.ts
 
 import { createAuth } from "./auth.ts";
-import { HOME, PORT, PROVIDER } from "./config.ts";
+import { HOME, OWNS_SKILL, PORT, PROVIDER } from "./config.ts";
 import { createHub } from "./events.ts";
 import { createApp } from "./http.ts";
 import { pickProvider } from "./providers/index.ts";
@@ -20,10 +20,8 @@ const hub = createHub();
 // the chats followed when the server last stopped go on
 const map = startLedger(provider, hub);
 
-// the living-map skill, if you installed it, follows this copy of the app;
-// a second copy run beside it (its own home, another port: a test server)
-// leaves it alone, so the skill never points at a server about to stop
-if (!process.env.LIVING_MAP_HOME || PORT === 4317)
+// the living-map skill, if you installed it, follows this copy of the app
+if (OWNS_SKILL)
   try {
     installSkill(PORT);
   } catch (e) {

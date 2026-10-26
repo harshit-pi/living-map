@@ -3,7 +3,13 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { checkForUpdate, repoSlug, runUpdate, type Run } from "./update.ts";
+import {
+  checkForUpdate,
+  repoSlug,
+  runUpdate,
+  SKILL_STEP,
+  type Run,
+} from "./update.ts";
 import type { UpdateStep } from "../shared/model.ts";
 
 // a fake git/npm: answers by command line, records what ran
@@ -19,6 +25,9 @@ function fakeGit(answers: Record<string, string | Error>) {
   };
   return { git, ran };
 }
+
+// never the real skill in ~/.claude
+const skill = () => "unchanged";
 
 const CLEAN = {
   "git rev-parse --is-inside-work-tree": "true",
@@ -85,7 +94,7 @@ test("a lockfile rewritten by npm install does not block the update", async () =
     ...CLEAN,
     "git status --porcelain": " M app/package-lock.json",
   });
-  const r = await runUpdate(() => {}, { git });
+  const r = await runUpdate(() => {}, { git, skill });
   assert.deepEqual(r, { ok: true });
   const reset = ran.indexOf("git checkout -- package-lock.json");
   assert.ok(
@@ -110,10 +119,20 @@ test("being offline means no update, not an error", async () => {
   assert.equal(info.latest, null);
 });
 
-test("an update pulls, installs and builds, reporting each step", async () => {
+test("an update pulls, installs, builds and rewrites the skill, reporting each step", async () => {
   const { git, ran } = fakeGit(CLEAN);
   const steps: UpdateStep[] = [];
-  const r = await runUpdate((s) => steps.push(s), { git });
+  let skillWritten = 0;
+  const r = await runUpdate((s) => steps.push(s), {
+    git,
+    skill: () => {
+      // after the build: the template on disk is the new one by then
+      assert.ok(ran.includes("npm run build"));
+      skillWritten++;
+      return "updated";
+    },
+  });
+  assert.equal(skillWritten, 1);
   assert.deepEqual(r, { ok: true });
   assert.ok(
     ran.includes(
@@ -128,9 +147,26 @@ test("an update pulls, installs and builds, reporting each step", async () => {
       "Getting the new version",
       "Installing what it needs",
       "Building the app",
+      SKILL_STEP,
       "Restart Living Map to finish",
     ],
   );
+});
+
+test("a skill that cannot be written is reported, and the update still finishes", async () => {
+  const { git } = fakeGit(CLEAN);
+  const steps: UpdateStep[] = [];
+  const r = await runUpdate((s) => steps.push(s), {
+    git,
+    skill: () => {
+      throw new Error("EACCES");
+    },
+  });
+  assert.deepEqual(r, { ok: true });
+  const failed = steps.find((s) => s.state === "failed");
+  assert.equal(failed?.step, SKILL_STEP);
+  assert.match(failed?.message ?? "", /EACCES.*npm run skill/);
+  assert.ok(steps.some((s) => s.step === "Restart Living Map to finish"));
 });
 
 test("a pull that fails is rolled back and nothing is installed", async () => {
@@ -139,7 +175,7 @@ test("a pull that fails is rolled back and nothing is installed", async () => {
     "git pull": new Error("CONFLICT in app/web/App.tsx"),
   });
   const steps: UpdateStep[] = [];
-  const r = await runUpdate((s) => steps.push(s), { git });
+  const r = await runUpdate((s) => steps.push(s), { git, skill });
   assert.equal(r.ok, false);
   assert.match(r.error ?? "", /CONFLICT/);
   assert.ok(

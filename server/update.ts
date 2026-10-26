@@ -2,14 +2,22 @@
 // GitHub release, and on request pull it, install, build and restart.
 //
 //   check:  GitHub's latest release ── git fetch ──► commits behind? ──► banner
-//   update: stop moves ► git pull --rebase ► npm ci ► npm run build ► restart
+//   update: stop moves ► git pull --rebase ► npm ci ► npm run build
+//           ► rewrite the installed skill ► restart
 
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { APP_DIR, RESTART_CODE, UNDER_LAUNCHER } from "./config.ts";
+import {
+  APP_DIR,
+  OWNS_SKILL,
+  PORT,
+  RESTART_CODE,
+  UNDER_LAUNCHER,
+} from "./config.ts";
 import type { UpdateInfo, UpdateStep } from "../shared/model.ts";
+import { installSkill } from "../skill/install.ts";
 
 export type Run = (
   cmd: string,
@@ -166,12 +174,22 @@ export async function checkForUpdate({
 
 let updating = false;
 
-// Pull, install, build, then restart (under the launcher). Each step is
-// reported as it runs. A failed pull is rolled back, so the copy is never left
-// half-rebased.
+// the installed skill is a copy of skill/SKILL.md, which the pull may have
+// changed; the server rewrites it at start too, but a copy not run under the
+// launcher does not restart here, so the update writes it itself
+const refreshSkill = () => (OWNS_SKILL ? installSkill(PORT) : "skipped");
+
+export const SKILL_STEP = "Updating the living-map skill";
+
+// Pull, install, build, rewrite the skill, then restart (under the launcher).
+// Each step is reported as it runs. A failed pull is rolled back, so the copy
+// is never left half-rebased.
 export async function runUpdate(
   report: (s: UpdateStep) => void,
-  { git = run }: { git?: Run } = {},
+  {
+    git = run,
+    skill = refreshSkill,
+  }: { git?: Run; skill?: () => unknown } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (updating) return { ok: false, error: "An update is already running." };
   updating = true;
@@ -208,6 +226,19 @@ export async function runUpdate(
     await step("Building the app", () =>
       git("npm", ["run", "build"], APP_DIR, 300_000),
     );
+    // the new version is in place by now: a skill that cannot be written is
+    // shown, and the update still finishes
+    report({ step: SKILL_STEP, state: "running" });
+    try {
+      skill();
+      report({ step: SKILL_STEP, state: "done" });
+    } catch (e) {
+      report({
+        step: SKILL_STEP,
+        state: "failed",
+        message: `${(e as Error).message}. Run npm run skill to update it by hand.`,
+      });
+    }
     cached = null;
     if (UNDER_LAUNCHER) {
       report({ step: "Restarting", state: "running" });
