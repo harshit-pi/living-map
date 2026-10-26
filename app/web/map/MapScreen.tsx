@@ -616,7 +616,8 @@ function Screen({
       <main className="relative min-h-0 flex-1 overflow-clip">
         <Canvas
           title={view.title}
-          items={items}
+          // only what it draws, so a topic's counts are the boxes it opens to
+          items={mapped}
           laid={laid}
           size={size}
           folded={folded}
