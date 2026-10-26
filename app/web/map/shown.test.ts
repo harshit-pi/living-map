@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { countsOf, descendants } from "./lens.ts";
 import { mapItems, startFolds } from "./shown.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
@@ -51,6 +52,13 @@ test("what sat under a hidden item hangs from the nearest one still drawn", () =
   assert.equal(o1.parent, "t1");
   // the original is left as it was, for the card and the list
   assert.equal(ITEMS.find((i) => i.id === "o1")!.parent, "d1");
+});
+
+test("a topic's counts are the boxes it opens to, not what stays in the list", () => {
+  const under = descendants(mapItems(ITEMS), "t1");
+  assert.deepEqual(under.map((i) => i.id).sort(), ["d2", "o1"]);
+  const c = countsOf(under);
+  assert.equal(c.waiting + c.open + c.settled, under.length);
 });
 
 test("the page opens with every topic folded but the one Claude is on", () => {
