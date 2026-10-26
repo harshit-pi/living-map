@@ -6,6 +6,7 @@ A local web app that drives your own Claude Code (`claude -p`) from a visual can
 - **Learn:** a path of steps; each is a small model on one concrete case that you see once, then build back from memory. The server checks the build against Claude's hidden model with no model call, and a step comes back days later with less help. Older maps keep the topic diagram with blanks.
 - **Play a step:** do it by hand on a board, array or tree, move by move; clicks are checked instantly on the server. Coding problems end with **Write it**, where Claude traces your code.
 - **Click any part** of a diagram to have it explained in plain words, go deeper, or ask about it in a side thread.
+- **The map of your chat** (v3, `ledger/` and `web/map/`, on with `{"ledger": true}` in `~/.living-map/settings.json`): follows a linked Claude Code chat as it grows and keeps what waits on you, what is open and what was decided as one mind map.
 
 ## Run
 
