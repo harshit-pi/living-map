@@ -33,7 +33,7 @@ The answer is `{"title", "created", "conversation", "listen", "url"}` or `{"erro
 
 ## 3. Open it beside the chat
 
-Open `http://localhost:{{PORT}}<url>` with the `url` from step 2: it signs the page in and shows the map. The page stays signed in, live, in that browser. The user puts the map in their own browser from the map itself (⋯ → Open in your browser), so you need not link again for that. In a browser never signed in, the bare address shows only how to open it; signed in, it lists every mapped chat.
+Open `http://localhost:{{PORT}}<url>` with the `url` from step 2: it signs the page in and shows the map. The page stays signed in, live, in that browser. The user puts the map in their own browser from the map itself (⋯ → Open in your browser), so you need not link again for that. In a browser never signed in, the bare address offers to sign that browser in with one click (Show my maps); signed in, it lists every mapped chat.
 
 - If you have a built-in browser pane (tools named `mcp__Claude_Browser__*` or `mcp__remote-devices__Claude_Browser__*`), read its skill and open the URL there, so the map sits next to this chat. Then make sure the pane is visible, not hidden: if `tabs_context` says it is hidden, front it (in the Claude desktop app, load `mcp__ccd_view__show_pane` with ToolSearch if it is deferred and call it with `pane: "preview"`, every time, so the map is docked beside the chat).
 - Otherwise give the user the link to open. Run `open` (macOS) or `xdg-open` (Linux) on it only if they ask you to.

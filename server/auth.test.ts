@@ -203,6 +203,42 @@ test("the sign-in link lands on the chat it names, and only a chat id passes", a
   assert.equal(odd.headers.location, "/");
 });
 
+test("a browser on this machine signs itself in from the page, and no other page can", async () => {
+  const page = `http://localhost:${port}`;
+  const ok = await call("POST", "/auth/here", {
+    origin: page,
+    "sec-fetch-site": "same-origin",
+  });
+  assert.equal(ok.status, 200);
+  const cookie = String(ok.headers["set-cookie"]?.[0] ?? "");
+  assert.match(cookie, /HttpOnly/i);
+  assert.match(cookie, /Max-Age=3\d{7}/i);
+  const jar = cookie.split(";")[0];
+  assert.equal(
+    (await call("GET", "/api/session", { cookie: jar })).status,
+    200,
+  );
+  // another site's page (its Origin), or no page at all
+  assert.equal(
+    (await call("POST", "/auth/here", { origin: "https://evil.example" }))
+      .status,
+    403,
+  );
+  assert.equal((await call("POST", "/auth/here")).status, 403);
+  assert.equal(
+    (
+      await call("POST", "/auth/here", {
+        origin: page,
+        "sec-fetch-site": "cross-site",
+      })
+    ).status,
+    403,
+  );
+  // a visit (a link from anywhere) is the page, not a sign-in
+  const visit = await call("GET", "/auth/here");
+  assert.equal(visit.headers["set-cookie"], undefined);
+});
+
 test("an expired sign-in link is refused", async () => {
   const realNow = Date.now;
   const code = auth.signInCode();

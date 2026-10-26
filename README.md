@@ -52,7 +52,7 @@ npm run skill -- --hook
 - Saying `/living-map` again in the same chat opens its map again. Another chat gets its own map.
 - Ask the chat "what does my map say?" or "what's pending?" and it reads the map back.
 - The first time each kind of box is on screen, a tip explains it. Each tip shows once in that browser; **No more tips** turns them off and **Show tips again** (under ⋯) brings them back.
-- The map is one page on http://localhost:4317. It stays signed in in the browser that opened it. To have it in your own browser too, choose **⋯ → Open in your browser** on the map; from then on http://localhost:4317 there lists every mapped chat, each opening in a new tab.
+- The map is one page on http://localhost:4317. It stays signed in in the browser that opened it. To have it in your own browser too, open http://localhost:4317 there and click **Show my maps** (or choose **⋯ → Open in your browser** on the map); from then on that address lists every mapped chat, each opening in a new tab. Any browser on this machine can sign itself in that way, so on a computer you share, another account could see your maps.
 
 **Cost.** Filing new turns is a quick call on Claude Code's default model that reads only those turns: about $1.70 per 100 turns on Opus at API prices. On a Claude subscription it counts toward your usage, and the page shows no prices. Side chats cost only when you open one.
 
