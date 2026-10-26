@@ -293,7 +293,7 @@ IGNORE_MARKER = "agent-docs: ignore"
 
 def check_references(root, report):
     top_level = {p.name for p in root.iterdir()}
-    # scripts from the package.json at the root or one folder down (app/)
+    # scripts from the package.json at the root or one folder down
     scripts = None
     for package in [root / "package.json", *sorted(root.glob("*/package.json"))]:
         try:

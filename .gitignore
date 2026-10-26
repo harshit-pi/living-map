@@ -9,6 +9,12 @@ __pycache__/
 
 .DS_Store
 
+# installs, builds and caches
+node_modules/
+dist/
+.eslintcache
+coverage/
+
 # secrets and keys
 .env
 .env.local

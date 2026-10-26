@@ -1,13 +1,12 @@
 {
-  "name": "living-map-app",
+  "name": "living-map",
   "private": true,
   "version": "0.1.0",
-  "description": "Living Map: a visual canvas that drives your own Claude Code. Explore a question as a map, or learn any subject on a diagram you fill in and scenes you play by hand.",
+  "description": "Living Map: a live mind map of your Claude Code chat, beside it. What waits on you, what is open and what was decided, kept up to date as you talk.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/harshit-pi/living-map.git",
-    "directory": "app"
+    "url": "https://github.com/harshit-pi/living-map.git"
   },
   "keywords": [
     "claude",
@@ -32,7 +31,7 @@
     "format": "prettier --write .",
     "check": "eslint . --max-warnings=0 && tsc --noEmit && prettier --check . && vitest run",
     "skill": "node skill/install.ts",
-    "prepare": "cd .. && husky app/.husky"
+    "prepare": "husky"
   },
   "dependencies": {
     "@xyflow/react": "^12.12.0",

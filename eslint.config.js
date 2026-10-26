@@ -10,8 +10,16 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default defineConfig([
-  // build output
-  globalIgnores(["dist/**", "coverage/**"]),
+  // build output, and local folders that are not the app (see .gitignore)
+  globalIgnores([
+    "dist/**",
+    "coverage/**",
+    "out/**",
+    "cache/**",
+    "data/**",
+    "lm/**",
+    ".claude/**",
+  ]),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
