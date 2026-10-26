@@ -51,7 +51,7 @@ For a UI change, also try it in the browser on a test server (below), on a linke
 - `server/providers/`: the model. `types.ts` is the only seam; `claude-code.ts` implements it (`extract`, finding your chats with `claude-sessions.ts`, `childEnv` dropping the session variables of the chat that started the server). Pick another with `LIVING_MAP_PROVIDER`.
 - `server/update.ts` and `server/launcher.ts`: the one-click update (compare with the latest GitHub release, pull, `npm ci`, build, restart).
 - `web/`: `App.tsx` signs in and asks `GET /api/ledger/view` once (`map/probe.ts`), then lazy-loads `map/MapScreen.tsx`. `map/layout.ts` places nodes from the items alone (column = depth, rows in tree order by `order` key), so an appended item never moves a node above it; `layout.test.ts` holds that over a 300-step growth. Node size follows the pane's width class (`sizeFor`: narrower than 640 px gets `NARROW`), never its exact width.
-- `skill/`: the `living-map` skill for users' own Claude Code. `SKILL.md` is a template (`{{APP_DIR}}`, `{{PORT}}`), `install.ts` writes it to `~/.claude/skills/living-map/` (the server rewrites an installed copy on start), `start.ts` starts the server detached so it outlives the chat that asked.
+- `skill/`: the `living-map` skill for users' own Claude Code. `SKILL.md` is a template (`{{APP_DIR}}`, `{{PORT}}`), `install.ts` writes it to `~/.claude/skills/living-map/` (the server rewrites an installed copy on start and after a one-click update, never a test server), `start.ts` starts the server detached so it outlives the chat that asked.
 - A test server: `LIVING_MAP_HOME=<test home> PORT=<not 4317> node server/index.ts` keeps its own store and token and leaves the installed skill alone.
 
 ## Releases
