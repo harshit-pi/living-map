@@ -8,6 +8,7 @@ export type LinkResult = {
   error?: string;
   title?: string;
   created?: boolean; // followed for the first time just now
+  conv?: string; // the chat's id on the map (its root id)
   conversation?: string; // the chat's title
   listen?: boolean; // the chat should start its listener
 };
@@ -31,7 +32,14 @@ export function linkChat(
       error:
         "Could not find that conversation. Pass its id as `session`, or the folder it runs in as `cwd`.",
     };
-  const created = !ledger.rootOf([...(c.previous ?? []), c.id]);
+  const ids = [...(c.previous ?? []), c.id];
+  const created = !ledger.rootOf(ids);
   ledger.follow(c);
-  return { title: c.title, created, conversation: c.title, listen: true };
+  return {
+    title: c.title,
+    created,
+    conversation: c.title,
+    listen: true,
+    conv: ledger.rootOf(ids) ?? c.id,
+  };
 }

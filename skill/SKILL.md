@@ -29,11 +29,11 @@ python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "cwd": sy
   | curl -s -X POST localhost:{{PORT}}/api/link -H 'content-type: application/json' -H "X-LM-Token: $(cat ~/.living-map/token)" -d @-
 ```
 
-The answer is `{"title", "created", "conversation", "listen", "url"}` or `{"error"}`. `"created": true` means the map starts following this conversation now; otherwise it already was. `url` is a one-time sign-in link to the page (valid for 5 minutes): open `http://localhost:{{PORT}}` followed by it. If the session id is not filled in above, leave it as is: the server then links the newest conversation in `cwd`, which is this one.
+The answer is `{"title", "created", "conversation", "listen", "url"}` or `{"error"}`. `"created": true` means the map starts following this conversation now; otherwise it already was. `url` is a one-time sign-in link to this conversation's map (valid for 5 minutes): open `http://localhost:{{PORT}}` followed by it. If the session id is not filled in above, leave it as is: the server then links the newest conversation in `cwd`, which is this one.
 
 ## 3. Open it beside the chat
 
-Open `http://localhost:{{PORT}}<url>` with the `url` from step 2: it signs the page in and shows the map. The page stays signed in, live, in that browser; another browser needs its own link, so link again (step 2) for it. The bare address without the link shows only how to open it.
+Open `http://localhost:{{PORT}}<url>` with the `url` from step 2: it signs the page in and shows the map. The page stays signed in, live, in that browser. The user puts the map in their own browser from the map itself (⋯ → Open in your browser), so you need not link again for that. In a browser never signed in, the bare address shows only how to open it; signed in, it lists every mapped chat.
 
 - If you have a built-in browser pane (tools named `mcp__Claude_Browser__*` or `mcp__remote-devices__Claude_Browser__*`), read its skill and open the URL there, so the map sits next to this chat. Then make sure the pane is visible, not hidden: if `tabs_context` says it is hidden, front it (in the Claude desktop app, load `mcp__ccd_view__show_pane` with ToolSearch if it is deferred and call it with `pane: "preview"`, every time, so the map is docked beside the chat).
 - Otherwise give the user the link to open. Run `open` (macOS) or `xdg-open` (Linux) on it only if they ask you to.

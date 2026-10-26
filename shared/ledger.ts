@@ -43,6 +43,17 @@ export type ChangeStatement = {
   review?: "expected" | "unwanted" | "unsure" | "wrong";
 };
 
+// one chat with a map, in the list the bare page shows (GET /api/ledger/chats)
+export type ChatSummary = {
+  conv: string;
+  title: string;
+  cwd: string;
+  linkedAt: number;
+  following: boolean;
+  turns: number;
+  waiting: number; // items that wait on you
+};
+
 export type LedgerView = {
   conv: string;
   title: string;

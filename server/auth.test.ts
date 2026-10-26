@@ -80,7 +80,9 @@ const ROUTES: [string, string][] = [
   ["POST", "/api/inbox"],
   ["GET", "/api/inbox/wait?session=x&timeout=1"],
   ["GET", "/api/ledger/view"],
+  ["GET", "/api/ledger/chats"],
   ["POST", "/api/ledger/act"],
+  ["POST", "/api/open"],
   ["GET", "/api/update"],
   ["POST", "/api/update"],
   ["GET", "/api/session"],
@@ -166,9 +168,12 @@ test("the sign-in link works once, and its cookie reads but never writes", async
   const code = auth.signInCode();
   const first = await call("GET", `/auth?n=${code}`);
   assert.equal(first.status, 302);
+  assert.equal(first.headers.location, "/");
   const cookie = String(first.headers["set-cookie"]?.[0] ?? "");
   assert.match(cookie, /HttpOnly/i);
   assert.match(cookie, /SameSite=Strict/i);
+  // a browser signed in once keeps the map
+  assert.match(cookie, /Max-Age=3\d{7}/i);
   assert.equal((await call("GET", `/auth?n=${code}`)).status, 401);
   assert.equal((await call("GET", "/auth?n=made-up")).status, 401);
 
@@ -177,8 +182,25 @@ test("the sign-in link works once, and its cookie reads but never writes", async
   assert.equal(session.status, 200);
   assert.equal(JSON.parse(session.body).token, auth.token);
   // a write needs the header: a cookie is sent by any page on localhost
-  for (const url of ["/api/update", "/api/ledger/act", "/api/link"])
+  for (const url of [
+    "/api/update",
+    "/api/ledger/act",
+    "/api/link",
+    "/api/open",
+  ])
     assert.equal((await call("POST", url, { cookie: jar })).status, 401, url);
+});
+
+test("the sign-in link lands on the chat it names, and only a chat id passes", async () => {
+  const one = await call("GET", `/auth?n=${auth.signInCode()}&conv=chat-1`);
+  assert.equal(one.status, 302);
+  assert.equal(one.headers.location, "/?conv=chat-1");
+  const odd = await call(
+    "GET",
+    `/auth?n=${auth.signInCode()}&conv=${encodeURIComponent("../x?y")}`,
+  );
+  assert.equal(odd.status, 302);
+  assert.equal(odd.headers.location, "/");
 });
 
 test("an expired sign-in link is refused", async () => {

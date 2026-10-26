@@ -52,6 +52,7 @@ import { Mark } from "../components/Logo.tsx";
 import { More } from "../components/More.tsx";
 import { UpdateButton } from "../components/UpdateButton.tsx";
 import { useUpdate } from "../lib/api.ts";
+import { api } from "../lib/session.ts";
 import { store, stored } from "../lib/storage.ts";
 
 // coming back to the page after this long counts as a new look
@@ -200,6 +201,37 @@ function Screen({
   const [step, setStep] = useState(-1);
   const [following, setFollowing] = useState(false);
   const [error, setError] = useState("");
+  // a word on what just happened (a link copied), gone by itself
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    if (!note) return;
+    const t = setTimeout(() => setNote(""), 6000);
+    return () => clearTimeout(t);
+  }, [note]);
+  // this map in another browser of yours: the server makes a fresh one-time
+  // link and opens it there, or the page copies it for you to paste
+  const handOff = async (launch: boolean) => {
+    try {
+      const r = await api("/api/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conv: view.conv, launch }),
+      });
+      const b = (await r.json()) as { url?: string; error?: string };
+      if (!r.ok || !b.url) {
+        setError(b.error ?? "Couldn't make a link for another browser.");
+        return;
+      }
+      if (launch) {
+        setNote("Opening this map in your browser…");
+        return;
+      }
+      await navigator.clipboard.writeText(b.url);
+      setNote("Link copied. It works once and expires in 5 minutes.");
+    } catch {
+      setError("Couldn't reach the Living Map server. Is it running?");
+    }
+  };
   // the side chat shown over the lower half; the others wait as chips
   const [sideId, setSideId] = useState<string | null>(null);
   // where stepping through a lens got to, for the lens it was on
@@ -507,6 +539,23 @@ function Screen({
                 : []),
             ],
           },
+          {
+            head: "This map elsewhere",
+            items: fixture
+              ? []
+              : [
+                  {
+                    label: "Open in your browser",
+                    title: "Opens this map in your default browser, signed in",
+                    onClick: () => void handOff(true),
+                  },
+                  {
+                    label: "Copy a link for another browser",
+                    title: "A one-time link, good for 5 minutes",
+                    onClick: () => void handOff(false),
+                  },
+                ],
+          },
         ]}
       />
     </>
@@ -760,6 +809,11 @@ function Screen({
           onReview={(a) => void run(a)}
           onClose={() => setDrawer(false)}
         />
+        {note && !error && (
+          <div className="absolute top-2 left-1/2 z-40 max-w-[min(480px,calc(100%-32px))] -translate-x-1/2 rounded-lg bg-surface px-3 py-1.5 text-sm text-body shadow-md ring-1 ring-line">
+            {note}
+          </div>
+        )}
         {error && (
           <div className="absolute top-2 left-1/2 z-40 flex max-w-[min(480px,calc(100%-32px))] -translate-x-1/2 items-center gap-3 rounded-lg bg-warning-soft px-3 py-1.5 text-sm text-warning-strong shadow-md ring-1 ring-warning-line">
             <span className="min-w-0 flex-1">{error}</span>

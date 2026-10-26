@@ -3,6 +3,7 @@
 // "ledger" event.
 //
 //   GET  /api/ledger/view?conv=<id>  the map of a chat (else the one linked last)
+//   GET  /api/ledger/chats           every chat with a map, newest link first
 //   POST /api/ledger/act {conv, action}  what you did on it; a side chat's
 //                                        actions (sides.ts) answer {side, view}
 
@@ -18,7 +19,7 @@ import { createSides, itemsPage, type Sides } from "./sides.ts";
 import { HOME } from "../server/config.ts";
 import type { Hub } from "../server/events.ts";
 import type { ModelProvider } from "../server/providers/types.ts";
-import type { LedgerAction } from "../shared/ledger.ts";
+import type { ChatSummary, LedgerAction } from "../shared/ledger.ts";
 
 export const DB_FILE = path.join(HOME, "ledger.db");
 
@@ -99,6 +100,22 @@ export function startLedger(
     }
     ledger.nudge(root);
     res.json(view);
+  });
+  // for the page's list of your maps
+  router.get("/chats", (_req, res) => {
+    const chats: ChatSummary[] = ledger.conversations().map((c) => {
+      const v = ledger.view(c.root);
+      return {
+        conv: c.root,
+        title: c.title || v?.title || "",
+        cwd: c.cwd,
+        linkedAt: c.linkedAt,
+        following: c.following,
+        turns: v?.turns ?? 0,
+        waiting: v?.strip.waiting.length ?? 0,
+      };
+    });
+    res.json(chats);
   });
   router.post("/act", async (req, res) => {
     const body = (req.body ?? {}) as { conv?: unknown; action?: unknown };

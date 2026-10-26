@@ -13,7 +13,16 @@ export const wantsFixture = () =>
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).has("fixture");
 
-export function useLedgerProbe(fixture: boolean): Probe {
+// the chat this page is the map of (/?conv=<chat>); none means the list
+export const wantedConv = () =>
+  typeof window !== "undefined"
+    ? (new URLSearchParams(window.location.search).get("conv") ?? "")
+    : "";
+
+export const viewUrl = (conv: string) =>
+  `/api/ledger/view${conv ? `?conv=${encodeURIComponent(conv)}` : ""}`;
+
+export function useLedgerProbe(fixture: boolean, conv: string): Probe {
   const [probe, setProbe] = useState<Probe>(null);
   useEffect(() => {
     let live = true;
@@ -30,7 +39,7 @@ export function useLedgerProbe(fixture: boolean): Probe {
         }),
       );
     else
-      api("/api/ledger/view")
+      api(viewUrl(conv))
         .then(async (r) =>
           done(
             r.ok
@@ -42,6 +51,6 @@ export function useLedgerProbe(fixture: boolean): Probe {
     return () => {
       live = false;
     };
-  }, [fixture]);
+  }, [fixture, conv]);
   return probe;
 }

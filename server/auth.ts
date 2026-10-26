@@ -7,7 +7,7 @@
 //   ~/.living-map/token (readable only by you). The skill, hooks and scripts
 //   read it from there and send it as X-LM-Token.
 // - The page gets it by a one-time sign-in link the skill opens
-//   (/auth?n=<code>, valid 5 min), which sets an HttpOnly cookie; the page
+//   (/auth?n=<code>&conv=<chat>, valid 5 min), which sets an HttpOnly cookie; the page
 //   then asks /api/session for the token to send on writes. SameSite does not
 //   separate localhost ports, so a cookie alone never allows a write.
 // - A request whose Host isn't this server (DNS rebinding), or a write whose
@@ -20,6 +20,17 @@ import path from "node:path";
 
 export const COOKIE = "lm_token";
 const NONCE_MS = 5 * 60_000;
+// the cookie lasts: a browser signed in once keeps the map (it reads alone;
+// a write still needs the token the page asks for)
+const COOKIE_MS = 365 * 24 * 60 * 60_000;
+// a chat id as the page and the ledger know it; anything else is dropped
+export const CONV_RE = /^[\w-]{1,100}$/;
+export const convOf = (v: unknown): string =>
+  typeof v === "string" && CONV_RE.test(v) ? v : "";
+
+// the one-time link to a chat's map (no chat: the list of them)
+export const signInPath = (code: string, conv = "") =>
+  `/auth?n=${code}${conv ? `&conv=${encodeURIComponent(conv)}` : ""}`;
 
 export type Auth = {
   token: string;
@@ -151,8 +162,10 @@ export function authRoutes(app: express.Express, auth: Auth) {
       httpOnly: true,
       sameSite: "strict",
       path: "/",
+      maxAge: COOKIE_MS,
     });
-    res.redirect(302, "/");
+    const conv = convOf(req.query.conv);
+    res.redirect(302, conv ? `/?conv=${encodeURIComponent(conv)}` : "/");
   });
   // only a page already signed in (its cookie) can read this, and no other
   // page can read the answer: the server sends no CORS headers
