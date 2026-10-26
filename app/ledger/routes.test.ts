@@ -1,7 +1,7 @@
-// The v3 map's routes on a real server: they need the token like every
-// /api route, are not there with the flag off, follow a chat linked through
-// /api/link, serve its view, take your actions, push "ledger" events, and
-// put your answers in the main chat's inbox.
+// The map's routes on a real server: they need the token like every /api
+// route, follow a chat linked through /api/link, serve its view and its
+// outline, take your actions, push "ledger" events, and put your answers in
+// the main chat's inbox.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -17,12 +17,10 @@ import type { ServerEvent } from "../shared/model.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lm-ledger-routes-"));
 process.env.LIVING_MAP_HOME = path.join(tmp, "living-map");
-process.env.LIVING_MAP_LEDGER = "0";
 
 const { createAuth } = await import("../server/auth.ts");
-const { createEngine } = await import("../server/engine.ts");
 const { createApp } = await import("../server/http.ts");
-const { ledgerServer } = await import("../server/ledger.ts");
+const { startLedger } = await import("./routes.ts");
 
 // a chat on disk, in the shapes Claude Code writes
 const transcript = path.join(tmp, "chat-1.jsonl");
@@ -56,24 +54,12 @@ fs.utimesSync(transcript, ago, ago);
 
 const provider: ModelProvider = {
   name: "scripted",
-  models: [{ id: "", label: "Default" }],
-  efforts: [{ id: "", label: "Default" }],
   findConversation: () => ({
     id: "chat-1",
     cwd: tmp,
     title: "Shipping",
     file: transcript,
   }),
-  run() {
-    const reply = {
-      ok: true,
-      final: "Hm.",
-      firstMs: 1,
-      endMs: 1,
-      usage: Promise.resolve(null),
-    };
-    return { reply: Promise.resolve(reply), cancel: () => {} };
-  },
   extract: async () => ({
     ok: true,
     value: {
@@ -110,7 +96,7 @@ const provider: ModelProvider = {
 
 const events: ServerEvent[] = [];
 const hub = { add() {}, remove() {}, emit: (e: ServerEvent) => events.push(e) };
-const engine = createEngine({ provider, hub, initial: null, save: () => {} });
+const map = startLedger(provider, hub, path.join(tmp, "ledger.db"));
 const port = await new Promise<number>((done) => {
   const s = net.createServer().listen(0, "127.0.0.1", () => {
     const p = (s.address() as net.AddressInfo).port;
@@ -118,10 +104,10 @@ const port = await new Promise<number>((done) => {
   });
 });
 const auth = createAuth({ home: process.env.LIVING_MAP_HOME, port });
-const server = createApp(engine, hub, auth).listen(port, "127.0.0.1");
+const server = createApp(provider, hub, auth, map).listen(port, "127.0.0.1");
 await new Promise((r) => server.once("listening", r));
 afterAll(async () => {
-  (await ledgerServer())?.ledger.close();
+  map.ledger.close();
   await new Promise((r) => server.close(r));
 });
 
@@ -163,9 +149,7 @@ function call(
   });
 }
 
-test("off with the flag off, and every route needs the token", async () => {
-  assert.equal((await call("GET", "/api/ledger/view")).status, 404);
-  process.env.LIVING_MAP_LEDGER = "1";
+test("every route needs the token, and with nothing linked there is no map", async () => {
   assert.equal(
     (await call("GET", "/api/ledger/view", undefined, null)).status,
     401,
@@ -181,19 +165,21 @@ test("off with the flag off, and every route needs the token", async () => {
     ).status,
     401,
   );
-  // on, but nothing linked yet
+  // nothing linked yet
   assert.equal((await call("GET", "/api/ledger/view")).status, 404);
 });
 
 test("a chat linked through /api/link is followed, filed and acted on", async () => {
-  process.env.LIVING_MAP_LEDGER = "1";
-  const linked = await call("POST", "/api/link", {
-    session: "chat-1",
-    purpose: "explore",
-    question: "Ship it?",
-  });
+  const linked = await call("POST", "/api/link", { session: "chat-1" });
   assert.equal(linked.status, 200);
-  const l = (await ledgerServer())!.ledger;
+  assert.equal(linked.json.created, true);
+  assert.equal(linked.json.listen, true);
+  assert.match(String(linked.json.url), /^\/auth\?n=/);
+  assert.equal(
+    (await call("POST", "/api/link", { session: "chat-1" })).json.created,
+    false,
+  );
+  const l = map.ledger;
   assert.deepEqual(l.following(), ["chat-1"]);
   await l.tick();
 

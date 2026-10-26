@@ -14,7 +14,7 @@ body:
     attributes:
       label: Steps to reproduce
       placeholder: |
-        1. Start a Learn map on "..."
+        1. Say /living-map in a Claude Code chat about "..."
         2. Click ...
   - type: input
     id: version

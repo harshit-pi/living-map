@@ -15,8 +15,6 @@ Long Claude Code sessions bury the things you need to act on. Living Map reads y
 - **Side chats** on any item: a read-only Claude that has read the map and the chat, can read your project, and proposes changes to the map you apply with one click.
 - An empty chat starts as an empty map that fills in as you talk. A chat you link partway through is read from its start, or from its newest 40 turns if it is longer.
 
-The map of your chat (v3) is still being tried out, so it is behind a switch: the install below turns it on. With it off, Living Map opens the older views of a chat instead (Explore, Learn and Design, [below](#explore-learn-and-design)).
-
 Everything runs on your machine. Living Map talks to the model through your own Claude Code (`claude -p`) and keeps its data in `~/.living-map/`.
 
 ## Install
@@ -31,9 +29,8 @@ Paste this into a Claude Code chat:
 Install Living Map for me from https://github.com/harshit-pi/living-map:
 1. Check that `node -v` is 23.6 or newer and that `claude` is on my PATH. If not, stop and tell me what to install.
 2. Clone it to ~/living-map (if that folder already exists, run `git pull` there instead), then run `npm install` in ~/living-map/app.
-3. Turn on the live map of my chat: in ~/.living-map/settings.json set "ledger": true, keeping anything else already in that file (create the folder and file if they are missing).
-4. In ~/living-map/app, run `npm run skill -- --hook` to install the living-map skill and its hook.
-5. Tell me it is done, and that I type /living-map in any Claude Code chat to open its map.
+3. In ~/living-map/app, run `npm run skill -- --hook` to install the living-map skill and its hook.
+4. Tell me it is done, and that I type /living-map in any Claude Code chat to open its map.
 ```
 
 Then type **/living-map** in any chat: in the desktop app, the terminal or an IDE. If that chat does not list the skill yet, start a new one.
@@ -47,10 +44,7 @@ npm install
 npm run skill -- --hook
 ```
 
-Then add `"ledger": true` to `~/.living-map/settings.json` (create it as `{"ledger": true}` if it is missing).
-
 - `npm run skill` installs the `living-map` skill into `~/.claude/skills/`. `--hook` also adds one `UserPromptSubmit` entry to `~/.claude/settings.json`, leaving the rest as it is: whatever you did on the map comes with your next message, if it has not reached the chat already.
-- Leave out `"ledger": true` to keep the older views.
 
 ## Using it
 
@@ -62,18 +56,10 @@ Then add `"ledger": true` to `~/.living-map/settings.json` (create it as `{"ledg
 
 **Cost.** Filing new turns is a quick call on Claude Code's default model that reads only those turns: about $1.70 per 100 turns on Opus at API prices. On a Claude subscription it counts toward your usage, and the page shows no prices. Side chats cost only when you open one.
 
-## Explore, Learn and Design
-
-With the switch off, the map of a chat is one of these views, picked from what the chat is doing (`/living-map explore <question>`, `/living-map learn <topic>` and `/living-map design <system>` pick one). You can also run them on their own: `npm start` in `app/`, then open http://localhost:4317.
-
-- **Explore** a question as a decision board: the options as columns, what you want as rows, and Claude's judgement in each cell, marked as a guess when no fact backs it. One **Next** button names the step; mark your musts, rate any cell yourself, then decide in one sheet with your reasons and a pre-mortem. Questions about causes open as a tree.
-- **Learn** any subject as a path of steps. Each step is a small model on one concrete case: you see it once, then build it back from memory, checked with no model call, and it comes back days later with less help. Play a step by hand on a board, an array or a tree; coding problems end with **Write it**, where Claude traces your code.
-- **Design** a system the way a system-design book teaches it: Claude writes the brief, you build the design from typed components, a rough load check shows what falls over, and **Check my design** reviews it against a reference Claude keeps hidden.
-
 ## Updates
 
 Every push to `main` that passes CI publishes a release (`v0.1.<n>`).
-When a newer one is out, the page shows **New version available** (in the top bar of the map of your chat, in the header of the older views). One click pulls it (`git pull --rebase`), installs (`npm ci`), builds and restarts, and the page reloads into it. The installed skill is rewritten from the new copy as the server starts.
+When a newer one is out, the map's top bar shows **New version available**. One click pulls it (`git pull --rebase`), installs (`npm ci`), builds and restarts, and the page reloads into it. The installed skill is rewritten from the new copy as the server starts.
 It runs only on a clean checkout of `main`; otherwise the popover says what is in the way.
 
 ## How it works

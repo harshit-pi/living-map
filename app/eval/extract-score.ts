@@ -190,7 +190,7 @@ async function refine(
       .digest("hex");
     let pairs = cache[key];
     if (!pairs) {
-      provider ??= claudeCode({ home: HOME, cwd: HOME });
+      provider ??= claudeCode({ home: HOME });
       const r = await provider.extract!({
         system: PAIR_SYSTEM,
         message: text,

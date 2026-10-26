@@ -15,7 +15,7 @@ import { toLines, toMermaid } from "../ledger/mermaid.ts";
 import { claudeCode } from "../server/providers/claude-code.ts";
 
 const home = path.join(os.homedir(), ".living-map");
-const provider = claudeCode({ home, cwd: home });
+const provider = claudeCode({ home });
 const model = process.env.LIVING_MAP_EVAL_MODEL ?? "";
 
 const FORMS = {

@@ -38,7 +38,7 @@ This skill is for what people say on a PR you opened; never wait for a review to
 
    ```bash
    python3 .github/agent-tools/pr_feedback.py reply <pr> <id> <<'MSG'
-   Declined: the answer never reaches the browser; fill() checks it on the server, see app/server/actions/learn.ts.
+   Declined: a side chat's proposal is checked on the server before it is applied; see checkProposal in app/ledger/sides.ts.
    MSG
    ```
 

@@ -51,8 +51,7 @@ import {
 
 const N = Number(process.argv[2]) || 20;
 const OUT =
-  process.argv[3] ??
-  "/private/tmp/claude-501/-Users-harshit-Library-Application-Support-Claude-scratch-workspaces-97bbd5f9-5474-4169-a5c8-a1581ac76d8b-47bdff2a-badd-45d0-9887-d133deb3d9ff-scratch-2026-10-23-7c759e/8110f9da-1e9b-4269-b9d5-2a743e0e6d33/scratchpad/research/10-changes-retro-go-py.md";
+  process.argv[3] ?? path.join(os.tmpdir(), "living-map-changes-retro.md");
 const CLAUDE = path.join(os.homedir(), ".claude");
 const PROJECTS = path.join(CLAUDE, "projects");
 const HISTORY = path.join(CLAUDE, "file-history");

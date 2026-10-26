@@ -10,16 +10,12 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default defineConfig([
-  // build output and generated eval results
-  globalIgnores(["dist/**", "coverage/**", "eval/forms-results.*"]),
+  // build output
+  globalIgnores(["dist/**", "coverage/**"]),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
-    files: [
-      "web/**/*.{ts,tsx}",
-      "plugins/*/web/**/*.{ts,tsx}",
-      "layer/web/**/*.{ts,tsx}",
-    ],
+    files: ["web/**/*.{ts,tsx}"],
     extends: [
       reactHooks.configs.flat["recommended-latest"],
       reactRefresh.configs.vite,
@@ -30,8 +26,6 @@ export default defineConfig([
     files: [
       "server/**/*.ts",
       "eval/**/*.ts",
-      "plugins/*/*.ts",
-      "layer/*.ts",
       "ledger/**/*.ts",
       "shared/**/*.ts",
       "*.config.{js,ts}",

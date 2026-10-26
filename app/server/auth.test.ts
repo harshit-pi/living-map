@@ -17,8 +17,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lm-auth-"));
 process.env.LIVING_MAP_HOME = path.join(tmp, "living-map");
 
 const { createAuth, readToken } = await import("./auth.ts");
-const { createEngine } = await import("./engine.ts");
 const { createApp } = await import("./http.ts");
+const { startLedger } = await import("../ledger/routes.ts");
 
 const port = await new Promise<number>((done) => {
   const s = net.createServer().listen(0, "127.0.0.1", () => {
@@ -29,26 +29,14 @@ const port = await new Promise<number>((done) => {
 
 const provider: ModelProvider = {
   name: "none",
-  models: [{ id: "", label: "Default" }],
-  efforts: [{ id: "", label: "Default" }],
   findConversation: () => null,
-  run() {
-    throw new Error("no model calls here");
-  },
 };
-const engine = createEngine({
-  provider,
-  hub: { add: () => {}, remove: () => {}, emit: () => {} },
-  initial: null,
-  save: () => {},
-});
+const hub = { add() {}, remove() {}, emit() {} };
 const home = process.env.LIVING_MAP_HOME;
 const auth = createAuth({ home, port });
-const server = createApp(
-  engine,
-  { add() {}, remove() {}, emit() {} },
-  auth,
-).listen(port, "127.0.0.1");
+const map = startLedger(provider, hub, path.join(tmp, "ledger.db"));
+afterAll(() => map.ledger.close());
+const server = createApp(provider, hub, auth, map).listen(port, "127.0.0.1");
 await new Promise((r) => server.once("listening", r));
 afterAll(() => new Promise((r) => server.close(r)));
 
@@ -87,13 +75,12 @@ function call(
 // fails when one is added and not listed here)
 const ROUTES: [string, string][] = [
   ["GET", "/api/events"],
-  ["POST", "/api/action"],
   ["POST", "/api/link"],
   ["GET", "/api/outline"],
   ["POST", "/api/inbox"],
   ["GET", "/api/inbox/wait?session=x&timeout=1"],
-  ["GET", "/api/maps"],
-  ["GET", "/api/provider"],
+  ["GET", "/api/ledger/view"],
+  ["POST", "/api/ledger/act"],
   ["GET", "/api/update"],
   ["POST", "/api/update"],
   ["GET", "/api/session"],
@@ -139,7 +126,7 @@ test("another name for localhost is refused, even with the token", async () => {
     `localhost:${port + 1}`,
     `127.0.0.1.nip.io:${port}`,
   ]) {
-    const r = await call("GET", "/api/maps", {
+    const r = await call("GET", "/api/inbox/wait", {
       host,
       "x-lm-token": auth.token,
     });
@@ -164,9 +151,11 @@ test("a page on another site is refused, even with the token", async () => {
 });
 
 test("the token lets you in, from the page itself or from no page", async () => {
-  const bare = await call("GET", "/api/maps", { "x-lm-token": auth.token });
+  const bare = await call("GET", "/api/inbox/wait", {
+    "x-lm-token": auth.token,
+  });
   assert.equal(bare.status, 200);
-  const page = await call("GET", "/api/maps", {
+  const page = await call("GET", "/api/inbox/wait", {
     "x-lm-token": auth.token,
     origin: `http://localhost:${port}`,
   });
@@ -188,7 +177,7 @@ test("the sign-in link works once, and its cookie reads but never writes", async
   assert.equal(session.status, 200);
   assert.equal(JSON.parse(session.body).token, auth.token);
   // a write needs the header: a cookie is sent by any page on localhost
-  for (const url of ["/api/update", "/api/action", "/api/link"])
+  for (const url of ["/api/update", "/api/ledger/act", "/api/link"])
     assert.equal((await call("POST", url, { cookie: jar })).status, 401, url);
 });
 
@@ -201,13 +190,4 @@ test("an expired sign-in link is refused", async () => {
   } finally {
     Date.now = realNow;
   }
-});
-
-test("with the conversation layer off, the chat's listener is told to stop", async () => {
-  assert.equal(process.env.LIVING_MAP_EXPERIMENTAL, undefined);
-  const h = { "x-lm-token": auth.token };
-  const wait = await call("GET", "/api/inbox/wait?session=x&timeout=1", h);
-  assert.deepEqual(JSON.parse(wait.body), { text: "", off: true });
-  const inbox = await call("POST", "/api/inbox", h);
-  assert.deepEqual(JSON.parse(inbox.body), { text: "" });
 });

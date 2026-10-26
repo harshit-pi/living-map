@@ -42,7 +42,7 @@ npm run check        # ESLint, TypeScript, Prettier, tests
 
 The same checks run in the pre-commit hook and in CI. Please don't bypass the hook with `--no-verify`.
 
-- Add or update a test for any behaviour you change. Server logic lives in `app/server/core/` (pure functions) and `app/server/engine.ts`; the tests run the engine against a scripted model, so they need no network or API key.
+- Add or update a test for any behaviour you change. The map's logic lives in `app/ledger/`; its tests run against a scripted model and transcripts written on the spot, so they need no network or API key.
 - Changing what Claude is asked to do (the prompts in `app/server/core/prompts.ts`)? Describe what you tried and what changed in the PR. `npm run eval` measures diagram choice and speed on 12 questions; it calls the model and costs about $1.
 - Keep changes focused: one fix or feature per pull request.
 
@@ -50,18 +50,14 @@ The same checks run in the pre-commit hook and in CI. Please don't bypass the ho
 
 The full list is in [AGENTS.md](AGENTS.md). The main ones:
 
-- Shared types live in `app/shared/model.ts`, used by both server and browser.
-- Anything model-specific stays in `app/server/providers/`; the engine never names Claude.
-- Treat the model's output as untrusted: clean it before it reaches the map, and never send an answer to the browser.
+- Shared types live in `app/shared/`, used by both server and browser.
+- Anything model-specific stays in `app/server/providers/`.
+- Treat the model's output as untrusted: check it before it reaches the map.
 - Colours come only from the roles in `app/web/brand.css`.
 - Text people read says "you", in plain words.
 
-## Writing a plugin
-
-A plugin adds a mode next to Explore and Learn. Copy the shape of `app/plugins/design/`: a server half that implements `ServerPlugin` (`app/server/plugin.ts`) and a screen that implements `WebPlugin` (`app/web/plugin.ts`), each registered in one line (`app/server/plugins.ts`, `app/web/plugins.ts`). Keep the logic in a pure, tested `core.ts`, clean every op the model writes, and send the browser only what the user should see.
-
 ## Issues
 
-Use the bug report or feature request form when you open an issue. For a bug, include what you did, what you expected, what happened, and the map if you can share it (maps are JSON files in `~/.living-map/maps/`). Security problems go through the private route in [SECURITY.md](SECURITY.md), not an issue.
+Use the bug report or feature request form when you open an issue. For a bug, include what you did, what you expected, what happened, and the map's outline if you can share it (ask your chat "what does my map say?"). Security problems go through the private route in [SECURITY.md](SECURITY.md), not an issue.
 
 Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).

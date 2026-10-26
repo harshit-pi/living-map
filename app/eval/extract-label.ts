@@ -210,7 +210,7 @@ async function main(dirs: string[]) {
     console.error("usage: node eval/extract-label.ts <conv dir>...");
     process.exit(2);
   }
-  const provider = claudeCode({ home: HOME, cwd: HOME });
+  const provider = claudeCode({ home: HOME });
   const fresh = dirs.includes("--fresh");
   dirs = dirs.filter((d) => d !== "--fresh");
   let total = 0;

@@ -23,7 +23,7 @@ import { claudeCode } from "../server/providers/claude-code.ts";
 
 const home = path.join(os.homedir(), ".living-map");
 const ROOT = path.join(home, "eval", "extract");
-const provider = claudeCode({ home, cwd: home });
+const provider = claudeCode({ home });
 
 const LINE =
   /^- \[ \] map right {2}\[ \] label right {2}\[ \] both wrong · (.*) <!-- k:(t(\d+)\.(\w+)\.(map|label)\.[\w.-]+) -->$/;
