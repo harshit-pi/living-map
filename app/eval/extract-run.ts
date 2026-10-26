@@ -36,7 +36,7 @@ import { claudeCode } from "../server/providers/claude-code.ts";
 
 const home = path.join(os.homedir(), ".living-map");
 const OUT = path.join(home, "eval", "extract");
-const provider = claudeCode({ home, cwd: home });
+const provider = claudeCode({ home });
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {

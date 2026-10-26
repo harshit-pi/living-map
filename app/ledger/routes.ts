@@ -1,10 +1,8 @@
-// The v3 map's routes and its start: the store opened, the chats marked
+// The map's routes and its start: the store opened, the chats marked
 // following picked up again, and every change pushed to open pages as a
-// "ledger" event. Loaded only while the experimental flag is on (see
-// server/ledger.ts).
+// "ledger" event.
 //
-//   GET  /api/ledger/view?conv=<id>  the map of a chat (the open map's, else
-//                                    the one linked last)
+//   GET  /api/ledger/view?conv=<id>  the map of a chat (else the one linked last)
 //   POST /api/ledger/act {conv, action}  what you did on it; a side chat's
 //                                        actions (sides.ts) answer {side, view}
 
@@ -15,12 +13,11 @@ import path from "node:path";
 import { compare, shadowFor, snapshot } from "./changes/snapshot.ts";
 import { openDb, type Conv } from "./db.ts";
 import { createLedger, type Ledger } from "./follow.ts";
-import { createSides, type Sides } from "./sides.ts";
-import { post } from "../layer/core.ts";
-import { layerOf, saveLayer } from "../layer/store.ts";
+import { heardAt as heardAtOf, post } from "./outbox.ts";
+import { createSides, itemsPage, type Sides } from "./sides.ts";
 import { HOME } from "../server/config.ts";
-import type { Engine } from "../server/engine.ts";
 import type { Hub } from "../server/events.ts";
+import type { ModelProvider } from "../server/providers/types.ts";
 import type { LedgerAction } from "../shared/ledger.ts";
 
 export const DB_FILE = path.join(HOME, "ledger.db");
@@ -38,45 +35,32 @@ export function ledgerModel(home = HOME): string {
   }
 }
 
-const layerFor = (conv: Conv) => {
-  const ids = conv.ids.length ? conv.ids : [conv.root];
-  const s = layerOf({
-    id: ids.at(-1)!,
-    previous: ids.slice(0, -1),
-    cwd: conv.cwd,
-    title: conv.title,
-  });
-  for (const id of ids) if (!s.aliases.includes(id)) s.aliases.push(id);
-  return s;
-};
+const idsOf = (conv: Conv) => (conv.ids.length ? conv.ids : [conv.root]);
 
-// Words for the main chat go through the conversation layer's outbox, which
-// the hook and the listener in that chat already read (layer/view.ts).
-// Marked to wake the listener, since you acted on something it is part of;
-// `quiet` ones (a side chat's finding you applied) wait for your next
-// message there.
+// Words for the main chat go to its outbox (outbox.ts), which the hook and
+// the listener in that chat read. Marked to wake the listener, since you
+// acted on something it is part of; `quiet` ones (a side chat's finding you
+// applied) wait for your next message there.
 export function tellChat(conv: Conv, text: string, quiet = false) {
-  const s = layerFor(conv);
-  post(s, text, Date.now(), !quiet);
-  saveLayer(s);
+  post(idsOf(conv), conv.title, text, !quiet);
 }
 
 // when the main chat last took its inbox: what was told before has arrived
-export const heardAt = (conv: Conv) => layerFor(conv).heardAt ?? 0;
+export const heardAt = (conv: Conv) => heardAtOf(idsOf(conv));
 
 export type LedgerServer = {
   ledger: Ledger;
   sides: Sides;
   router: express.Router;
+  outline: (conv?: unknown) => string | null;
 };
 
 export function startLedger(
-  engine: Engine,
+  provider: ModelProvider,
   hub: Hub,
   file = DB_FILE,
 ): LedgerServer {
   const db = openDb(file);
-  const provider = engine.provider;
   const ledger = createLedger({
     db,
     extract: provider.extract ? (req) => provider.extract!(req) : undefined,
@@ -99,16 +83,11 @@ export function startLedger(
     model: () => ledgerModel(),
   });
 
-  // the chat asked for, else the open map's, else the one linked last
-  const rootFor = (asked: unknown): string | null => {
-    if (typeof asked === "string" && asked)
-      return ledger.rootOf([asked.slice(0, 100)]);
-    const c = engine.state.map?.conversation;
-    return (
-      (c ? ledger.rootOf([...(c.previous ?? []), c.id]) : null) ??
-      ledger.latest()
-    );
-  };
+  // the chat asked for, else the one linked last
+  const rootFor = (asked: unknown): string | null =>
+    typeof asked === "string" && asked
+      ? ledger.rootOf([asked.slice(0, 100)])
+      : ledger.latest();
 
   const router = express.Router();
   router.get("/view", (req, res) => {
@@ -160,7 +139,14 @@ export function startLedger(
         .json({ error: "Something went wrong on the server. Try again." });
     }
   });
-  return { ledger, sides, router };
+  // a chat's map as text, for a conversation to read back: every live item
+  // in tree order, with what it says
+  const outline = (asked: unknown): string | null => {
+    const root = rootFor(asked);
+    const s = root ? ledger.state(root) : null;
+    return s ? itemsPage(s.store) : null;
+  };
+  return { ledger, sides, router, outline };
 }
 
 const SIDE_ACTIONS = new Set<string>([

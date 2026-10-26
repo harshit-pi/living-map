@@ -110,7 +110,7 @@ function tellOf(s: State, item: Item, state: string): string | undefined {
 export type Acted = {
   lines: LogLine[];
   error?: string;
-  // words for the main chat, delivered through its inbox (layer/view.ts)
+  // words for the main chat, delivered through its inbox (outbox.ts)
   tell?: string;
   quiet?: boolean; // the words wait for your next message there
   about?: string; // the item they are about: its card says when they arrive

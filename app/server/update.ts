@@ -171,10 +171,7 @@ let updating = false;
 // half-rebased.
 export async function runUpdate(
   report: (s: UpdateStep) => void,
-  {
-    beforeRestart,
-    git = run,
-  }: { beforeRestart: () => Promise<void>; git?: Run },
+  { git = run }: { git?: Run } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (updating) return { ok: false, error: "An update is already running." };
   updating = true;
@@ -191,7 +188,6 @@ export async function runUpdate(
   try {
     const reason = await blocker(git);
     if (reason) throw new Error(reason);
-    await step("Stopping Claude's current move", beforeRestart);
     await step("Getting the new version", async () => {
       await git("git", ["checkout", "--", "package-lock.json"]);
       try {

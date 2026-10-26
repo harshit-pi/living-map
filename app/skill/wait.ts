@@ -44,16 +44,7 @@ async function main() {
         `http://127.0.0.1:${port}/api/inbox/wait?session=${session}&timeout=600`,
         { headers: { "x-lm-token": token } },
       );
-      const { text, off } = (await r.json()) as {
-        text?: string;
-        off?: boolean;
-      };
-      if (off) {
-        console.log(
-          "Living Map is not listening to this chat (the conversation layer is off). Do not start this again.",
-        );
-        return;
-      }
+      const { text } = (await r.json()) as { text?: string };
       if (text?.trim()) {
         console.log(`FROM YOUR LIVING MAP:\n${text}`);
         return;

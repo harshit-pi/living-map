@@ -8,7 +8,7 @@ Fixes <!-- #issue, or "No issue" -->
 
 ## How tested
 
-<!-- `npm run check`, what you tried in the app (Explore and Learn). Screenshots or a recording for UI. -->
+<!-- `npm run check`, what you tried on the map of a chat. Screenshots or a recording for UI. -->
 
 ## Risk
 

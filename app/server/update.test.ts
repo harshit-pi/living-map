@@ -85,7 +85,7 @@ test("a lockfile rewritten by npm install does not block the update", async () =
     ...CLEAN,
     "git status --porcelain": " M app/package-lock.json",
   });
-  const r = await runUpdate(() => {}, { beforeRestart: async () => {}, git });
+  const r = await runUpdate(() => {}, { git });
   assert.deepEqual(r, { ok: true });
   const reset = ran.indexOf("git checkout -- package-lock.json");
   assert.ok(
@@ -113,10 +113,7 @@ test("being offline means no update, not an error", async () => {
 test("an update pulls, installs and builds, reporting each step", async () => {
   const { git, ran } = fakeGit(CLEAN);
   const steps: UpdateStep[] = [];
-  const r = await runUpdate((s) => steps.push(s), {
-    beforeRestart: async () => {},
-    git,
-  });
+  const r = await runUpdate((s) => steps.push(s), { git });
   assert.deepEqual(r, { ok: true });
   assert.ok(
     ran.includes(
@@ -128,7 +125,6 @@ test("an update pulls, installs and builds, reporting each step", async () => {
   assert.deepEqual(
     steps.filter((s) => s.state === "done").map((s) => s.step),
     [
-      "Stopping Claude's current move",
       "Getting the new version",
       "Installing what it needs",
       "Building the app",
@@ -143,10 +139,7 @@ test("a pull that fails is rolled back and nothing is installed", async () => {
     "git pull": new Error("CONFLICT in app/web/App.tsx"),
   });
   const steps: UpdateStep[] = [];
-  const r = await runUpdate((s) => steps.push(s), {
-    beforeRestart: async () => {},
-    git,
-  });
+  const r = await runUpdate((s) => steps.push(s), { git });
   assert.equal(r.ok, false);
   assert.match(r.error ?? "", /CONFLICT/);
   assert.ok(

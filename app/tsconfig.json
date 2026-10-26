@@ -24,15 +24,8 @@
     "shared",
     "server",
     "eval",
-    "plugins",
-    "layer",
     "ledger",
     "skill",
     "vite.config.ts"
-  ],
-  "exclude": [
-    "server/legacy-server.mjs",
-    "server/core/legacy-lib.mjs",
-    "server/core/legacy.test.mjs"
   ]
 }

@@ -34,24 +34,6 @@ body {
 .react-flow__handle {
   opacity: 0;
 }
-.react-flow__controls button {
-  background: var(--color-surface);
-  border-color: var(--color-line);
-}
-@keyframes pop {
-  from {
-    transform: scale(0.94);
-    opacity: 0.3;
-  }
-  to {
-    transform: none;
-    opacity: 1;
-  }
-}
-.fresh {
-  animation: pop 0.4s ease-out;
-}
-
 /* Claude-style answers: serif body, calm spacing */
 .answer {
   font-family: ui-serif, Georgia, Cambria, serif;
@@ -133,73 +115,4 @@ body {
 }
 .answer-sm p:last-child {
   margin-bottom: 0;
-}
-/* working states */
-@keyframes slide {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(250%);
-  }
-}
-.working-bar {
-  position: relative;
-  overflow: hidden;
-  height: 2px;
-  background: var(--color-bubble);
-}
-.working-bar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 40%;
-  background: var(--color-primary);
-  animation: slide 1.2s ease-in-out infinite;
-}
-@keyframes shimmer {
-  from {
-    background-position: -300px 0;
-  }
-  to {
-    background-position: 300px 0;
-  }
-}
-.skeleton {
-  border-radius: 6px;
-  height: 10px;
-  background: linear-gradient(
-    90deg,
-    var(--color-panel) 25%,
-    var(--color-canvas) 50%,
-    var(--color-panel) 75%
-  );
-  background-size: 600px 100%;
-  animation: shimmer 1.4s linear infinite;
-}
-@keyframes ring {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0
-      color-mix(in srgb, var(--color-primary) 45%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 6px
-      color-mix(in srgb, var(--color-primary) 0%, transparent);
-  }
-}
-.is-working {
-  animation: ring 1.4s ease-in-out infinite;
-}
-@keyframes shake {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  25% {
-    transform: translateX(-4px);
-  }
-  75% {
-    transform: translateX(4px);
-  }
 }

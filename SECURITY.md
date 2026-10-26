@@ -3,8 +3,9 @@
 Living Map runs on your own machine:
 
 - The server listens on `127.0.0.1` only, so other machines cannot reach it.
-- Your maps are plain JSON files in `~/.living-map/maps/`.
-- The model is reached through your own Claude Code (`claude -p`), with your MCP servers and settings turned off for each call. It starts in `~/.living-map/workspace/` (or the folder you set with `LIVING_MAP_CWD`) and is given only read-only tools (Read, Glob, Grep) and web search: it cannot edit files or run commands.
+- Every API call needs a local token kept in `~/.living-map/token`, readable only by you, and a page from another site is refused even with it.
+- The map is kept in `~/.living-map/ledger.db` (readable only by you), since it quotes your chats.
+- The model is reached through your own Claude Code (`claude -p`), with your MCP servers and settings turned off for each call. Filing a chat's turns runs with no tools at all. A side chat gets only read-only tools (Read, Glob, Grep) in your project folder, with no web: it cannot edit files or run commands, and what it proposes for the map changes nothing until you apply it.
 
 ## Reporting a vulnerability
 

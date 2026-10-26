@@ -1,24 +1,27 @@
-// The HTTP surface: live events, actions, the maps list, the model's pickers,
-// and the built browser app.
+// The HTTP surface: live events, the map of your chat, linking a chat, its
+// inbox to the chat, the one-click update, and the built page.
 
 import express from "express";
 import path from "node:path";
 
-import type { ActionRequest, ProviderInfo } from "../shared/model.ts";
-import { act } from "./actions/index.ts";
-import { link, mapText } from "./actions/link.ts";
 import { authRoutes, type Auth } from "./auth.ts";
 import { STATIC_DIR } from "./config.ts";
-import type { Engine } from "./engine.ts";
 import type { Hub } from "./events.ts";
-import { listening } from "./flags.ts";
-import { heardInLedger, initLedger, ledgerServer } from "./ledger.ts";
-import { listMaps, readMap } from "./store.ts";
+import type { ModelProvider } from "./providers/types.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
-import { listen, unsentFor, wakesFor } from "../layer/view.ts";
+import { linkChat } from "../ledger/link.ts";
+import { unsentFor, wakesFor } from "../ledger/outbox.ts";
+import type { LedgerServer } from "../ledger/routes.ts";
 
-export function createApp(engine: Engine, hub: Hub, auth: Auth) {
-  initLedger(engine, hub);
+const sessionOf = (v: unknown) =>
+  typeof v === "string" ? v.slice(0, 100) : "";
+
+export function createApp(
+  provider: ModelProvider,
+  hub: Hub,
+  auth: Auth,
+  map: LedgerServer,
+) {
   const app = express();
   app.disable("x-powered-by");
   // before anything else: who may ask (see auth.ts)
@@ -47,21 +50,8 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
       Connection: "keep-alive",
     });
     res.flushHeaders();
-    hub.add(res, engine.snapshot());
+    hub.add(res, { type: "ping" });
     req.on("close", () => hub.remove(res));
-  });
-
-  app.post("/api/action", async (req, res) => {
-    try {
-      const r = await act(engine, (req.body ?? {}) as ActionRequest);
-      // an action that did not go through says so with the status too
-      res.status(r.error ? 400 : 200).json(r);
-    } catch (e) {
-      console.error("[action] failed:", e);
-      res
-        .status(500)
-        .json({ error: "Something went wrong on the server. Try again." });
-    }
   });
 
   // for the living-map skill: is the server up, and is it this app
@@ -70,11 +60,14 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
     res.json({ app: "living-map", ok: true });
   });
 
-  // open (or start) the map of one of your conversations, from that
-  // conversation (the living-map skill)
-  app.post("/api/link", async (req, res) => {
+  // follow one of your chats, from that chat (the living-map skill)
+  app.post("/api/link", (req, res) => {
     try {
-      const r = await link(engine, (req.body ?? {}) as Record<string, unknown>);
+      const r = linkChat(
+        provider,
+        map.ledger,
+        (req.body ?? {}) as Record<string, unknown>,
+      );
       // the page to open: signed in by a one-time link
       res
         .status(r.error ? 400 : 200)
@@ -87,102 +80,56 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
     }
   });
 
-  // a map as plain text, for a conversation to read back (the open one if
-  // no id is given)
+  // a chat's map as plain text, for a conversation to read back (?conv=<id>,
+  // else the one linked last)
   app.get("/api/outline", (req, res) => {
-    const id = typeof req.query.id === "string" ? req.query.id : "";
-    const current = engine.state.map;
-    const m = !id || id === current?.id ? current : readMap(id);
-    if (!m) {
-      res.status(404).type("text/plain").send("No such map.");
-      return;
-    }
-    res.type("text/plain").send(mapText(engine, m));
+    const text = map.outline(req.query.conv);
+    if (text === null)
+      res
+        .status(404)
+        .type("text/plain")
+        .send("No chat is linked to the map yet.");
+    else res.type("text/plain").send(text);
   });
 
-  // what your conversation has not heard from its maps (side chats, ticks,
-  // what you did on its views),
-  // asked by the living-map hook each time you write there; marked heard
+  // what your chat has not heard from its map, asked by the living-map hook
+  // each time you write there; marked heard
   app.post("/api/inbox", (req, res) => {
-    const id =
-      typeof req.body?.session === "string"
-        ? req.body.session.slice(0, 100)
-        : "";
-    if (!id || !listening()) {
-      res.json({ text: "" });
-      return;
-    }
-    const text = unsentFor(id);
-    // the rail's "for your chat" count drops now it is heard
-    if (text) {
-      engine.push();
-      heardInLedger(id);
-    }
+    const id = sessionOf(req.body?.session);
+    const text = id ? unsentFor(id) : "";
+    if (text) map.ledger.heard(id);
     res.json({ text });
   });
 
-  // The listener in your main chat (skill/wait.ts) waits here: answered as
-  // soon as the map has something it should hear now, else empty after
-  // `timeout` seconds (at most 25 minutes), and it asks again.
+  // The listener in your chat (skill/wait.ts) waits here: answered as soon
+  // as the map has something it should hear now, else empty after `timeout`
+  // seconds (at most 25 minutes), and it asks again.
   app.get("/api/inbox/wait", (req, res) => {
-    const id =
-      typeof req.query.session === "string"
-        ? req.query.session.slice(0, 100)
-        : "";
+    const id = sessionOf(req.query.session);
     const secs = Math.min(1500, Math.max(1, Number(req.query.timeout) || 600));
-    // the conversation layer is off: nothing will come, so the listener stops
-    if (!listening()) {
-      res.json({ text: "", off: true });
-      return;
-    }
     if (!id) {
       res.json({ text: "" });
       return;
     }
-    listen(id, 1);
-    engine.push();
     let over = false;
     const end = (text: string) => {
       if (over) return;
       over = true;
       clearInterval(tick);
       clearTimeout(limit);
-      listen(id, -1);
       if (!res.writableEnded) res.json({ text });
-      engine.push();
     };
     const tick = setInterval(() => {
       if (!wakesFor(id)) return;
       end(unsentFor(id));
-      heardInLedger(id);
+      map.ledger.heard(id);
     }, 1000);
     const limit = setTimeout(() => end(""), secs * 1000);
     // the listener went away (its chat stopped it): no longer waiting
     res.on("close", () => end(""));
   });
 
-  // the v3 map (app/ledger/), only while its flag is on (see flags.ts)
-  app.use("/api/ledger", (req, res, next) => {
-    void ledgerServer().then(
-      (l) => {
-        if (l) l.router(req, res, next);
-        else res.status(404).json({ error: "Not found." });
-      },
-      () =>
-        res
-          .status(500)
-          .json({ error: "Something went wrong on the server. Try again." }),
-    );
-  });
-
-  app.get("/api/maps", (_req, res) => {
-    res.json(listMaps(engine.state.map?.id ?? null));
-  });
-
-  app.get("/api/provider", (_req, res) => {
-    const { name, models, efforts } = engine.provider;
-    res.json({ name, models, efforts } satisfies ProviderInfo);
-  });
+  app.use("/api/ledger", map.router);
 
   // is a newer release out? (?refresh=1 asks GitHub again now)
   app.get("/api/update", async (req, res) => {
@@ -192,9 +139,7 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
   // pull, install, build, restart; progress goes to every tab as "update" events
   app.post("/api/update", (_req, res) => {
     res.json({ started: true });
-    void runUpdate((s) => hub.emit({ type: "update", ...s }), {
-      beforeRestart: () => engine.stop({ release: true }),
-    }).then((r) => {
+    void runUpdate((s) => hub.emit({ type: "update", ...s })).then((r) => {
       if (!r.ok)
         hub.emit({
           type: "update",
@@ -206,7 +151,7 @@ export function createApp(engine: Engine, hub: Hub, auth: Auth) {
   });
 
   app.use(express.static(STATIC_DIR));
-  // every other path is the app itself
+  // every other path is the page itself
   app.use((_req, res) => res.sendFile(path.join(STATIC_DIR, "index.html")));
   return app;
 }

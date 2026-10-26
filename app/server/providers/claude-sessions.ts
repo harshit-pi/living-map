@@ -1,7 +1,6 @@
 // Your Claude Code conversations, as Claude Code keeps them on disk: one JSONL
-// file per conversation under ~/.claude/projects/<folder for its cwd>/. A map
-// linked to one resumes it (forked, never written to) on every move, so the
-// model works the canvas knowing everything said there.
+// file per conversation under ~/.claude/projects/<folder for its cwd>/. The
+// map of a chat is found, and followed, from here.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -78,18 +77,6 @@ export function successor(file: string, id: string): string | null {
     }
   }
   return found.sort((a, b) => b.at - a.at)[0]?.f ?? null;
-}
-
-// changes whenever the conversation does: a process started on an older
-// version of it would answer without what was said since
-export function conversationStamp(file: string | undefined): string {
-  if (!file) return "";
-  try {
-    const s = fs.statSync(file);
-    return `${s.size}:${s.mtimeMs}`;
-  } catch {
-    return "";
-  }
 }
 
 // The cwd it started in (where `--resume` finds it) and a title: the
