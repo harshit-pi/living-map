@@ -24,7 +24,8 @@ export const TIPS: Record<TipId, string> = {
   task: "A task: ☐ still to do, ◐ Claude is on it, ✓ done.",
   question:
     "An open question. “Claude's to find out” means Claude owes the answer.",
-  option: "An option Claude offered. ● marks the one taken.",
+  option:
+    "An option Claude offered: ○ while it is offered, a green ◆ once it is taken.",
   assumption: "Something Claude assumed. Click it to confirm or strike it.",
   decision:
     "A decision, under the topic where it was made. Green ◆ is in force; amber ◆ was reopened.",

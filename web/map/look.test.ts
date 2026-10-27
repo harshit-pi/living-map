@@ -47,3 +47,14 @@ test("a settled topic is a soft fill of the same size; one in play keeps its box
   assert.match(settled, /\bbg-panel\b/);
   assert.doesNotMatch(lookOf(topic("active")).box, /transparent/);
 });
+
+test("a taken option wears the decided mark; an offered one stays open", () => {
+  const option = (state: string) => ({
+    ...ask(state, false),
+    type: "option" as const,
+  });
+  const decision = { ...ask("decided", false), type: "decision" as const };
+  assert.equal(lookOf(option("taken")).glyph, lookOf(decision).glyph);
+  assert.equal(lookOf(option("taken")).mark, lookOf(decision).mark);
+  assert.equal(lookOf(option("offered")).glyph, "○");
+});

@@ -103,6 +103,10 @@ export function Card({
   const look = lookOf(item);
   const acts = actionsOf(item);
   const linked = linkedTo([...byId.values()], item.id);
+  // the question an option answers, one click away
+  const question =
+    item.type === "option" && item.parent ? byId.get(item.parent) : undefined;
+  const forQuestion = question?.type === "question" ? question : null;
   const canAnswer = answerable(item) && sent !== "sent";
   // Claude owes this one: the card says so first, and your words are an
   // extra you open, not the next step
@@ -205,6 +209,18 @@ export function Card({
         </figure>
       )}
       <div className="mt-2 text-[11px] text-muted">{BASIS[item.basis]}</div>
+      {forQuestion && (
+        <div className="mt-2 text-[12px] text-muted">
+          for{" "}
+          <button
+            onClick={() => onPick(forQuestion.id)}
+            className="text-left text-body underline decoration-line-strong underline-offset-2 hover:text-ink"
+            data-content
+          >
+            {forQuestion.title}
+          </button>
+        </div>
+      )}
       {(item.links.length > 0 || linked.length > 0) && (
         <ul className="mt-2 space-y-0.5">
           {linked.map(({ rel, from }) => (
