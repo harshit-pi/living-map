@@ -7,6 +7,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import { Canvas } from "./Canvas.tsx";
 import { Card } from "./Card.tsx";
 import { Drawer } from "./Drawer.tsx";
 import {
+  holdView,
   layout,
   NARROW,
   NARROW_PANE,
@@ -488,6 +490,20 @@ function Screen({
     setFollowing(true);
     frameLeft(now.id, l);
   };
+  // New boxes land at the top of their group (newest first), pushing what is
+  // under them down: further down the map, the camera moves with them, so
+  // what you are looking at stays put while the rows above fill in. Only for
+  // items arriving: a fold, a pick or Now moves the camera on purpose.
+  const shown = useRef({ laid, mapped, folds });
+  useLayoutEffect(() => {
+    const prev = shown.current;
+    shown.current = { laid, mapped, folds };
+    if (prev.mapped === mapped || prev.folds !== folds || following) return;
+    const vp = rf.getViewport();
+    const dy = holdView(prev.laid, laid, -vp.y / vp.zoom, size);
+    if (dy) void rf.setViewport({ ...vp, y: vp.y - dy * vp.zoom });
+  }, [laid, mapped, folds, following, rf, size]);
+
   // following Now: the camera stays on that topic as the map grows, until
   // you move it yourself
   const nowId = now?.id ?? null;

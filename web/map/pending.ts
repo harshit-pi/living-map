@@ -43,7 +43,8 @@ export function pendingItem(v: LedgerView): LedgerItem | null {
     waiting: false,
     open: false,
     isNew: false,
-    // after every real key, which start with a letter
+    // after every real key, which start with a letter: the newest, so it
+    // sits first under its topic
     order: "~",
   };
 }

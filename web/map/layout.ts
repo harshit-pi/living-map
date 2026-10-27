@@ -1,10 +1,12 @@
 // The mind map's layout: a tree growing left to right from the chat's root.
 // A node's column is its depth; its row is the next free row when it is
 // reached in order, and a parent shares the row of its first child. Rows
-// are given out in tree order (siblings by their order key), so an item
-// appended under a parent takes the row after that parent's last row: every
-// node on an earlier row keeps its place, and the rows after it move down by
-// whole rows. No measuring and no graph layout library: positions follow
+// are given out in tree order, newest first (siblings by their order key,
+// highest first), so the latest topic and the latest item under each sit at
+// the top. A new item takes the first row under its parent: every node on
+// an earlier row keeps its place, and the rows from it on move down by whole
+// rows, which the camera makes up for while you look further down
+// (MapScreen). No measuring and no graph layout library: positions follow
 // from the items alone, so the same items always land in the same places.
 
 import type { LedgerItem } from "../../shared/ledger.ts";
@@ -46,7 +48,8 @@ export type Layout = {
 const byOrder = (a: LedgerItem, b: LedgerItem) =>
   a.order < b.order ? -1 : a.order > b.order ? 1 : a.id < b.id ? -1 : 1;
 
-// each item's children, sorted; an item whose parent is gone hangs off the root
+// each item's children, newest first; an item whose parent is gone hangs off
+// the root
 export function childrenMap(items: LedgerItem[]): Map<string, LedgerItem[]> {
   const ids = new Set(items.map((i) => i.id));
   const kids = new Map<string, LedgerItem[]>();
@@ -56,7 +59,7 @@ export function childrenMap(items: LedgerItem[]): Map<string, LedgerItem[]> {
     list.push(i);
     kids.set(p, list);
   }
-  for (const list of kids.values()) list.sort(byOrder);
+  for (const list of kids.values()) list.sort((a, b) => byOrder(b, a));
   return kids;
 }
 
@@ -112,4 +115,22 @@ export function moves(prev: Layout, next: Layout) {
     if (n) out.push({ id, dx: n.x - p.x, dy: n.y - p.y, prevY: p.y });
   }
   return out;
+}
+
+// How far to move the camera, in map px, when new items arrive, so the
+// first box at or below `top` (the map y at the top of the pane) stays where
+// it is on screen while the rows above it fill in. At the very top of the
+// map there is nothing to hold: the new boxes show where they land.
+export function holdView(
+  prev: Layout,
+  next: Layout,
+  top: number,
+  size: Size = WIDE,
+): number {
+  if (top < size.row / 2) return 0;
+  let held: Placed | null = null;
+  for (const p of prev.nodes.values())
+    if (p.y + size.h > top && next.nodes.has(p.id) && (!held || p.y < held.y))
+      held = p;
+  return held ? next.nodes.get(held.id)!.y - held.y : 0;
 }
