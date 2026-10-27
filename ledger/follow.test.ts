@@ -13,7 +13,7 @@ import { test } from "vitest";
 import { applyAction } from "./apply.ts";
 import { openDb, type Conv } from "./db.ts";
 import { SWEEP_SYSTEM } from "./extract.ts";
-import { backoff, createLedger, QUIET_MS } from "./follow.ts";
+import { backoff, createLedger } from "./follow.ts";
 import { emptyStore, type Item } from "./items.ts";
 import type {
   ExtractRequest,
@@ -161,7 +161,7 @@ function setup(
 
 // ---- sealing and triggers ---------------------------------------------------
 
-test("a turn seals after 5 s still, and one that asks runs at once", async () => {
+test("a turn seals after 2 s still, and runs at once", async () => {
   const c = chat();
   const t = setup();
   const root = t.link(c);
@@ -188,7 +188,7 @@ test("a turn seals after 5 s still, and one that asks runs at once", async () =>
   assert.ok(t.events.some((e) => e.type === "ledger" && e.view.read === 1));
 });
 
-test("a later prompt seals a turn; three sealed turns run, fewer wait for 20 s of quiet", async () => {
+test("a later prompt seals a turn; what is sealed runs at once, three turns at a time", async () => {
   const c = chat();
   const t = setup();
   const root = t.link(c);
@@ -196,27 +196,33 @@ test("a later prompt seals a turn; three sealed turns run, fewer wait for 20 s o
   c.turn("Now the tests", "Updated.");
   c.you("And the docs");
   await t.ledger.tick();
-  // two sealed by the prompts after them, nothing asked: they wait
-  assert.equal(t.calls.length, 0);
-  assert.equal(t.ledger.view(root)!.health.behind, 2);
-  c.claude("Docs too.");
-  c.turn("Last, the changelog", "Written.");
-  t.advance(1000);
-  await t.ledger.tick();
-  // turn 3 sealed by turn 4's prompt: three wait, so they run
+  // two sealed by the prompts after them: filed now, nothing asked or not
   assert.equal(t.calls.length, 1);
   assert.deepEqual(
     turnsOf(t.calls[0]!.message).map((x) => x.n),
-    [1, 2, 3],
+    [1, 2],
   );
-  // turn 4 seals once still for 5 s, then waits for 20 s of quiet
-  t.advance(6000);
-  await t.ledger.tick();
-  assert.equal(t.calls.length, 1);
-  t.advance(QUIET_MS);
+  assert.equal(t.ledger.view(root)!.health.behind, 0);
+  c.claude("Docs too.");
+  c.turn("Last, the changelog", "Written.");
+  c.turn("And a release note", "Noted.");
+  c.turn("Tag it", "Tagged.");
+  // turns 3, 4 and 5 sealed by the prompts after them: one batch of three
+  t.advance(1000);
   await t.ledger.tick();
   assert.equal(t.calls.length, 2);
-  assert.equal(t.ledger.view(root)!.read, 4);
+  assert.deepEqual(
+    turnsOf(t.calls[1]!.message).map((x) => x.n),
+    [3, 4, 5],
+  );
+  // turn 6 is still open until the file has been still for 2 s
+  t.advance(1000);
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 2);
+  t.advance(1500);
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 3);
+  assert.equal(t.ledger.view(root)!.read, 6);
 });
 
 test("a failure is tried again later and later, its error shown until one works", async () => {
@@ -648,14 +654,11 @@ test("the view says which turns are being filed, and how long after a turn seale
   assert.equal(after.filing, undefined);
   assert.deepEqual(after.lag, { turn: 1, ms: 3000, modelMs: 5 });
   assert.equal(after.behind, 0);
-  // the next turn: sealed by the prompt after it, then 20 s of quiet, then
-  // the run; the lag counts from the seal
+  // the next turn: sealed by the prompt after it and run in the same
+  // tick; the lag counts from the seal
   c.turn("Postgres.", "Done.");
   c.you("Now the tests");
   t.advance(1000);
-  await t.ledger.tick();
-  assert.equal(t.calls.length, 1);
-  t.advance(QUIET_MS);
   const next = t.ledger.tick();
   await until(() => t.calls.length === 2);
   assert.deepEqual(t.ledger.view(root)!.health.filing?.turns, [2]);
@@ -664,7 +667,7 @@ test("the view says which turns are being filed, and how long after a turn seale
   await next;
   assert.deepEqual(t.ledger.view(root)!.health.lag, {
     turn: 2,
-    ms: QUIET_MS + 2000,
+    ms: 2000,
     modelMs: 5,
   });
 });

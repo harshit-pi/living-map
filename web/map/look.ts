@@ -1,4 +1,5 @@
 import type { Lens } from "./lens.ts";
+import { PENDING } from "./pending.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 // How a box looks: every box is white with the same thin border, and one
@@ -18,6 +19,15 @@ const PLAIN = "border border-line bg-surface";
 const DONE = "text-muted";
 
 export function lookOf(i: LedgerItem): Look {
+  // turns on their way to the map: a dashed outline, nothing filed yet
+  if (i.id === PENDING)
+    return {
+      box: "border border-dashed border-line-strong bg-canvas",
+      title: "text-muted italic",
+      glyph: "◐",
+      mark: "text-primary",
+      tag: "the model is reading these turns",
+    };
   const dropped = i.state === "dropped" || i.state === "struck";
   if (dropped)
     return {

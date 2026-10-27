@@ -35,6 +35,7 @@ import {
   search,
   type Lens,
 } from "./lens.ts";
+import { pendingItem } from "./pending.ts";
 import { SearchBox } from "./SearchBox.tsx";
 import { mapItems, startFolds } from "./shown.ts";
 import { Chip, SideSheet } from "./SideSheet.tsx";
@@ -250,8 +251,12 @@ function Screen({
     [folds, byId],
   );
   // what the map draws: findings and settled decisions stay in the card
-  // and the list
-  const mapped = useMemo(() => mapItems(items), [items]);
+  // and the list; turns on their way get a placeholder box (pending.ts)
+  const mapped = useMemo(() => {
+    const m = mapItems(items);
+    const p = pendingItem(view);
+    return p ? [...m, p] : m;
+  }, [items, view]);
   const laid = useMemo(
     () => layout(mapped, folded, size),
     [mapped, folded, size],
