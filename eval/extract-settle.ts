@@ -9,7 +9,6 @@
 //   node eval/extract-settle.ts [<conv dir>...]   then: node eval/extract-score.ts
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { LABEL_SYSTEM, render } from "./extract-label.ts";
@@ -19,9 +18,12 @@ import {
   view,
   type Turn,
 } from "../ledger/transcript.ts";
+import { HOME } from "../server/config.ts";
 import { claudeCode } from "../server/providers/claude-code.ts";
 
-const home = path.join(os.homedir(), ".living-map");
+// $LIVING_MAP_HOME when set, like the server and the scorer, so two runs
+// can each keep their own folder
+const home = HOME;
 const ROOT = path.join(home, "eval", "extract");
 const provider = claudeCode({ home });
 
