@@ -123,6 +123,7 @@ export function Canvas({
         hasKids: item ? items.some((i) => i.parent === id) : true,
         // what a topic holds, folded or open
         counts: all.length ? countsText(countsOf(all)) : null,
+        live: all.some((i) => i.waiting || i.open),
         lensCount: isFolded && lit ? under.filter(lit).length : 0,
         lit: !!item && !!lit && lit(item),
         lens,

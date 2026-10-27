@@ -149,55 +149,64 @@ export function Strip({
   );
 }
 
-// Back after a while: arrows that step through what was filed since you
-// last looked.
-export function SinceBar({
+// Back after a while: a chip in the toolbar that steps through what was
+// filed since you last looked. It sits in the toolbar, not a bar of its own,
+// so the map doesn't move down when it appears, and it stays outlined: the
+// screen's one filled button belongs to whatever you opened.
+export function SinceChip({
   snap,
   at,
-  primary,
   onStep,
   onClose,
 }: {
   snap: Snap;
   at: number; // index of the item stepped to, -1 before the first step
-  primary: boolean; // the screen's one filled button is free
   onStep: (to: number) => void;
   onClose: () => void;
 }) {
   const n = snap.ids.length;
   const arrow =
-    "flex h-6 min-w-6 items-center justify-center rounded-md border border-line-strong px-1.5 text-[12px] text-body hover:bg-panel disabled:opacity-40";
+    "flex h-7 w-6 items-center justify-center text-[12px] text-primary-strong hover:bg-primary-soft disabled:opacity-40";
   return (
-    <div className="flex items-center justify-end gap-1 border-b border-primary-line bg-primary-soft px-3 py-1">
-      <button
-        className={arrow}
-        disabled={at <= 0}
-        onClick={() => onStep(at - 1)}
-        aria-label="Previous new item"
-      >
-        ‹
-      </button>
-      <span className="min-w-9 text-center text-[11px] text-primary-strong tabular-nums">
-        {at < 0 ? `${n} new` : `${at + 1}/${n}`}
-      </span>
-      <button
-        data-primary={primary || undefined}
-        className={
-          primary
-            ? "flex h-6 items-center justify-center rounded-md bg-primary px-2 text-[12px] font-medium text-on-primary hover:bg-primary-strong disabled:opacity-40"
-            : arrow
-        }
-        disabled={at >= n - 1}
-        onClick={() => onStep(at + 1)}
-        aria-label="Next new item"
-      >
-        {at < 0 ? "Show ›" : "›"}
-      </button>
+    <div className="flex h-7 shrink-0 items-center overflow-hidden rounded-lg border border-primary-line text-[12px]">
+      {at < 0 ? (
+        <button
+          onClick={() => onStep(0)}
+          aria-label="Next new item"
+          title="Go to each item filed since you last looked"
+          className="flex h-7 items-center gap-1.5 pr-1 pl-2 text-primary-strong hover:bg-primary-soft"
+        >
+          <span aria-hidden className="h-2 w-2 rounded-full bg-primary" />
+          {n} new ›
+        </button>
+      ) : (
+        <>
+          <button
+            className={arrow}
+            disabled={at <= 0}
+            onClick={() => onStep(at - 1)}
+            aria-label="Previous new item"
+          >
+            ‹
+          </button>
+          <span className="min-w-8 text-center text-[11px] text-primary-strong tabular-nums">
+            {at + 1}/{n} new
+          </span>
+          <button
+            className={arrow}
+            disabled={at >= n - 1}
+            onClick={() => onStep(at + 1)}
+            aria-label="Next new item"
+          >
+            ›
+          </button>
+        </>
+      )}
       <button
         onClick={onClose}
         aria-label="Close"
         title="Done looking"
-        className="ml-1 shrink-0 px-1 text-[14px] leading-none text-primary-strong"
+        className="flex h-7 w-6 items-center justify-center border-l border-primary-line text-[13px] leading-none text-primary-strong hover:bg-primary-soft"
       >
         ×
       </button>
