@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/73b3762c-e3b1-4c2b-9492-965592b0af54
 Long Claude Code sessions bury the things you need to act on. Living Map reads your chat as it grows and keeps it as one mind map in a page beside it:
 
 - **It follows by itself.** Type `/living-map` once in a chat. A few seconds after each turn, the map files what was new: questions waiting on you, tasks Claude is on, decisions made, what changed in your code. You never tell it what happened.
-- **Lenses** show what matters now: **Waiting** (on you), **Open**, **Decided** and **Changed**, with a strip that steps through them. Settled topics fold away; findings and settled decisions sit in the list.
+- **Lenses** show what matters now: **Waiting** (on you), **Open**, **Decided** and **Changed**, with a strip that steps through them. Settled topics fold away; each decision sits under the topic where it was made, and findings sit in the list.
 - **Answer from the map.** Answer a question, pick an option or tick a task on the map, and it reaches your chat at once.
 - **Side chats** on any item: a read-only Claude that has read the map and the chat, can read your project, and proposes changes to the map you apply with one click.
 - An empty chat starts as an empty map that fills in as you talk. A chat you link partway through is read from its start, or from its newest 40 turns if it is longer.

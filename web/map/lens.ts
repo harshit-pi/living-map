@@ -114,25 +114,33 @@ export function descendants(items: LedgerItem[], id: string): LedgerItem[] {
   return out;
 }
 
-export type Counts = { waiting: number; open: number; settled: number };
+export type Counts = {
+  waiting: number;
+  open: number;
+  decided: number; // decisions in force and options taken, apart from settled
+  settled: number;
+};
 
 export function countsOf(under: LedgerItem[]): Counts {
   let waiting = 0;
   let open = 0;
+  let decided = 0;
   let settled = 0;
   for (const i of under) {
     if (i.waiting) waiting++;
     else if (i.open) open++;
+    else if (isDecided(i)) decided++;
     else settled++;
   }
-  return { waiting, open, settled };
+  return { waiting, open, decided, settled };
 }
 
-// "2 waiting · 1 open · 5 settled", leaving out the zeros
+// "2 waiting · 1 open · 1 decided · 5 settled", leaving out the zeros
 export function countsText(c: Counts): string {
   const parts: string[] = [];
   if (c.waiting) parts.push(`${c.waiting} waiting`);
   if (c.open) parts.push(`${c.open} open`);
+  if (c.decided) parts.push(`${c.decided} decided`);
   if (c.settled) parts.push(`${c.settled} settled`);
   return parts.join(" · ") || "empty";
 }

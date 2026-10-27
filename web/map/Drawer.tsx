@@ -44,7 +44,7 @@ export function Drawer({
   items: LedgerItem[];
   changes: ChangeStatement[];
   changesFirst: boolean;
-  // a group to show on top (the Decided lens opens the list there)
+  // a group to show on top (the Decided lens puts its group there)
   first?: string | null;
   selected: string | null;
   newIds: Set<string>; // marked new, as on the map

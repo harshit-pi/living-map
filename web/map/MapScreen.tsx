@@ -250,8 +250,8 @@ function Screen({
     (id: string) => folds[id] ?? !!byId.get(id)?.folded,
     [folds, byId],
   );
-  // what the map draws: findings and settled decisions stay in the card
-  // and the list; turns on their way get a placeholder box (pending.ts)
+  // what the map draws: findings stay in the card and the list; turns on
+  // their way get a placeholder box (pending.ts)
   const mapped = useMemo(() => {
     const m = mapItems(items);
     const p = pendingItem(view);
@@ -282,8 +282,7 @@ function Screen({
       const ids = new Set(search(items, query).map((i) => i.id));
       return (i) => ids.has(i.id);
     }
-    // decided items are off the map: that lens shows them in the list
-    return lens && lens !== "decided" ? litBy(lens, items, changed) : null;
+    return lens ? litBy(lens, items, changed) : null;
   }, [searching, query, items, lens, changed]);
   const marked = useMemo(
     () => new Set([...(snap?.ids ?? []), ...newIds(view)]),
@@ -301,7 +300,7 @@ function Screen({
   const otherSides = view.sides.filter((x) => x.id !== side?.id);
   // what the lens lights up, in map order, for its stepper
   const lensIds = useMemo(() => {
-    if (!lens || lens === "decided") return [];
+    if (!lens) return [];
     const m = matcher(lens, changed);
     return order.filter((id) => {
       const i = byId.get(id);
@@ -449,6 +448,37 @@ function Screen({
     const next = !folded(id);
     setFolds((f) => ({ ...f, [id]: next }));
     void run({ type: "fold", item: id, folded: next });
+  };
+
+  // every topic that holds boxes, for Fold all and Unfold all
+  const foldable = useMemo(
+    () =>
+      mapped
+        .filter(
+          (i) => i.type === "topic" && mapped.some((c) => c.parent === i.id),
+        )
+        .map((i) => i.id),
+    [mapped],
+  );
+  const allFolded = foldable.length > 0 && foldable.every(folded);
+  const foldAll = () => {
+    const to = !allFolded;
+    const next = { ...folds };
+    for (const id of foldable) {
+      if (folded(id) === to) continue;
+      next[id] = to;
+      void run({ type: "fold", item: id, folded: to });
+    }
+    setFolds(next);
+    setFollowing(false);
+    if (!to) return;
+    // a box folded away takes its card with it, and the camera goes back
+    // to the start of the map, where every topic is now one line
+    setSelected(null);
+    frameLeft(
+      ROOT,
+      layout(mapped, (x) => next[x] ?? !!byId.get(x)?.folded, size),
+    );
   };
 
   const goNow = () => {
@@ -644,14 +674,17 @@ function Screen({
           if (l === "changed" && view.changes.length) {
             setChangesFirst(true);
           }
-          // the decisions in force live in the list, not on the map
+          // the lens lights decisions on the map like any other; the list,
+          // if it is open, shows them on top too
           if (l === "decided") {
             setChangesFirst(false);
             setListFirst("decided");
-            setDrawer(true);
           } else if (lens === "decided") setListFirst(null);
         }}
         onSearch={() => setSearching(true)}
+        onFoldAll={foldAll}
+        allFolded={allFolded}
+        canFold={foldable.length > 0}
         onNow={goNow}
         onList={() => {
           setChangesFirst(false);

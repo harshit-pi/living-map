@@ -14,6 +14,7 @@ import { ROOT, type Layout, type Size } from "./layout.ts";
 import { countsOf, countsText, descendants, type Lens } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import { ItemNode, type ItemData } from "./nodes.tsx";
+import { trailOf } from "./shown.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 const nodeTypes = { item: ItemNode };
@@ -85,6 +86,8 @@ export function Canvas({
   onMoveEnd: (v: Viewport) => void;
 }) {
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  // the picked item and its topics above it, coloured with the line between
+  const trail = useMemo(() => trailOf(items, selected), [items, selected]);
   // Where lines meet a box, given rather than measured: React Flow forgets
   // its measurements whenever the nodes change, and draws no line until it
   // has measured again, which never happens while the pane is hidden.
@@ -137,6 +140,7 @@ export function Canvas({
               (item.type === "topic" && descendants(items, id).some(lit))
             )),
         selected: selected === id,
+        trail: selected !== id && trail.has(id),
         isNew: newIds.has(id),
         now: id === now,
         size,
@@ -171,6 +175,7 @@ export function Canvas({
     lit,
     lens,
     selected,
+    trail,
     newIds,
     size,
     now,
@@ -187,11 +192,13 @@ export function Canvas({
       target: e.to,
       type: "branch",
       data: { gap: size.col - size.w },
-      style: {
-        stroke: LINE,
-        strokeWidth: 1,
-        opacity: dimmed.has(e.to) ? 0.3 : 1,
-      },
+      style: trail.has(e.to)
+        ? { stroke: "var(--color-primary)", strokeWidth: 2 }
+        : {
+            stroke: LINE,
+            strokeWidth: 1,
+            opacity: dimmed.has(e.to) ? 0.3 : 1,
+          },
     }));
     const links = laid.links.map((l): Edge => ({
       id: `${l.from}~${l.to}`,
@@ -209,7 +216,7 @@ export function Canvas({
       },
     }));
     return [...tree, ...links];
-  }, [laid, nodes, size]);
+  }, [laid, nodes, size, trail]);
 
   return (
     <ReactFlow
