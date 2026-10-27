@@ -4,8 +4,9 @@ import type { LedgerItem } from "../../shared/ledger.ts";
 
 // How a box looks: every box is white with the same thin border, and one
 // colour means something: amber, for what waits on you. Everything else says
-// its state with a small glyph (a green ◆ for decided, a green ● for an
-// option taken, a ✓ for a task or ask that is done) and grey text once it
+// its state with a small glyph (a green ◆ for decided, an option taken
+// included, since taking one is how it was decided; a ✓ for a task or ask
+// that is done) and grey text once it
 // is done, settled or dropped. A settled topic is a faint grey fill with no
 // border (the node gives it a box back while something inside still waits
 // or is open), so the topics still in play are the boxes you see first, and
@@ -83,7 +84,7 @@ export function lookOf(i: LedgerItem): Look {
         ? {
             box: PLAIN,
             title: "text-ink",
-            glyph: "●",
+            glyph: "◆",
             mark: "text-success",
             tag: "taken",
           }

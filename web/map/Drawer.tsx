@@ -136,6 +136,12 @@ export function Drawer({
         {g.items.map((i) => {
           const look = lookOf(i);
           const topic = topicOf(items, i.id);
+          // an option says which question it answers; anything else, its topic
+          const question =
+            i.type === "option"
+              ? items.find((q) => q.id === i.parent && q.type === "question")
+              : undefined;
+          const under = question ? `for: ${question.title}` : topic?.title;
           return (
             <li key={i.id}>
               <button
@@ -155,12 +161,13 @@ export function Drawer({
                   >
                     {i.title}
                   </span>
-                  {topic && (
+                  {under && (
                     <span
                       data-content
                       className="block truncate text-[11px] text-muted"
+                      title={question && topic ? topic.title : undefined}
                     >
-                      {topic.title}
+                      {under}
                     </span>
                   )}
                 </span>
