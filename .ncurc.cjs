@@ -11,7 +11,9 @@ module.exports = {
   enginesNode: true,
   format: ["group"],
   // Doctor mode installs everything, runs these checks, and when they fail
-  // retries one package at a time and reverts the ones that break.
-  doctorInstall: "npm install",
+  // retries one package at a time and reverts the ones that break. The
+  // install keeps the same week's cooldown for what the new ranges resolve
+  // to, direct and transitive.
+  doctorInstall: "npm install --min-release-age=7",
   doctorTest: "npm run upgrade:test",
 };
