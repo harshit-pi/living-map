@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { applyLocal, fixtureView, keyAt } from "./fixture.ts";
 import {
+  holdView,
   layout,
   moves,
   NARROW,
@@ -58,7 +59,7 @@ function rng(seed: number) {
 const { col: COL, row: ROW } = WIDE;
 
 describe("layout", () => {
-  it("grows left to right, a parent on its first child's row", () => {
+  it("grows left to right, newest first, a parent on its first child's row", () => {
     const l = layout([
       item("t1", null, "a1"),
       item("a", "t1", "a1"),
@@ -67,21 +68,21 @@ describe("layout", () => {
     ]);
     const at = (id: string) => l.nodes.get(id)!;
     expect(at(ROOT)).toMatchObject({ x: 0, y: 0 });
-    expect(at("t1")).toMatchObject({ x: COL, y: 0 });
-    expect(at("a")).toMatchObject({ x: 2 * COL, y: 0 });
+    expect(at("t2")).toMatchObject({ x: COL, y: 0 });
+    expect(at("t1")).toMatchObject({ x: COL, y: ROW });
     expect(at("b")).toMatchObject({ x: 2 * COL, y: ROW });
-    expect(at("t2")).toMatchObject({ x: COL, y: 2 * ROW });
+    expect(at("a")).toMatchObject({ x: 2 * COL, y: 2 * ROW });
     expect(l.rows).toBe(3);
     expect(l.edges).toContainEqual({ from: "t1", to: "b" });
   });
 
-  it("sorts siblings by order key, not by the order items arrive", () => {
+  it("sorts siblings by order key, newest first, not by the order items arrive", () => {
     const l = layout([
       item("t1", null, "a1"),
-      item("late", "t1", "a3"),
       item("early", "t1", "a2"),
+      item("late", "t1", "a3"),
     ]);
-    expect(l.nodes.get("early")!.y).toBeLessThan(l.nodes.get("late")!.y);
+    expect(l.nodes.get("late")!.y).toBeLessThan(l.nodes.get("early")!.y);
   });
 
   it("collapses a folded topic's rows", () => {
@@ -91,9 +92,9 @@ describe("layout", () => {
       item("b", "t1", "a2"),
       item("t2", null, "a2"),
     ];
-    const l = layout(items, (id) => id === "t1");
+    const l = layout(items, (id) => id === "t2" || id === "t1");
     expect(l.nodes.has("a")).toBe(false);
-    expect(l.nodes.get("t2")!.y).toBe(ROW);
+    expect(l.nodes.get("t1")!.y).toBe(ROW);
   });
 
   it("hangs an item whose parent is gone off the root, and survives a loop", () => {
@@ -128,8 +129,8 @@ describe("layout", () => {
     });
   });
 
-  // The rule: an appended item never moves a node on an earlier row, and
-  // moves the ones after it only by whole rows. Checked at every step of a
+  // The rule: a new item never moves a node on an earlier row, and moves the
+  // ones after it only by whole rows, which the camera can make up for. Checked at every step of a
   // 300-step growth with topics, nesting and folded topics, in both sizes.
   it.each([
     ["wide", WIDE],
@@ -306,5 +307,35 @@ describe("since you looked", () => {
     const never = { ...v, lookedTurn: 0 };
     expect(newIds(never).size).toBe(0);
     expect(snapOf(never, order)).toBeNull();
+  });
+});
+
+describe("holding the view", () => {
+  const before = [
+    item("t1", null, "a1"),
+    item("a", "t1", "a1"),
+    item("b", "t1", "a2"),
+    item("t2", null, "a2"),
+    item("c", "t2", "a1"),
+  ];
+  const after = [...before, item("t3", null, "a3"), item("d", "t2", "a2")];
+
+  it("moves the camera by what the box in view moved, so it stays put", () => {
+    const prev = layout(before);
+    const next = layout(after);
+    // looking at t1, two rows down: t3 lands above it and d above c
+    const top = prev.nodes.get("t1")!.y;
+    const dy = holdView(prev, next, top);
+    expect(dy).toBe(next.nodes.get("t1")!.y - prev.nodes.get("t1")!.y);
+    expect(dy).toBe(2 * ROW);
+  });
+
+  it("holds nothing at the top of the map, so new boxes show as they land", () => {
+    expect(holdView(layout(before), layout(after), 0)).toBe(0);
+  });
+
+  it("holds nothing when nothing in view moved", () => {
+    const l = layout(before);
+    expect(holdView(l, l, 2 * ROW)).toBe(0);
   });
 });

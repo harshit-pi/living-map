@@ -47,7 +47,7 @@ test("a run under way names its turns; otherwise what is behind, from the read p
   assert.deepEqual(pendingTurns(view({ following: true, behind: 0 })), []);
 });
 
-test("the box hangs under the topic the chat is on, sorts last, and is drawn only", () => {
+test("the box hangs under the topic the chat is on, sorts newest, and is drawn only", () => {
   const p = pendingItem(view({ following: true, behind: 1 }))!;
   assert.equal(p.id, PENDING);
   assert.equal(p.title, "Filing turn 11…");
