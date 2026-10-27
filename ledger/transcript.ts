@@ -33,7 +33,7 @@ type Raw = any;
 
 // a turn the file says Claude finished is sealed once nothing has been
 // written for this long (the next prompt seals it at once)
-export const SEAL_IDLE_MS = 5000;
+export const SEAL_IDLE_MS = 2000;
 
 const CHUNK = 1 << 20;
 

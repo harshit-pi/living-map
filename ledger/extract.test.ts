@@ -409,3 +409,59 @@ test("the sweep checks what waits on you and has gone quiet, against the turns s
   assert.equal(s.items.get("i2")!.state, "answered");
   assert.deepEqual(quiet(s), []);
 });
+
+test("links land only between live items, through refs, never to the item itself", () => {
+  const s = first();
+  const a: Answer = {
+    topics: [{ turn: 2, topic: "i1" }],
+    ops: [
+      {
+        op: "create",
+        ref: "new1",
+        type: "task",
+        title: "Add the peering routes",
+        quote: "add the peering routes",
+        turn: 2,
+        parent: "i1",
+        owner: "claude",
+        links: [
+          { rel: "blocks", to: "new1" }, // itself
+          { rel: "answers", to: "i99" }, // no such item
+          { rel: "answers", to: "i2" },
+        ],
+      },
+      {
+        op: "update",
+        item: "i2",
+        state: "answered",
+        quote: "Go with VPC peering",
+        turn: 2,
+        links: [
+          { rel: "blocks", to: "new1" },
+          { rel: "blocks", to: "new1" }, // once
+          { rel: "nope" as "blocks", to: "new1" }, // not a rel we know
+        ],
+      },
+      {
+        op: "create",
+        ref: "new2",
+        type: "decision",
+        title: "Clusters talk over VPC peering",
+        body: "No overlay to run.",
+        quote: "Go with VPC peering",
+        turn: 2,
+        parent: "i1",
+        links: [{ rel: "answers", to: "i2" }],
+      },
+    ],
+  };
+  const r = apply(s, a, [T2]);
+  assert.deepEqual(r.rejected, []);
+  assert.deepEqual(s.items.get("i5")!.links, [{ rel: "answers", to: "i2" }]);
+  assert.deepEqual(s.items.get("i2")!.links, [{ rel: "blocks", to: "i5" }]);
+  assert.deepEqual(s.items.get("i6")!.links, [{ rel: "answers", to: "i2" }]);
+  assert.equal(s.items.get("i6")!.body, "No overlay to run.");
+  // the map the model reads next carries them
+  assert.match(message(s, []), /%% i2 blocks i5/);
+  assert.match(message(s, []), /%% i6 answers i2/);
+});

@@ -12,6 +12,7 @@ import type { ModelProvider } from "./providers/types.ts";
 import { checkForUpdate, runUpdate } from "./update.ts";
 import { linkChat } from "../ledger/link.ts";
 import { unsentFor, wakesFor } from "../ledger/outbox.ts";
+import { outlineLens } from "../ledger/outline.ts";
 import type { LedgerServer } from "../ledger/routes.ts";
 
 const sessionOf = (v: unknown) =>
@@ -86,9 +87,9 @@ export function createApp(
   });
 
   // a chat's map as plain text, for a conversation to read back (?conv=<id>,
-  // else the one linked last)
+  // else the one linked last; ?lens=waiting|open|decided for one section)
   app.get("/api/outline", (req, res) => {
-    const text = map.outline(req.query.conv);
+    const text = map.outline(req.query.conv, outlineLens(req.query.lens));
     if (text === null)
       res
         .status(404)

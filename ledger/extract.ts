@@ -41,6 +41,8 @@ Rules:
 - A task owned by the user is done when the user says they did it ("merged", "deployed", "logged in", "sent") or a later turn shows it happened.
 - An optional offer ("if you want, I can…", "tell me if you'd rather…", "say so and I'll…") is an ask only while the user hasn't replied: if the user's next message doesn't take it up, mark it dropped. This is only for optional offers: an approval Claude needs before it can go on (send this message, run this migration, spend this money) or a handoff stays waiting until the user answers or does it. A reminder or precondition ("your login must still be active at 7:15") is a finding, not an ask.
 - When the user merges, approves, or says "ok" / "go ahead" after a reply, every ask and question in that reply with a default Claude stated is settled. When Claude restates an earlier ask in new words, update the old item instead of filing a new one. A finding only when later work depends on it: most turns have none.
+- A decision's "body" says why it was taken, in one line, when the conversation gives a reason: someone coming back needs the reason as much as the call.
+- "links" ties an item to another when the conversation shows it, and only then: {"rel": "blocks", "to": <id or ref>} on a question or ask whose answer work is waiting for (what it holds up is the "to"); {"rel": "answers", "to": <id>} on a decision or option that settles a question. Most items have none.
 - Every create needs "quote": words copied exactly from the turn named in "turn" (at most 25 words). An update that changes state should quote the turn that shows it.
 - "turn" is always one of the NEW TURNS. Name new items "new1", "new2", ...; you may use those refs as parents later in the same answer.
 - A non-topic item's parent is the item it belongs under (an option under its question, a finding under the option it is about), or its topic.
@@ -49,6 +51,11 @@ Rules:
 - Never invent: if the turns don't show it, don't file it.`;
 
 const OPS = ["create", "update", "retire"] as const;
+// how one item may point at another: what a wait holds up, what settled a
+// question. Few and fixed, so the page can draw and count them.
+export const LINK_RELS = ["blocks", "answers"] as const;
+export type LinkRel = (typeof LINK_RELS)[number];
+const MAX_LINKS = 6;
 
 export const SCHEMA = {
   type: "object",
@@ -87,6 +94,18 @@ export const SCHEMA = {
           owner: { type: "string", enum: ["you", "claude"] },
           state: { type: "string" },
           reason: { type: "string" },
+          links: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["rel", "to"],
+              properties: {
+                rel: { type: "string", enum: LINK_RELS },
+                to: { type: "string" },
+              },
+            },
+          },
         },
       },
     },
@@ -106,6 +125,7 @@ export type Op = {
   owner?: "you" | "claude";
   state?: string;
   reason?: string;
+  links?: { rel: LinkRel; to: string }[];
 };
 export type Answer = { topics: { turn: number; topic: string }[]; ops: Op[] };
 
@@ -273,6 +293,18 @@ export function apply(
     );
   };
   const reject = (op: Op, why: string) => rejected.push({ op, why });
+  // the links an op names that point at a live item other than its own,
+  // added to the ones it has; a bad one is left out, the op still lands
+  const link = (item: Item, op: Op) => {
+    for (const l of op.links ?? []) {
+      const to = resolve(l.to);
+      if (!LINK_RELS.includes(l.rel) || !to || to === item.id || !exists(to))
+        continue;
+      if (item.links.some((h) => h.rel === l.rel && h.to === to)) continue;
+      if (item.links.length >= MAX_LINKS) break;
+      item.links.push({ rel: l.rel, to });
+    }
+  };
 
   // A create the model gave no ref is still named by its place among the
   // creates (new1, new2, ...): models refer to them that way when they
@@ -358,6 +390,7 @@ export function apply(
         },
       };
       s.items.set(id, item);
+      link(item, op);
       applied.push(op);
       continue;
     }
@@ -394,6 +427,7 @@ export function apply(
     const p = resolve(op.parent);
     if (p && p !== item.id && exists(p) && can("parent")) item.parent = p;
     if (!item.src.includes(op.turn)) item.src.push(op.turn);
+    link(item, op);
     applied.push(op);
   }
 

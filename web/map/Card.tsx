@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { linkedTo, REVERSE } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import type { ActResult } from "./useLedger.ts";
 import type {
@@ -100,6 +101,7 @@ export function Card({
   const [removing, setRemoving] = useState(false);
   const look = lookOf(item);
   const acts = actionsOf(item);
+  const linked = linkedTo([...byId.values()], item.id);
   const canAnswer = answerable(item) && sent !== "sent";
   const owner =
     item.owner === "you" ? "Yours" : item.owner === "claude" ? "Claude's" : "";
@@ -181,8 +183,20 @@ export function Card({
         </figure>
       )}
       <div className="mt-2 text-[11px] text-muted">{BASIS[item.basis]}</div>
-      {item.links.length > 0 && (
+      {(item.links.length > 0 || linked.length > 0) && (
         <ul className="mt-2 space-y-0.5">
+          {linked.map(({ rel, from }) => (
+            <li key={`${rel}<${from.id}`} className="text-[12px] text-muted">
+              {REVERSE[rel] ?? `${rel} by`}{" "}
+              <button
+                onClick={() => onPick(from.id)}
+                className="text-left text-body underline decoration-line-strong underline-offset-2 hover:text-ink"
+                data-content
+              >
+                {from.title}
+              </button>
+            </li>
+          ))}
           {item.links.map((l) => {
             const to = byId.get(l.to);
             const change = changes.find((c) => c.id === l.to);

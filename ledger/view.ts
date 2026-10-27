@@ -17,6 +17,8 @@ export type Facts = {
   following: boolean;
   error?: string;
   reading?: { done: number; total: number };
+  filing?: LedgerView["health"]["filing"];
+  lag?: LedgerView["health"]["lag"];
   spend: LedgerView["spend"];
   changes?: ChangeStatement[];
   told?: Map<string, { at: number; heard: boolean }>;
@@ -109,6 +111,8 @@ export function buildView(s: State, f: Facts): LedgerView {
       behind: f.behind,
       ...(f.error ? { error: f.error } : {}),
       ...(f.reading ? { reading: f.reading } : {}),
+      ...(f.filing ? { filing: f.filing } : {}),
+      ...(f.lag ? { lag: f.lag } : {}),
     },
   };
 }

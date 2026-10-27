@@ -78,6 +78,11 @@ export type LedgerView = {
     behind: number; // sealed turns not yet filed
     error?: string; // the last extraction's failure, when the next hasn't succeeded
     reading?: { done: number; total: number }; // a long chat linked late
+    // a run under way: which turns, since when
+    filing?: { turns: number[]; since: number };
+    // the last run: how long after its newest turn sealed it was filed, and
+    // how much of that the model took
+    lag?: { turn: number; ms: number; modelMs: number };
   };
 };
 

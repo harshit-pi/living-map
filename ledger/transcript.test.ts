@@ -344,7 +344,7 @@ test("slash commands count when Claude acts on them, not when run locally", () =
   assert.equal(t.byId.get("r1")?.kind, "meta");
 });
 
-test("a turn is sealed by a later prompt, or by end_turn and 5 s of quiet", () => {
+test("a turn is sealed by a later prompt, or by end_turn and 2 s of quiet", () => {
   const one = [typed("p1", null, "q1"), claude("c1", "p1", "a1")];
   const t1 = read(one);
   assert.equal(view(t1, SEAL_IDLE_MS - 1).sealed, 0);
