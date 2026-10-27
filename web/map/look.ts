@@ -6,7 +6,7 @@ import type { LedgerItem } from "../../shared/ledger.ts";
 // colour means something: amber, for what waits on you. Everything else says
 // its state with a small glyph (a green ◆ for decided, a green ● for an
 // option taken, a ✓ for a task or ask that is done) and grey text once it
-// is done, settled or dropped. A settled topic is a soft grey fill with no
+// is done, settled or dropped. A settled topic is a faint grey fill with no
 // border (the node gives it a box back while something inside still waits
 // or is open), so the topics still in play are the boxes you see first, and
 // lines still meet a shape at both ends.
@@ -54,7 +54,7 @@ export function lookOf(i: LedgerItem): Look {
         // the border stays, transparent, so a settled box keeps its size
         box:
           i.state === "done"
-            ? "border border-transparent bg-panel hover:border-line"
+            ? "border border-transparent bg-panel/50 hover:border-line"
             : PLAIN,
         title:
           i.state === "done" ? `font-medium ${DONE}` : "font-semibold text-ink",
