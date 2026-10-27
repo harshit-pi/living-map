@@ -17,6 +17,9 @@ npm start              # build, then serve http://localhost:4317 under server/la
 npm run dev            # server with --watch, plus Vite on :5173 (?fixture=1 draws a fixture map, no server)
 npm run check          # ESLint, tsc, Prettier, Vitest: the same as the pre-commit hook
 npm test               # Vitest only
+npm run upgrade:check  # list dependency upgrades .ncurc.cjs allows (week-old releases, peer- and engine-compatible)
+npm run upgrade        # minor and patch upgrades; npm-check-updates doctor reverts any that fail upgrade:test (rewrites package.json and the lockfile; only when asked)
+npm run upgrade:latest # the same, majors included (only when asked)
 npm run skill          # install the living-map skill into ~/.claude/skills (writes outside the repo; only when asked)
 npm run skill -- --hook  # also add its UserPromptSubmit hook to ~/.claude/settings.json (only when asked)
 node eval/read-format.ts             # can models read mermaid+ as well as one line per item (calls the model, ~$0.50; only when asked)

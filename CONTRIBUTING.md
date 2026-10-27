@@ -48,6 +48,24 @@ The same checks run in the pre-commit hook and in CI. Please don't bypass the ho
 - Changing what Claude is asked to do (the extractor's prompt in `ledger/extract.ts`, a side chat's in `ledger/sides.ts`)? Describe what you tried and what changed in the PR. `node eval/extract-run.ts` runs the extractor over your own chats offline and `node eval/extract-score.ts` scores it; they call the model and cost real money.
 - Keep changes focused: one fix or feature per pull request.
 
+## Updating dependencies
+
+Dependabot opens a grouped pull request every week. To upgrade by hand instead:
+
+```bash
+npm run upgrade:check   # what can be upgraded, changes nothing
+npm run upgrade         # minor and patch versions
+npm run upgrade:latest  # major versions too
+```
+
+These use [npm-check-updates](https://github.com/raineorshine/npm-check-updates) with the settings in `.ncurc.cjs`:
+
+- They skip any version less than 7 days old, since a bad release is usually caught and pulled within days.
+- They hold back a version that another package's peer range doesn't accept yet, so `npm ci` keeps working.
+- They skip any version that drops a Node release this project supports (`engines` in `package.json`).
+
+`upgrade` and `upgrade:latest` first run `npm run upgrade:test` (the full checks, then the build) to make sure everything passes. Then they upgrade everything and run it again. If something fails, they retry one package at a time and revert only the ones that break. The packages that failed are listed with ✗ and their errors. Put the upgrade in its own pull request, with nothing else in it.
+
 ## Conventions
 
 The full list is in [AGENTS.md](AGENTS.md). The main ones:

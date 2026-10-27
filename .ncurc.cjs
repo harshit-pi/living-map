@@ -13,5 +13,5 @@ module.exports = {
   // Doctor mode installs everything, runs these checks, and when they fail
   // retries one package at a time and reverts the ones that break.
   doctorInstall: "npm install",
-  doctorTest: "npm run check && npm run build",
+  doctorTest: "npm run upgrade:test",
 };

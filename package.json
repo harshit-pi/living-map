@@ -32,6 +32,7 @@
     "upgrade:check": "ncu",
     "upgrade": "ncu --doctor -u --target minor",
     "upgrade:latest": "ncu --doctor -u --target latest",
+    "upgrade:test": "npm run check && npm run build",
     "check": "eslint . --max-warnings=0 && tsc --noEmit && prettier --check . && vitest run",
     "skill": "node skill/install.ts",
     "prepare": "husky"
