@@ -121,6 +121,13 @@ type Follower = {
   // Claude's own task list, as its calls left it
   plan?: Plan;
   lastSweep: number; // the read point the last sweep checked at
+  // How long the map takes: when each turn was seen sealed (only turns
+  // sealed while following; a chat's past has no times), the run under way,
+  // and how the last run did. The page shows them; the log keeps one line
+  // per run.
+  sealedAt: Map<number, number>;
+  filing?: LedgerView["health"]["filing"];
+  lag?: LedgerView["health"]["lag"];
 };
 
 const mtimeOf = (file: string) => {
@@ -173,6 +180,7 @@ export function createLedger(deps: LedgerDeps) {
       lookedForNext: now(),
       snapped: 0,
       lastSweep: 0,
+      sealedAt: new Map(),
     };
     followers.set(c.root, f);
     return f;
@@ -265,6 +273,9 @@ export function createLedger(deps: LedgerDeps) {
       const v = readView(f.t, t - f.grewAt);
       f.plan = planOf(v.path);
       f.turns = v.turns;
+      if (f.readOnce)
+        for (const turn of v.turns.slice(before.sealed, v.sealed))
+          f.sealedAt.set(turn.n, t);
       f.sealed = v.sealed;
       if (grew) db.setSource(f.file, f.s.conv.root, f.t.offset, t);
       if (!f.readOnce) {
@@ -386,9 +397,12 @@ export function createLedger(deps: LedgerDeps) {
     f.nudged = false;
     const batch = batches(pending, BATCH)[0]!;
     active++;
+    f.filing = { turns: batch.map((t) => t.n), since: now() };
+    push(f.s.conv.root);
     f.running = run(f, batch).finally(() => {
       active--;
       f.running = null;
+      f.filing = undefined;
       if (f.backlog && f.s.store.read >= f.backlog.to) f.backlog = undefined;
       push(f.s.conv.root);
     });
@@ -460,6 +474,7 @@ export function createLedger(deps: LedgerDeps) {
       f.failures = 0;
       f.retryAt = 0;
       f.error = undefined;
+      measure(f, batch, r.ms);
       const store = f.s.store;
       if (store.read - f.lastSweep >= SWEEP_EVERY && quiet(store).length) {
         f.lastSweep = store.read;
@@ -469,6 +484,21 @@ export function createLedger(deps: LedgerDeps) {
       console.error("[ledger] filing turns failed:", e);
       fail("Filing the chat's turns failed on the server.");
     }
+  }
+
+  // How long the newest turn of a batch waited between sealing and landing
+  // on the map: the lag the page shows, and one log line per run
+  function measure(f: Follower, batch: Turn[], modelMs: number) {
+    const last = batch.at(-1)!.n;
+    const sealed = f.sealedAt.get(last);
+    for (const n of f.sealedAt.keys()) if (n <= last) f.sealedAt.delete(n);
+    if (sealed === undefined) return;
+    const ms = Math.max(0, now() - sealed);
+    f.lag = { turn: last, ms, modelMs };
+    const s = (x: number) => `${(x / 1000).toFixed(1)}s`;
+    console.log(
+      `[ledger] ${f.s.conv.root}: filed turn${batch.length === 1 ? "" : "s"} ${batch[0]!.n}${batch.length === 1 ? "" : `–${last}`} ${s(ms)} after turn ${last} sealed (model ${s(modelMs)})`,
+    );
   }
 
   // What waits on you and has gone quiet, checked on its own against the
@@ -568,6 +598,8 @@ export function createLedger(deps: LedgerDeps) {
               total: f.backlog.to - f.backlog.from,
             }
           : undefined,
+      filing: f?.filing,
+      lag: f?.lag,
       spend: db.spend(root, startOfDay(now())),
       changes: db.changes(root),
       // what Claude is on from its own list, when it keeps one

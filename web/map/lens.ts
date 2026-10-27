@@ -51,6 +51,52 @@ export function matcher(
   return (i) => changed.has(i.id);
 }
 
+// what the items waiting on you hold up: everything a waiting item links to
+// with "blocks", and what those block in turn
+export function heldUp(items: LedgerItem[]): Set<string> {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const out = new Set<string>();
+  const walk = (i: LedgerItem) => {
+    for (const l of i.links) {
+      if (l.rel !== "blocks" || out.has(l.to)) continue;
+      const to = byId.get(l.to);
+      if (!to) continue;
+      out.add(to.id);
+      walk(to);
+    }
+  };
+  for (const i of items) if (i.waiting) walk(i);
+  return out;
+}
+
+// what a lens lights on the map: its own items, and for Waiting also what
+// they hold up, so a blocked task reads as blocked. Counts and the stepper
+// use matcher(): they say how many wait, not how much waits on them.
+export function litBy(
+  lens: Lens,
+  items: LedgerItem[],
+  changed: Set<string>,
+): (i: LedgerItem) => boolean {
+  const m = matcher(lens, changed);
+  if (lens !== "waiting") return m;
+  const held = heldUp(items);
+  return (i) => m(i) || held.has(i.id);
+}
+
+// the items pointing at this one, by what they say of it
+export const REVERSE: Record<string, string> = {
+  blocks: "held up by",
+  answers: "settled by",
+};
+export function linkedTo(
+  items: LedgerItem[],
+  id: string,
+): { rel: string; from: LedgerItem }[] {
+  return items.flatMap((from) =>
+    from.links.filter((l) => l.to === id).map((l) => ({ rel: l.rel, from })),
+  );
+}
+
 // every item under a topic, however deep
 export function descendants(items: LedgerItem[], id: string): LedgerItem[] {
   const kids = childrenMap(items);

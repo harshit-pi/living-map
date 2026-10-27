@@ -7,6 +7,16 @@ import type { LedgerItem, LedgerView } from "../../shared/ledger.ts";
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
+const secs = (ms: number) => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+
+// how the last run did, for a chip's hover: when the map was last behind
+// the chat and by how much
+function lagText(v: LedgerView): string {
+  const l = v.health.lag;
+  if (!l) return `Filed up to turn ${v.read}`;
+  return `Filed up to turn ${v.read}: turn ${l.turn} was on the map ${secs(l.ms)} after it ended (the model took ${secs(l.modelMs)})`;
+}
+
 function Health({ v }: { v: LedgerView }) {
   const h = v.health;
   const chip = "shrink-0 rounded-full px-2 py-0.5 text-[11px]";
@@ -34,11 +44,23 @@ function Health({ v }: { v: LedgerView }) {
         Paused
       </span>
     );
+  // a run under way: the map is reading, not stuck
+  if (h.filing) {
+    const t = h.filing.turns;
+    return (
+      <span
+        className={`${chip} bg-hint-soft text-hint-strong`}
+        title={`Reading turn${t.length === 1 ? "" : "s"} ${t[0]}${t.length > 1 ? `–${t.at(-1)}` : ""} of ${v.turns}. ${lagText(v)}`}
+      >
+        Filing turn {t.at(-1)}…
+      </span>
+    );
+  }
   if (h.behind > 0)
     return (
       <span
         className={`${chip} bg-warning-soft text-warning-strong`}
-        title={`Filed up to turn ${v.read} of ${v.turns}`}
+        title={`${plural(h.behind, "turn")} to file, up to turn ${v.turns}. ${lagText(v)}`}
       >
         {plural(h.behind, "turn")} behind
       </span>
@@ -46,7 +68,7 @@ function Health({ v }: { v: LedgerView }) {
   return (
     <span
       className={`${chip} bg-success-soft text-success-strong`}
-      title={`Filed up to turn ${v.read}`}
+      title={lagText(v)}
     >
       Up to date
     </span>

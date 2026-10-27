@@ -210,6 +210,7 @@ export const ITEMS: MapItem[] = [
   it("i37", "question", "open", "Keep Nebula or move to VPC peering?", "i36", {
     owner: "you",
     src: ["t121"],
+    links: [{ rel: "blocks", to: "i46" }],
   }),
   it("i38", "option", "offered", "Keep the Nebula overlay", "i37", {
     src: ["t121"],

@@ -65,11 +65,13 @@ It ends the moment the map has something for you, printing it after `FROM YOUR L
     | curl -s -X POST localhost:{{PORT}}/api/inbox -H 'content-type: application/json' -H "X-LM-Token: $(cat ~/.living-map/token)" -d @-
   ```
 
-- When the user refers to the map ("what does my map say", "what's still open", "what did we decide"), read it first, then answer:
+- When the user asks what is pending, open or decided ("what's pending", "what's waiting on me", "what's still open", "what did we decide"), read that one section of the map, then answer. `lens` is `waiting`, `open` or `decided`; it costs a few lines, never the whole chat:
 
   ```bash
-  curl -s "localhost:{{PORT}}/api/outline?conv=${CLAUDE_SESSION_ID}" -H "X-LM-Token: $(cat ~/.living-map/token)"
+  curl -s "localhost:{{PORT}}/api/outline?conv=${CLAUDE_SESSION_ID}&lens=waiting" -H "X-LM-Token: $(cat ~/.living-map/token)"
   ```
+
+- When they want the whole picture ("what does my map say", "where were we", a handoff), leave `lens` out: it leads with what waits on you, what is open, what was decided and what you are on, then the whole map with settled topics folded to one line. Pasted into a file, it is a handoff.
 
 - A side chat is a paid model call that reads this conversation; the user starts them from the map. Do not start the map for a conversation unless the user asks for it.
 - Never stop the server or delete its data unless the user asks. The map is kept in `~/.living-map/ledger.db`, the server's log in `~/.living-map/server.log`.

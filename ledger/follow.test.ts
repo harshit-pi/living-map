@@ -618,3 +618,53 @@ test("what waits on you and goes quiet is swept: checked again against the turns
   const v = t.ledger.view(root)!;
   assert.deepEqual(v.strip.waiting, []);
 }, 30_000);
+
+test("the view says which turns are being filed, and how long after a turn sealed it landed", async () => {
+  const c = chat();
+  const release: (() => void)[] = [];
+  const t = setup(
+    (req) => new Promise((done) => release.push(() => done(filing(req)))),
+  );
+  const root = t.link(c);
+  c.turn("Which database should we use?", "Postgres or Mongo, which one?");
+  await t.ledger.tick();
+  // ended, not yet sealed: no run, nothing being filed
+  assert.equal(t.ledger.view(root)!.health.filing, undefined);
+  t.advance(6000);
+  const round = t.ledger.tick();
+  await until(() => t.calls.length === 1);
+  const during = t.ledger.view(root)!.health;
+  assert.deepEqual(during.filing, { turns: [1], since: t.advance(0) });
+  assert.equal(during.lag, undefined, "no run has finished yet");
+  assert.ok(
+    t.events.some((e) => e.type === "ledger" && !!e.view.health.filing),
+    "pushed to the page when the run started",
+  );
+  // the model takes 3 s
+  t.advance(3000);
+  release.shift()!();
+  await round;
+  const after = t.ledger.view(root)!.health;
+  assert.equal(after.filing, undefined);
+  assert.deepEqual(after.lag, { turn: 1, ms: 3000, modelMs: 5 });
+  assert.equal(after.behind, 0);
+  // the next turn: sealed by the prompt after it, then 20 s of quiet, then
+  // the run; the lag counts from the seal
+  c.turn("Postgres.", "Done.");
+  c.you("Now the tests");
+  t.advance(1000);
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 1);
+  t.advance(QUIET_MS);
+  const next = t.ledger.tick();
+  await until(() => t.calls.length === 2);
+  assert.deepEqual(t.ledger.view(root)!.health.filing?.turns, [2]);
+  t.advance(2000);
+  release.shift()!();
+  await next;
+  assert.deepEqual(t.ledger.view(root)!.health.lag, {
+    turn: 2,
+    ms: QUIET_MS + 2000,
+    modelMs: 5,
+  });
+});

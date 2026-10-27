@@ -50,11 +50,11 @@ npm run skill -- --hook
 
 - `/living-map` starts the server if it is not running (in the background, so it outlives the chat), links the chat and opens the map: in the desktop app's browser pane beside the chat if there is one, or as a link to open. Nothing to choose, nothing to describe.
 - Saying `/living-map` again in the same chat opens its map again. Another chat gets its own map.
-- Ask the chat "what does my map say?" or "what's pending?" and it reads the map back.
+- Ask the chat "what's pending?", "what's open?" or "what did we decide?" and it reads that one section of the map back: a few lines, not the chat again. "What does my map say?" or "where were we?" gets the whole outline: what waits on you, what is open, what was decided and what Claude is on, then the map with settled topics folded. Pasted into a file, that outline is a handoff; `GET /api/outline?conv=<chat>` serves it (with `&lens=waiting`, `open` or `decided` for one section).
 - The first time each kind of box is on screen, a tip explains it. Each tip shows once in that browser; **No more tips** turns them off and **Show tips again** (under ⋯) brings them back.
 - The map is one page on http://localhost:4317. It stays signed in in the browser that opened it. To have it in your own browser too, open http://localhost:4317 there and click **Show my maps** (or choose **⋯ → Open in your browser** on the map); from then on that address lists every mapped chat, each opening in a new tab. Any browser on this machine can sign itself in that way, so on a computer you share, another account could see your maps.
 
-**Cost.** Filing new turns is a quick call on Claude Code's default model that reads only those turns: about $1.70 per 100 turns on Opus at API prices. On a Claude subscription it counts toward your usage, and the page shows no prices. Side chats cost only when you open one.
+**Cost.** Filing new turns is a quick call on Claude Code's default model that reads only those turns: about $1.70 per 100 turns on Opus at API prices, which on the author's own chats came to about 0.13% of the tokens the chat itself used. On a Claude subscription it counts toward your usage, and the page shows no prices. Side chats cost only when you open one.
 
 ## Updates
 
@@ -71,7 +71,7 @@ your chat ◄──answers, picks, ticks───────┤◄────�
 ```
 
 - The server reads your chat's transcript as it grows, and never tool output. A fresh `claude -p` call with no tools turns the new turns into typed changes, and code checks each one before it is stored.
-- The map never re-reads the whole chat: each call is sent only the turns since the last one.
+- The map never re-reads the whole chat: each call is sent the map so far as a Mermaid mindmap, every item tagged with its id (`i12`), and only the turns since the last call. It answers with typed changes (create, update, retire) on those ids, and links between items (what a wait holds up, what settled a question). Ids are minted by the server, never by the model, so they never drift as the chat grows.
 - Side chats run as their own `claude -p`, read-only and kept to your project folder, with no web.
 - The model sits behind one interface (`server/providers/types.ts`). Claude Code is the default; another model is one new file.
 

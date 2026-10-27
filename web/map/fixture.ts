@@ -48,9 +48,18 @@ const CHANGE: Record<string, ChangeStatement["change"]> = {
   changed: "changed",
 };
 
-// `variant` shows the page's other states: empty, reading, error
+// `variant` shows the page's other states: empty, reading, error, filing
 export function fixtureView(variant = ""): LedgerView {
   const v = fullView();
+  if (variant === "filing")
+    return {
+      ...v,
+      health: {
+        ...v.health,
+        filing: { turns: [TURNS - 1, TURNS], since: Date.now() - 4000 },
+        lag: { turn: TURNS - 2, ms: 31_400, modelMs: 9_800 },
+      },
+    };
   if (variant === "empty" || variant === "reading")
     return withStrip({
       ...v,

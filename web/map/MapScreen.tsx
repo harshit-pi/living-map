@@ -29,6 +29,7 @@ import {
 import {
   changedIds,
   foldsAbove,
+  litBy,
   matcher,
   nowTopic,
   search,
@@ -277,7 +278,7 @@ function Screen({
       return (i) => ids.has(i.id);
     }
     // decided items are off the map: that lens shows them in the list
-    return lens && lens !== "decided" ? matcher(lens, changed) : null;
+    return lens && lens !== "decided" ? litBy(lens, items, changed) : null;
   }, [searching, query, items, lens, changed]);
   const marked = useMemo(
     () => new Set([...(snap?.ids ?? []), ...newIds(view)]),

@@ -4,7 +4,7 @@
 // the extractor. Every item gets its place among its siblings here.
 
 import type { LogLine, State } from "./db.ts";
-import { apply, type Answer, type Op } from "./extract.ts";
+import { apply, LINK_RELS, type Answer, type Op } from "./extract.ts";
 import { STATES, type Item } from "./items.ts";
 import { keyAfter } from "./order.ts";
 import type { Turn } from "./transcript.ts";
@@ -39,6 +39,15 @@ export function place(s: State, now: number) {
 const OPS = new Set(["create", "update", "retire"]);
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 
+// the links shaped as asked, with a rel we know; the rest is left out
+const linksOf = (v: unknown[]) =>
+  v.flatMap((l) => {
+    if (!l || typeof l !== "object") return [];
+    const { rel, to } = l as { rel?: unknown; to?: unknown };
+    const r = LINK_RELS.find((k) => k === rel);
+    return r && typeof to === "string" ? [{ rel: r, to }] : [];
+  });
+
 // The model's answer is untrusted even though the CLI held it to the
 // schema: anything not shaped like an op is dropped here, the rest is
 // checked by apply().
@@ -72,6 +81,7 @@ export function checkAnswer(v: unknown): Answer | null {
       owner: o.owner === "you" || o.owner === "claude" ? o.owner : undefined,
       state: str(o.state),
       reason: str(o.reason),
+      ...(Array.isArray(o.links) ? { links: linksOf(o.links) } : {}),
     });
   }
   return { topics, ops };

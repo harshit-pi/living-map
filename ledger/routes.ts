@@ -3,7 +3,7 @@
 // "ledger" event.
 //
 //   GET  /api/ledger/view?conv=<id>  the map of a chat (else the one linked last)
-//   GET  /api/ledger/chats           every chat with a map, newest link first
+//   GET  /api/ledger/chats           every chat with a map, waiting on you first
 //   POST /api/ledger/act {conv, action}  what you did on it; a side chat's
 //                                        actions (sides.ts) answer {side, view}
 
@@ -12,14 +12,16 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { compare, shadowFor, snapshot } from "./changes/snapshot.ts";
+import { summarize } from "./chats.ts";
 import { openDb, type Conv } from "./db.ts";
 import { createLedger, type Ledger } from "./follow.ts";
 import { heardAt as heardAtOf, post } from "./outbox.ts";
-import { createSides, itemsPage, type Sides } from "./sides.ts";
+import { outline as outlineOf, type OutlineLens } from "./outline.ts";
+import { createSides, type Sides } from "./sides.ts";
 import { HOME } from "../server/config.ts";
 import type { Hub } from "../server/events.ts";
 import type { ModelProvider } from "../server/providers/types.ts";
-import type { ChatSummary, LedgerAction } from "../shared/ledger.ts";
+import type { LedgerAction } from "../shared/ledger.ts";
 
 export const DB_FILE = path.join(HOME, "ledger.db");
 
@@ -53,7 +55,7 @@ export type LedgerServer = {
   ledger: Ledger;
   sides: Sides;
   router: express.Router;
-  outline: (conv?: unknown) => string | null;
+  outline: (conv?: unknown, lens?: OutlineLens) => string | null;
 };
 
 export function startLedger(
@@ -103,19 +105,7 @@ export function startLedger(
   });
   // for the page's list of your maps
   router.get("/chats", (_req, res) => {
-    const chats: ChatSummary[] = ledger.conversations().map((c) => {
-      const v = ledger.view(c.root);
-      return {
-        conv: c.root,
-        title: c.title || v?.title || "",
-        cwd: c.cwd,
-        linkedAt: c.linkedAt,
-        following: c.following,
-        turns: v?.turns ?? 0,
-        waiting: v?.strip.waiting.length ?? 0,
-      };
-    });
-    res.json(chats);
+    res.json(summarize(ledger.conversations(), ledger.view));
   });
   router.post("/act", async (req, res) => {
     const body = (req.body ?? {}) as { conv?: unknown; action?: unknown };
@@ -156,12 +146,11 @@ export function startLedger(
         .json({ error: "Something went wrong on the server. Try again." });
     }
   });
-  // a chat's map as text, for a conversation to read back: every live item
-  // in tree order, with what it says
-  const outline = (asked: unknown): string | null => {
+  // a chat's map as text, for a conversation to read back (outline.ts)
+  const outline = (asked: unknown, lens?: OutlineLens): string | null => {
     const root = rootFor(asked);
-    const s = root ? ledger.state(root) : null;
-    return s ? itemsPage(s.store) : null;
+    const v = root ? ledger.view(root) : null;
+    return v ? outlineOf(v, lens) : null;
   };
   return { ledger, sides, router, outline };
 }
