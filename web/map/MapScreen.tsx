@@ -40,7 +40,7 @@ import { SearchBox } from "./SearchBox.tsx";
 import { mapItems, startFolds } from "./shown.ts";
 import { Chip, SideSheet } from "./SideSheet.tsx";
 import { newIds, snapOf, type Snap } from "./since.ts";
-import { SinceBar, Strip } from "./Strip.tsx";
+import { SinceChip, Strip } from "./Strip.tsx";
 import type { TipId } from "./tips.ts";
 import { MapTips, Tip } from "./Tips.tsx";
 import { Toolbar } from "./Toolbar.tsx";
@@ -261,7 +261,7 @@ function Screen({
     () => layout(mapped, folded, size),
     [mapped, folded, size],
   );
-  // every item on the map in order, folds open: the order the since bar and
+  // every item on the map in order, folds open: the order the since chip and
   // a lens step in
   const order = useMemo(() => layout(mapped).order, [mapped]);
   const changed = useMemo(
@@ -590,18 +590,6 @@ function Screen({
         waitingLens={lens === "waiting"}
         more={more}
       />
-      {snap && (
-        <SinceBar
-          snap={snap}
-          at={step}
-          primary={!card && !side}
-          onStep={stepTo}
-          onClose={() => {
-            setSnap(null);
-            setStep(-1);
-          }}
-        />
-      )}
       {!online && !fixture && (
         <div className="bg-warning-soft px-3 py-1 text-[12.5px] text-warning-strong">
           Lost the connection to the Living Map server; reconnecting…
@@ -638,6 +626,19 @@ function Screen({
       <Toolbar
         lens={lens}
         counts={counts}
+        since={
+          snap && (
+            <SinceChip
+              snap={snap}
+              at={step}
+              onStep={stepTo}
+              onClose={() => {
+                setSnap(null);
+                setStep(-1);
+              }}
+            />
+          )
+        }
         onLens={(l) => {
           setLens(l);
           if (l === "changed" && view.changes.length) {

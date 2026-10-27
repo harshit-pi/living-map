@@ -35,3 +35,14 @@ test("a done task and a done ask carry the same check", () => {
   assert.equal(lookOf(task).glyph, "✓");
   assert.equal(lookOf(task).glyph, lookOf(ask("done", false)).glyph);
 });
+
+test("a settled topic drops its box but keeps its size; one in play keeps it", () => {
+  const topic = (state: string) => ({
+    ...ask(state, false),
+    type: "topic" as const,
+  });
+  const settled = lookOf(topic("done")).box;
+  assert.match(settled, /border-transparent/);
+  assert.match(settled, /\bborder\b/);
+  assert.doesNotMatch(lookOf(topic("active")).box, /transparent/);
+});

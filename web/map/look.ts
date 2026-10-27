@@ -6,7 +6,9 @@ import type { LedgerItem } from "../../shared/ledger.ts";
 // colour means something: amber, for what waits on you. Everything else says
 // its state with a small glyph (a green ◆ for decided, a green ● for an
 // option taken, a ✓ for a task or ask that is done) and grey text once it
-// is done, settled or dropped.
+// is done, settled or dropped. A settled topic drops its box too (the node
+// gives it back while something inside still waits or is open), so the
+// topics still in play are the boxes you see first.
 export type Look = {
   box: string;
   title: string;
@@ -48,11 +50,13 @@ export function lookOf(i: LedgerItem): Look {
   switch (i.type) {
     case "topic":
       return {
-        box: PLAIN,
-        title:
+        // the border stays, transparent, so a settled box keeps its size
+        box:
           i.state === "done"
-            ? `font-semibold ${DONE}`
-            : "font-semibold text-ink",
+            ? "border border-transparent bg-transparent hover:bg-panel"
+            : PLAIN,
+        title:
+          i.state === "done" ? `font-medium ${DONE}` : "font-semibold text-ink",
         glyph: "",
         mark: DONE,
         tag: i.state === "done" ? "settled" : i.state,

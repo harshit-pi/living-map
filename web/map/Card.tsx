@@ -92,6 +92,7 @@ export function Card({
   tip?: React.ReactNode; // a one-time tip, over the actions
 }) {
   const [text, setText] = useState("");
+  const [adding, setAdding] = useState(false);
   const [sent, setSent] = useState<"" | "sending" | "sent">("");
   // what was told to the chat before this card opened isn't news here
   const [toldBefore] = useState(item.sent?.at ?? 0);
@@ -103,8 +104,18 @@ export function Card({
   const acts = actionsOf(item);
   const linked = linkedTo([...byId.values()], item.id);
   const canAnswer = answerable(item) && sent !== "sent";
-  const owner =
-    item.owner === "you" ? "Yours" : item.owner === "claude" ? "Claude's" : "";
+  // Claude owes this one: the card says so first, and your words are an
+  // extra you open, not the next step
+  const claudes = canAnswer && item.owner === "claude";
+  const showBox = canAnswer && (!claudes || adding);
+  // the tag already says whose it is ("Claude's to find out", "on you")
+  const owner = /claude|yours|on you/i.test(look.tag)
+    ? ""
+    : item.owner === "you"
+      ? "Yours"
+      : item.owner === "claude"
+        ? "Claude's"
+        : "";
 
   const run = async (a: LedgerAction) => {
     setBusy(true);
@@ -128,8 +139,9 @@ export function Card({
   const filled =
     "rounded-lg bg-primary px-3 py-1 text-[12.5px] font-medium text-on-primary hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-40";
   // the card owns the screen's one filled button: Send when you can answer,
-  // else the item's main action
-  const mainIsSend = canAnswer;
+  // else the item's main action; none while it is Claude's move
+  const mainIsSend = showBox;
+  const lead = primary && !(claudes && !adding);
 
   return (
     <div
@@ -139,8 +151,18 @@ export function Card({
     >
       <div className="flex items-start gap-2">
         <span className="mt-0.5 rounded-full bg-panel px-2 py-0.5 text-[11px] text-muted">
-          {look.tag === item.type ? item.type : `${item.type} · ${look.tag}`}
+          {look.tag === item.type || claudes
+            ? item.type
+            : `${item.type} · ${look.tag}`}
         </span>
+        {claudes && (
+          <span className="mt-0.5 text-[11px] text-body">
+            <span aria-hidden className="mr-1 text-primary">
+              ◐
+            </span>
+            Claude is finding this out
+          </span>
+        )}
         {owner && (
           <span className="mt-0.5 text-[11px] text-muted">{owner}</span>
         )}
@@ -222,16 +244,29 @@ export function Card({
         </ul>
       )}
 
-      {canAnswer && (
+      {claudes && !adding && (
+        <button
+          onClick={() => setAdding(true)}
+          className="mt-3 text-[12.5px] text-body underline decoration-line-strong underline-offset-2 hover:text-ink"
+        >
+          + Add something for Claude
+        </button>
+      )}
+      {showBox && (
         <div className="mt-3">
           <textarea
+            autoFocus={claudes}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
             }}
             rows={2}
-            placeholder="Your answer goes to the chat at once"
+            placeholder={
+              claudes
+                ? "It goes to the chat at once"
+                : "Your answer goes to the chat at once"
+            }
             className="w-full resize-y rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] text-ink placeholder:text-faint focus:border-primary focus:outline-none"
           />
         </div>
@@ -278,7 +313,7 @@ export function Card({
         </div>
       ) : (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {canAnswer && (
+          {showBox && (
             <button
               data-primary={primary || undefined}
               className={primary ? filled : button}
@@ -289,7 +324,7 @@ export function Card({
             </button>
           )}
           {acts.map((a, k) => {
-            const main = primary && !mainIsSend && k === 0;
+            const main = lead && !mainIsSend && k === 0;
             return (
               <button
                 key={a.label}

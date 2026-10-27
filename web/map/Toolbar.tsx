@@ -1,10 +1,13 @@
+import type { ReactNode } from "react";
+
 import { Glyph } from "./Glyph.tsx";
 import { LENSES, type Lens } from "./lens.ts";
 import { LENS_LOOK } from "./look.ts";
 
 // Each lens wears the colour it gives the boxes it lights, so the row reads
-// as the map's key. Waiting is amber even when off: it is the one colour the
-// map shows unasked.
+// as the map's key. Waiting is amber even when off, while something waits:
+// it is the one colour the map shows unasked. A lens with nothing to light
+// goes quiet, and an empty Waiting says so in words.
 const KEY: Record<Lens, { glyph: string; off: string }> = {
   waiting: {
     glyph: "⚑",
@@ -14,12 +17,14 @@ const KEY: Record<Lens, { glyph: string; off: string }> = {
   decided: { glyph: "◆", off: "border-line text-body" },
   changed: { glyph: "±", off: "border-line text-body" },
 };
+const EMPTY = "border-line text-muted";
 
 // The lenses and the map's tools, under the strip. A lens lights its items
 // and dims the rest in place; a second click turns it off.
 export function Toolbar({
   lens,
   counts,
+  since,
   onLens,
   onSearch,
   onNow,
@@ -31,6 +36,7 @@ export function Toolbar({
 }: {
   lens: Lens | null;
   counts: Record<Lens, number>;
+  since?: ReactNode; // what was filed since you last looked, to step through
   onLens: (l: Lens | null) => void;
   onSearch: () => void;
   onNow: () => void;
@@ -50,32 +56,46 @@ export function Toolbar({
       <div className="flex min-w-0 flex-[1_1_100%] flex-wrap items-center gap-1 min-[560px]:flex-[1_1_0%]">
         {LENSES.map((l) => {
           const on = lens === l.id;
+          const empty = !on && counts[l.id] === 0;
+          const clear = empty && l.id === "waiting";
           return (
             <button
               key={l.id}
               onClick={() => onLens(on ? null : l.id)}
               aria-pressed={on}
               title={
-                on
-                  ? `Turn off ${l.label}`
-                  : `Light up ${l.label.toLowerCase()} items`
+                clear
+                  ? "Nothing waits on you"
+                  : on
+                    ? `Turn off ${l.label}`
+                    : `Light up ${l.label.toLowerCase()} items`
               }
-              className={`${tool} gap-1 ${on ? LENS_LOOK[l.id].on : `${KEY[l.id].off} hover:bg-panel`}`}
+              className={`${tool} gap-1 ${on ? LENS_LOOK[l.id].on : `${empty ? EMPTY : KEY[l.id].off} hover:bg-panel`}`}
             >
-              <span aria-hidden className={LENS_LOOK[l.id].mark}>
-                <Glyph g={KEY[l.id].glyph} />
-              </span>
-              {l.label}
               <span
-                className={`tabular-nums ${on ? "" : "text-muted"} ${l.id === "waiting" && counts.waiting ? "font-semibold text-warning-strong" : ""}`}
+                aria-hidden
+                className={empty ? "text-faint" : LENS_LOOK[l.id].mark}
               >
-                {counts[l.id]}
+                <Glyph g={clear ? "✓" : KEY[l.id].glyph} />
               </span>
+              {clear ? (
+                "Nothing on you"
+              ) : (
+                <>
+                  {l.label}
+                  <span
+                    className={`tabular-nums ${on ? "" : empty ? "text-faint" : "text-muted"} ${l.id === "waiting" && counts.waiting ? "font-semibold text-warning-strong" : ""}`}
+                  >
+                    {counts[l.id]}
+                  </span>
+                </>
+              )}
             </button>
           );
         })}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {since}
         {step && step.n > 0 && (
           <div className="flex shrink-0 items-center gap-0.5">
             <button

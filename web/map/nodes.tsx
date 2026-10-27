@@ -14,6 +14,7 @@ export type ItemData = {
   folded: boolean;
   hasKids: boolean;
   counts: string | null; // "2 waiting · 5 settled", on a folded topic
+  live: boolean; // a topic still holds something waiting or open
   lensCount: number; // matches inside a fold, while a lens is on
   lit: boolean;
   lens: Lens | null; // the lens lighting the map, if it isn't a search
@@ -57,10 +58,20 @@ export function ItemNode({ data }: NodeProps) {
   const look = lookOf(i);
   const topic = i.type === "topic";
   const text = textOf(d);
-  // a topic keeps a line for what it holds
-  const lines = topic && d.counts ? text.lines - 1 : text.lines;
-  // a lens colours the boxes it lights
-  const box = d.lit && d.lens ? LENS_LOOK[d.lens].box : look.box;
+  // a topic keeps a line for what it holds, and for "now"
+  const meta = topic && (!!d.counts || d.now);
+  const lines = meta ? text.lines - 1 : text.lines;
+  // a lens colours the boxes it lights; the topic the chat is on keeps its
+  // box even when settled, with a clay edge (the clay dot means "new"), and
+  // so does a settled topic still holding something waiting or open
+  const box =
+    d.lit && d.lens
+      ? LENS_LOOK[d.lens].box
+      : topic && d.now
+        ? "border border-line border-l-[3px] border-l-primary bg-surface"
+        : topic && d.live
+          ? "border border-line bg-surface"
+          : look.box;
   return (
     <div
       style={{ width: d.size.w, height: d.size.h }}
@@ -102,16 +113,18 @@ export function ItemNode({ data }: NodeProps) {
           // a long name with no spaces breaks instead of running off the box
           className={`${text.title} ${CLAMP[lines]} wrap-break-word ${look.title}`}
         >
-          {topic && d.now && (
-            <span
-              title="The topic the chat is on"
-              className="mr-1.5 inline-block h-2 w-2 rounded-full bg-primary align-[1px]"
-            />
-          )}
           {i.title}
         </div>
-        {topic && d.counts && (
+        {meta && (
           <div className="truncate text-[10.5px] leading-[13px] text-muted">
+            {d.now && (
+              <span
+                title="The topic the chat is on"
+                className="font-medium text-primary-strong"
+              >
+                now{d.counts ? " · " : ""}
+              </span>
+            )}
             {d.lensCount > 0 ? (
               <span
                 className={`font-medium ${d.lens ? LENS_LOOK[d.lens].text : "text-primary-strong"}`}
