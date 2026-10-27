@@ -7,14 +7,16 @@
 //   node eval/read-format.ts            → eval/read-format-results.md
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { HEADER, ITEMS, QUESTIONS } from "../ledger/fixtures/map.ts";
 import { toLines, toMermaid } from "../ledger/mermaid.ts";
+import { HOME } from "../server/config.ts";
 import { claudeCode } from "../server/providers/claude-code.ts";
 
-const home = path.join(os.homedir(), ".living-map");
+// $LIVING_MAP_HOME when set, like the server and the scorer, so two runs
+// can each keep their own folder
+const home = HOME;
 const provider = claudeCode({ home });
 const model = process.env.LIVING_MAP_EVAL_MODEL ?? "";
 

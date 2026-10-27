@@ -41,7 +41,7 @@ type CliResult = {
   structured_output?: unknown;
   total_cost_usd?: number;
   usage?: Tokens & { iterations?: Tokens[] };
-  modelUsage?: Record<string, { outputTokens?: number }>;
+  modelUsage?: Record<string, { outputTokens?: number; costUSD?: number }>;
 };
 
 // What a Claude Code session started by your chat inherits that ties it to
@@ -180,9 +180,14 @@ export function claudeCode({
           r = null;
         }
         if (!r) return end({ ok: false, error: "no result", usage: null });
+        // the model that did the work: the one the call spent most on, so a
+        // small helper call on a cheaper model that wrote more output is not
+        // taken for it; by output when the CLI gives no cost
         const model =
           Object.entries(r.modelUsage ?? {}).sort(
-            (a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0),
+            (a, b) =>
+              (b[1].costUSD ?? 0) - (a[1].costUSD ?? 0) ||
+              (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0),
           )[0]?.[0] ??
           req.model ??
           "";

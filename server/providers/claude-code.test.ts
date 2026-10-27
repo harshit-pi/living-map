@@ -130,6 +130,26 @@ test("extract runs a fresh call with its own instructions, no tools and no cache
   assert.equal(r.usage?.costUsd, 0.0005);
 });
 
+test("extract names the model the call spent most on, not the one that wrote most", async () => {
+  const { spawn, procs } = fakeSpawn();
+  const provider = claudeCode({ home, spawn });
+  const call = provider.extract!({ system: "s", message: "m", schema: {} });
+  procs[0].say([
+    {
+      type: "result",
+      subtype: "success",
+      structured_output: {},
+      total_cost_usd: 0.03,
+      modelUsage: {
+        "claude-haiku-5-5": { outputTokens: 900, costUSD: 0.001 },
+        "claude-opus-5-5": { outputTokens: 400, costUSD: 0.029 },
+      },
+    },
+  ]);
+  procs[0].end();
+  assert.equal((await call).usage?.model, "claude-opus-5-5");
+});
+
 test("extract with no model passes none, so Claude Code's default model answers", async () => {
   const { spawn, procs } = fakeSpawn();
   const provider = claudeCode({ home, spawn });

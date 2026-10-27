@@ -2,7 +2,8 @@
 // batch as it would be live, and the map is saved at 5 checkpoints for the
 // labeler (eval/extract-label.ts) and the scorer (eval/extract-score.ts).
 // It calls the model (Claude Code's default model unless --model names one):
-// only when asked. Everything it writes stays in ~/.living-map/eval/extract.
+// only when asked. Everything it writes stays in ~/.living-map/eval/extract
+// ($LIVING_MAP_HOME/eval/extract when that is set).
 //
 //   node eval/extract-run.ts --pick 15 [--max-usd 40]
 //   node eval/extract-run.ts <transcript.jsonl> [--turns 30] [--fresh]
@@ -32,9 +33,12 @@ import {
   view,
   type Turn,
 } from "../ledger/transcript.ts";
+import { HOME } from "../server/config.ts";
 import { claudeCode } from "../server/providers/claude-code.ts";
 
-const home = path.join(os.homedir(), ".living-map");
+// $LIVING_MAP_HOME when set, like the server and the scorer, so two runs
+// can each keep their own folder
+const home = HOME;
 const OUT = path.join(home, "eval", "extract");
 const provider = claudeCode({ home });
 
