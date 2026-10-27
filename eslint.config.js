@@ -37,6 +37,7 @@ export default defineConfig([
       "ledger/**/*.ts",
       "shared/**/*.ts",
       "*.config.{js,ts}",
+      ".ncurc.cjs",
     ],
     languageOptions: { globals: globals.node },
   },
