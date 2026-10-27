@@ -20,6 +20,7 @@ export type ItemData = {
   lens: Lens | null; // the lens lighting the map, if it isn't a search
   dim: boolean;
   selected: boolean;
+  trail: boolean; // above the picked item, on the way to it
   isNew: boolean;
   now: boolean; // the topic the chat is on, marked with a dot
   size: Size;
@@ -35,12 +36,16 @@ const CLAMP = ["", "line-clamp-1", "line-clamp-2", "line-clamp-3"];
 
 const hidden = { opacity: 0, pointerEvents: "none" as const };
 
+// the picked box is ringed in clay, and the topics above it more lightly,
+// with the lines between them coloured too (Canvas)
 const ring = (d: ItemData) =>
   d.selected
-    ? "ring-2 ring-ink ring-offset-2 ring-offset-canvas"
-    : d.lit && !d.lens
-      ? "ring-2 ring-primary ring-offset-2 ring-offset-canvas"
-      : "";
+    ? "ring-2 ring-primary ring-offset-2 ring-offset-canvas"
+    : d.trail
+      ? "ring-2 ring-primary-line ring-offset-1 ring-offset-canvas"
+      : d.lit && !d.lens
+        ? "ring-2 ring-primary ring-offset-2 ring-offset-canvas"
+        : "";
 
 function Handles() {
   return (

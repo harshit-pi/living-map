@@ -27,6 +27,9 @@ export function Toolbar({
   since,
   onLens,
   onSearch,
+  onFoldAll,
+  allFolded,
+  canFold,
   onNow,
   onList,
   listOpen,
@@ -39,6 +42,9 @@ export function Toolbar({
   since?: ReactNode; // what was filed since you last looked, to step through
   onLens: (l: Lens | null) => void;
   onSearch: () => void;
+  onFoldAll: () => void;
+  allFolded: boolean; // every topic is folded: the button unfolds them
+  canFold: boolean;
   onNow: () => void;
   onList: () => void;
   listOpen: boolean;
@@ -137,6 +143,16 @@ export function Toolbar({
             <circle cx="7" cy="7" r="4.5" />
             <path d="M10.5 10.5 14 14" strokeLinecap="round" />
           </svg>
+        </button>
+        <button
+          onClick={onFoldAll}
+          disabled={!canFold}
+          title={
+            allFolded ? "Open every topic" : "Fold every topic to one line"
+          }
+          className={`${tool} border-line text-body hover:bg-panel disabled:opacity-40`}
+        >
+          {allFolded ? "Unfold all" : "Fold all"}
         </button>
         <button
           onClick={onNow}

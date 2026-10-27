@@ -14,12 +14,17 @@ import { ROOT, type Layout, type Size } from "./layout.ts";
 import { countsOf, countsText, descendants, type Lens } from "./lens.ts";
 import { lookOf } from "./look.ts";
 import { ItemNode, type ItemData } from "./nodes.tsx";
+import { trailOf } from "./shown.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 const nodeTypes = { item: ItemNode };
 
 // out of the parent's right side, down the gap between the columns, across
-// into the child: every child of one parent shares that one vertical line
+// into the child: every child of one parent shares that one vertical line.
+// Each child draws only its own stretch of it, from the sibling above
+// (`from`), so the line is drawn once: the colour is translucent, and
+// stretches drawn over each other would darken toward the parent. A trail
+// line is drawn whole, from the parent.
 function Branch({
   sourceX,
   sourceY,
@@ -29,10 +34,13 @@ function Branch({
   data,
 }: EdgeProps) {
   const mid = sourceX + Number(data?.gap ?? 0) / 2;
+  const from = typeof data?.from === "number" ? data.from : null;
   const path =
-    Math.abs(targetY - sourceY) < 1
-      ? `M ${sourceX} ${sourceY} H ${targetX}`
-      : `M ${sourceX} ${sourceY} H ${mid} V ${targetY} H ${targetX}`;
+    from !== null
+      ? `M ${mid} ${from} V ${targetY} H ${targetX}`
+      : Math.abs(targetY - sourceY) < 1
+        ? `M ${sourceX} ${sourceY} H ${targetX}`
+        : `M ${sourceX} ${sourceY} H ${mid} V ${targetY} H ${targetX}`;
   return <BaseEdge path={path} style={style} />;
 }
 const edgeTypes = { branch: Branch };
@@ -85,6 +93,8 @@ export function Canvas({
   onMoveEnd: (v: Viewport) => void;
 }) {
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  // the picked item and its topics above it, coloured with the line between
+  const trail = useMemo(() => trailOf(items, selected), [items, selected]);
   // Where lines meet a box, given rather than measured: React Flow forgets
   // its measurements whenever the nodes change, and draws no line until it
   // has measured again, which never happens while the pane is hidden.
@@ -137,6 +147,7 @@ export function Canvas({
               (item.type === "topic" && descendants(items, id).some(lit))
             )),
         selected: selected === id,
+        trail: selected !== id && trail.has(id),
         isNew: newIds.has(id),
         now: id === now,
         size,
@@ -171,6 +182,7 @@ export function Canvas({
     lit,
     lens,
     selected,
+    trail,
     newIds,
     size,
     now,
@@ -181,17 +193,31 @@ export function Canvas({
     const dimmed = new Set(
       nodes.filter((n) => (n.data as ItemData).dim).map((n) => n.id),
     );
+    // the middle of the sibling drawn just above each child, if any
+    const above = new Map<string, number>();
+    const last = new Map<string, string>();
+    for (const e of laid.edges) {
+      const prev = last.get(e.from);
+      const p = prev && laid.nodes.get(prev);
+      if (p) above.set(e.to, p.y + size.h / 2);
+      last.set(e.from, e.to);
+    }
     const tree = laid.edges.map((e): Edge => ({
       id: `${e.from}>${e.to}`,
       source: e.from,
       target: e.to,
       type: "branch",
-      data: { gap: size.col - size.w },
-      style: {
-        stroke: LINE,
-        strokeWidth: 1,
-        opacity: dimmed.has(e.to) ? 0.3 : 1,
+      data: {
+        gap: size.col - size.w,
+        from: trail.has(e.to) ? null : (above.get(e.to) ?? null),
       },
+      style: trail.has(e.to)
+        ? { stroke: "var(--color-primary)", strokeWidth: 2 }
+        : {
+            stroke: LINE,
+            strokeWidth: 1,
+            opacity: dimmed.has(e.to) ? 0.3 : 1,
+          },
     }));
     const links = laid.links.map((l): Edge => ({
       id: `${l.from}~${l.to}`,
@@ -208,8 +234,14 @@ export function Canvas({
         opacity: dimmed.has(l.from) && dimmed.has(l.to) ? 0.3 : 1,
       },
     }));
-    return [...tree, ...links];
-  }, [laid, nodes, size]);
+    // the trail last, so it lies over the grey lines it shares a stretch with
+    const onTrail = (e: Edge) => trail.has(e.target);
+    return [
+      ...tree.filter((e) => !onTrail(e)),
+      ...links,
+      ...tree.filter(onTrail),
+    ];
+  }, [laid, nodes, size, trail]);
 
   return (
     <ReactFlow

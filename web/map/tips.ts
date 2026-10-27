@@ -10,6 +10,7 @@ export type TipId =
   | "question"
   | "option"
   | "assumption"
+  | "decision"
   | "settled"
   | "card";
 
@@ -19,12 +20,14 @@ export const TIPS: Record<TipId, string> = {
   lenses:
     "Each lens lights its boxes on the map, and its colour matches theirs.",
   topic:
-    "A topic: one part of the chat. The arrow folds it, and a dot marks the one Claude is on.",
+    "A topic: one part of the chat. The arrow folds it, and a clay edge marks the one Claude is on.",
   task: "A task: ☐ still to do, ◐ Claude is on it, ✓ done.",
   question:
     "An open question. “Claude's to find out” means Claude owes the answer.",
   option: "An option Claude offered. ● marks the one taken.",
   assumption: "Something Claude assumed. Click it to confirm or strike it.",
+  decision:
+    "A decision, under the topic where it was made. Green ◆ is in force; amber ◆ was reopened.",
   settled: "Grey is settled; struck through was dropped.",
   card: "Ask about this opens a side chat that knows this chat. Nothing reaches the chat until you apply it.",
 };
@@ -39,6 +42,7 @@ const ORDER: TipId[] = [
   "question",
   "option",
   "assumption",
+  "decision",
   "settled",
 ];
 
@@ -59,6 +63,8 @@ export function kindOf(i: LedgerItem): TipId | null {
       return i.state === "confirmed" ? "settled" : "assumption";
     case "ask":
       return "settled";
+    case "decision":
+      return "decision";
     default:
       return null;
   }

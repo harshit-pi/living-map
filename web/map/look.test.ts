@@ -36,7 +36,7 @@ test("a done task and a done ask carry the same check", () => {
   assert.equal(lookOf(task).glyph, lookOf(ask("done", false)).glyph);
 });
 
-test("a settled topic drops its box but keeps its size; one in play keeps it", () => {
+test("a settled topic is a soft fill of the same size; one in play keeps its box", () => {
   const topic = (state: string) => ({
     ...ask(state, false),
     type: "topic" as const,
@@ -44,5 +44,6 @@ test("a settled topic drops its box but keeps its size; one in play keeps it", (
   const settled = lookOf(topic("done")).box;
   assert.match(settled, /border-transparent/);
   assert.match(settled, /\bborder\b/);
+  assert.match(settled, /\bbg-panel\b/);
   assert.doesNotMatch(lookOf(topic("active")).box, /transparent/);
 });

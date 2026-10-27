@@ -49,7 +49,8 @@ test("each box stands for the tip its look needs", () => {
   assert.equal(kindOf(item("o", "option", "offered")), "option");
   assert.equal(kindOf(item("s", "assumption", "assumed")), "assumption");
   assert.equal(kindOf(item("s", "assumption", "confirmed")), "settled");
-  assert.equal(kindOf(item("d", "decision", "reopened")), null);
+  assert.equal(kindOf(item("d", "decision", "decided")), "decision");
+  assert.equal(kindOf(item("d", "decision", "reopened")), "decision");
 });
 
 test("what waits on you comes first, then the lenses, then the rest", () => {

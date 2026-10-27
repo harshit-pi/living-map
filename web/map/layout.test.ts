@@ -253,8 +253,13 @@ describe("lenses", () => {
 
   it("counts a folded topic's items", () => {
     const c = countsOf(descendants(v.items, "i14"));
-    expect(countsText(c)).toBe("1 waiting · 1 settled");
-    expect(countsText({ waiting: 0, open: 0, settled: 0 })).toBe("empty");
+    expect(countsText(c)).toBe("1 waiting · 1 decided");
+    expect(countsText({ waiting: 0, open: 0, decided: 0, settled: 0 })).toBe(
+      "empty",
+    );
+    expect(countsText({ waiting: 0, open: 1, decided: 2, settled: 3 })).toBe(
+      "1 open · 2 decided · 3 settled",
+    );
   });
 
   it("groups the list by state, waiting first", () => {
