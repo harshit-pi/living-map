@@ -248,6 +248,18 @@ export function openDb(file: string) {
   const version = num(
     (db.prepare("PRAGMA user_version").get() as Row).user_version,
   );
+  // Before a store that already holds maps is migrated, a copy of it as it
+  // is: a migration that fails rolls back on its own, but one that runs and
+  // turns out wrong would leave no way back. VACUUM INTO writes a whole,
+  // consistent copy (what the WAL holds included); the first copy made for
+  // a version is kept.
+  if (version > 0 && version < MIGRATIONS.length) {
+    const copy = `${file}.before-v${MIGRATIONS.length}`;
+    if (!fs.existsSync(copy)) {
+      db.exec(`VACUUM INTO '${copy.replaceAll("'", "''")}'`);
+      fs.chmodSync(copy, 0o600);
+    }
+  }
   for (let v = version; v < MIGRATIONS.length; v++) {
     db.exec("BEGIN IMMEDIATE");
     try {

@@ -209,6 +209,26 @@ test("a store from before the unconfirmed column opens with its items whole", ()
   const back = db.load("old")!;
   assert.equal(back.store.items.get("i1")!.state, "answered");
   assert.equal(back.store.items.get("i1")!.unconfirmed, undefined);
+  // the store as it was before migrating, kept beside it, yours alone
+  const copy = `${file}.before-v3`;
+  assert.equal(fs.statSync(copy).mode & 0o777, 0o600);
+  const kept = new DatabaseSync(copy);
+  assert.equal(
+    Number(
+      (kept.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ),
+    2,
+  );
+  assert.equal(
+    (
+      kept.prepare("SELECT title FROM items WHERE id = 'i1'").get() as {
+        title: string;
+      }
+    ).title,
+    "Which store?",
+  );
+  kept.close();
   assert.equal(
     Number(
       (db.db.prepare("PRAGMA user_version").get() as { user_version: number })
@@ -217,4 +237,14 @@ test("a store from before the unconfirmed column opens with its items whole", ()
     3,
   );
   db.close();
+});
+
+test("a new store, or one already migrated, makes no copy", () => {
+  const file = path.join(tmp, "new", "ledger.db");
+  openDb(file).close();
+  openDb(file).close();
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(file)).filter((f) => f.includes("before")),
+    [],
+  );
 });
