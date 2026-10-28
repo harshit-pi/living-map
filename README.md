@@ -1,13 +1,13 @@
 <p align="center"><img src="docs/logo.svg" alt="Living Map" width="260"></p>
 
-<p align="center"><b>Claude asked you something 40 turns ago. It's still waiting.</b><br>
-Living Map sits beside your Claude Code chat and draws it as a map every turn: what waits on you, what is still open, what was decided. You answer Claude right on the map.</p>
+<p align="center"><b>See where your Claude Code chat stands, at a glance.</b><br>
+Living Map draws your chat as a mind map while you work: what waits on you, what is still open, what was decided. You answer Claude right on the map.</p>
 
 https://github.com/user-attachments/assets/73b3762c-e3b1-4c2b-9492-965592b0af54
 
 ---
 
-Living Map is a view for you, not memory for Claude. Claude still has the whole chat; what gets lost is what it asked you, and what the two of you decided an hour ago. Living Map reads your chat as it grows and keeps it as one mind map in a page beside it:
+When a project gets too big for your head, you draw a mind map. When a Claude chat does, you scroll, and coming back to it means asking Claude "where were we?" and waiting while it digs through everything. Living Map is that answer, already sitting beside the chat. It is a view for you, not memory for Claude: it reads your chat as it grows and keeps it as one mind map in a page beside it:
 
 - **It follows by itself.** Type `/living-map` once in a chat. A few seconds after each turn, the map files what was new: questions waiting on you, tasks Claude is on, decisions made, what changed in your code. You never tell it what happened.
 - **What waits on you stays on top.** A question Claude asked stays in the strip at the top of the map until you deal with it, however far the chat has scrolled since. When work is waiting on your answer, the map draws what it holds up.
@@ -19,7 +19,8 @@ Living Map is a view for you, not memory for Claude. Claude still has the whole 
 
 ### Isn't this just…?
 
-- **A handover file, or ADRs?** Those work between sessions, and Living Map writes the handover for you. The map is for the middle of a session, when Claude asks something and it scrolls away.
+- **Asking Claude "where were we?"** That works, but it costs a turn and answers in a wall of text. The map is already there when you come back, and you can click it.
+- **A handover file, or ADRs?** Those work between sessions, and Living Map writes the handover for you. The map is for the moment you come back to a chat, or when Claude asks something and it scrolls away.
 - **Shorter sessions?** Keep them short too. A two-hour session buries a question just as well, and with several sessions the question becomes which one is waiting on you.
 - **A changelog?** A changelog says what changed. It doesn't say what Claude asked and is still waiting on, or what you decided and why.
 - **A memory tool?** Memory tools help Claude remember. Living Map helps you see where the chat stands.
