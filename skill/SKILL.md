@@ -66,6 +66,7 @@ It ends the moment the map has something for you, printing it after `FROM YOUR L
     | curl -s -X POST localhost:{{PORT}}/api/inbox -H 'content-type: application/json' -H "X-LM-Token: $(cat ~/.living-map/token)" -d @-
   ```
 
+- **A handover of this chat is kept on disk**, rewritten whenever its map changes (a turn filed, something done on the map): what waits on the user, the next steps, what is still open, and what was decided, when and why. For this project folder it is `~/.living-map/handover/projects/<folder>.md`, where `<folder>` is the folder's full path with every character other than a letter or digit turned into `-` (Claude Code names its own project folders the same way); that file holds the chat most recently changed here and lists the others. When the user asks for a handover, or to carry on in a new chat, read that file instead of going back through the chat. Only when the user asks, add one line to the project's CLAUDE.md so every new chat starts from it: `Before anything else, read ~/.living-map/handover/projects/<folder>.md if it exists.`
 - When the user asks what is pending, open or decided ("what's pending", "what's waiting on me", "what's still open", "what did we decide"), read that one section of the map, then answer. `lens` is `waiting`, `open` or `decided`; it costs a few lines, never the whole chat:
 
   ```bash
