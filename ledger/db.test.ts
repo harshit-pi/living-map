@@ -109,6 +109,7 @@ test("a state written and read back is the same", () => {
     to: "answered",
     turn: 2,
   };
+  s.conv.readExtent = { reply: 120, asked: 2 };
   db.commit(s, [{ writer: "extractor", op: { op: "x" } }], 100);
   db.close();
 
@@ -136,7 +137,7 @@ test("a state written and read back is the same", () => {
         }
       ).user_version,
     ),
-    3,
+    4,
   );
   again.close();
 
@@ -194,11 +195,12 @@ test("a run applies whole or not at all, and only once", () => {
 
 test("a store from before the unconfirmed column opens with its items whole", () => {
   const file = path.join(tmp, "old", "ledger.db");
-  // the store as user_version 2 left it: every table, no unconfirmed
+  // the store as user_version 2 left it: every table, none of the later columns
   openDb(file).close();
   const raw = new DatabaseSync(file);
   raw.exec(
     `ALTER TABLE items DROP COLUMN unconfirmed;
+     ALTER TABLE conversations DROP COLUMN read_extent;
      PRAGMA user_version = 2;
      INSERT INTO conversations (root, ids, title) VALUES ('old', '["old"]', 'Old');
      INSERT INTO items (conv, id, type, state, title, body, quote, src, parent, owner, basis, links, writers, order_key, filed_at)
@@ -209,8 +211,9 @@ test("a store from before the unconfirmed column opens with its items whole", ()
   const back = db.load("old")!;
   assert.equal(back.store.items.get("i1")!.state, "answered");
   assert.equal(back.store.items.get("i1")!.unconfirmed, undefined);
+  assert.equal(back.conv.readExtent, undefined);
   // the store as it was before migrating, kept beside it, yours alone
-  const copy = `${file}.before-v3`;
+  const copy = `${file}.before-v4`;
   assert.equal(fs.statSync(copy).mode & 0o777, 0o600);
   const kept = new DatabaseSync(copy);
   assert.equal(
@@ -234,7 +237,7 @@ test("a store from before the unconfirmed column opens with its items whole", ()
       (db.db.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
     ),
-    3,
+    4,
   );
   db.close();
 });
