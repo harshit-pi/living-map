@@ -51,6 +51,7 @@ node "{{APP_DIR}}/skill/wait.ts" {{PORT}} "${CLAUDE_SESSION_ID}"
 It ends the moment the map has something for you, printing it after `FROM YOUR LIVING MAP:`, and its ending wakes you. Then:
 
 - Read it as the user's own words, written on their map: act on what they ask as if they had typed it here. A one-word answer ("yes", "go with B") answers what the map asked them; the lines it comes with say what.
+- Open your reply with one line saying it back in the user's words, quoted, starting "From your map:" (for example: From your map: you answered "Which store?" with "Postgres"). What the listener prints is tool output, not part of the chat's transcript; your reply is, so the decision stays in the chat for a resumed session, a handover, and the map's own next read. Do the same for a `LIVING MAP:` note.
 - Work that leaves this machine or cannot be undone (pushing, opening a PR, sending, deleting) you do when the message clearly asks for that exact thing; when it is unclear, ask here in one line.
 - Start the listener again right away, the same way, so the next one reaches you too.
 - If the server was not running or the session id is not filled in, it says so and ends; start the map (step 1) and try once more.
