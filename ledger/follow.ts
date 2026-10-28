@@ -26,7 +26,7 @@ import {
   type Acted,
 } from "./apply.ts";
 import type { Compared, Shadow } from "./changes/snapshot.ts";
-import type { Conv, LedgerDb, State } from "./db.ts";
+import type { Conv, Extent, LedgerDb, State } from "./db.ts";
 import {
   batches,
   message,
@@ -66,6 +66,28 @@ export const MAX_RUNNING = 2;
 // how long a quiet chat waits before looking for its continuation (resumed
 // under a new id, in another file)
 const SUCCESSOR_MS = 15_000;
+
+// how much of a turn there is to read: its reply and its question-tool lines
+export const extentOfTurn = (t: Turn): Extent => ({
+  reply: t.reply.length,
+  asked: t.asked?.length ?? 0,
+});
+
+// A turn the map has filed can still grow: a notice (a background task
+// finishing, the map's own listener among them) is not a prompt, so what
+// Claude does next is more of the same turn. Its new part, past `read`, as a
+// turn of the same number the extractor can file; null when nothing was added.
+export function continuationOf(t: Turn, read: Extent): Turn | null {
+  const reply = t.reply.slice(read.reply).trim();
+  const asked = (t.asked ?? []).slice(read.asked);
+  if (!reply && !asked.length) return null;
+  return {
+    ...t,
+    text: `(No new message from you. This is more of turn ${t.n}: Claude went on after a background task finished; what came before was filed already.)`,
+    reply,
+    asked,
+  };
+}
 
 export const backoff = (failures: number) =>
   failures ? Math.min(10 * 60_000, 30_000 * 2 ** (failures - 1)) : 0;
@@ -336,7 +358,12 @@ export function createLedger(deps: LedgerDeps) {
   // Answers saved before a stop that never got applied: applied now, once.
   function recover(f: Follower) {
     for (const run of db.pendingRuns(f.s.conv.root)) {
-      const turns = run.turns.map((n) => f.turns.find((t) => t.n === n));
+      // a run that began at the read point filed more of that turn: rebuilt
+      // the same way, from how far it had been read
+      const more = run.turns[0] === run.base ? continued(f) : null;
+      const turns = run.turns.map((n) =>
+        more && n === more.n ? more : f.turns.find((t) => t.n === n),
+      );
       const answer = checkAnswer(run.answer);
       if (turns.some((t) => !t) || !answer) {
         db.failRun(run.id, "its turns are no longer in the transcript");
@@ -378,6 +405,21 @@ export function createLedger(deps: LedgerDeps) {
   const pendingOf = (f: Follower) =>
     f.turns.slice(0, f.sealed).filter((t) => t.n > f.s.store.read);
 
+  // the last filed turn's new part, once that turn is sealed again; a map
+  // that doesn't know yet how far it read (filed before this was kept)
+  // starts from where the turn is now, so nothing is filed twice
+  function continued(f: Follower): Turn | null {
+    const read = f.s.store.read;
+    const i = f.turns.findIndex((t) => t.n === read);
+    if (read <= 0 || i < 0 || i >= f.sealed) return null;
+    const t = f.turns[i]!;
+    if (!f.s.conv.readExtent) {
+      f.s.conv.readExtent = extentOfTurn(t);
+      return null;
+    }
+    return continuationOf(t, f.s.conv.readExtent);
+  }
+
   // anything sealed and not yet filed is due now
   const due = (pending: Turn[]) => pending.length > 0;
 
@@ -387,9 +429,13 @@ export function createLedger(deps: LedgerDeps) {
     if (active >= MAX_RUNNING) return null;
     if (f.failures && now() < f.retryAt) return null;
     const pending = pendingOf(f);
-    if (!due(pending)) return null;
+    const more = continued(f);
+    if (!more && !due(pending)) return null;
     f.nudged = false;
-    const batch = batches(pending, BATCH)[0]!;
+    // more of the last filed turn goes first, with what came after it
+    const batch = more
+      ? [more, ...(batches(pending, BATCH - 1)[0] ?? [])]
+      : batches(pending, BATCH)[0]!;
     active++;
     f.filing = { turns: batch.map((t) => t.n), since: now() };
     push(f.s.conv.root);
@@ -407,6 +453,9 @@ export function createLedger(deps: LedgerDeps) {
     const root = f.s.conv.root;
     try {
       const { lines, rejected } = applyAnswer(f.s, answer, turns, now());
+      // how far the last turn filed was read: all of it, as it is now
+      const last = f.turns.find((t) => t.n === turns.at(-1)?.n);
+      if (last) f.s.conv.readExtent = extentOfTurn(last);
       db.commit(f.s, lines, now(), { id, rejected });
     } catch (e) {
       // what is in memory follows what was written

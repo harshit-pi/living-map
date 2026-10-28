@@ -71,6 +71,17 @@ function chat() {
       this.you(you);
       this.claude(claude);
     },
+    // a background task finishing: a notice, not a prompt
+    notice(summary: string) {
+      write({
+        ...base("user"),
+        message: {
+          role: "user",
+          content: `<task-notification>\n<status>completed</status>\n<summary>${summary}</summary>\n</task-notification>`,
+        },
+        promptSource: "sdk",
+      });
+    },
   };
 }
 
@@ -703,6 +714,74 @@ test("your word on an item the map closed without a quote settles it", () => {
     assert.equal(item.unconfirmed, undefined);
     assert.equal(item.writers.state, "you");
   }
+});
+
+test("what Claude adds to a filed turn after a background task finishes is filed as more of that turn, once", async () => {
+  const c = chat();
+  const t = setup();
+  const root = t.link(c);
+  c.turn("Redis or Postgres for sessions?", "Which one do you want?");
+  t.advance(6000);
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 1);
+  // the map's listener ends; Claude goes on in the same turn
+  c.notice('Background command "Listen for messages from the map" completed');
+  c.claude(
+    'From your map: you answered "Redis or Postgres?" with "Postgres". Going with Postgres.',
+  );
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 1, "not before the turn is over and still");
+  t.advance(6000);
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 2, "the new part is filed");
+  const m = t.calls[1]!.message;
+  assert.match(
+    m,
+    /TURN 1 · YOU:\n\(No new message from you\. This is more of turn 1/,
+  );
+  assert.match(m, /TURN 1 · CLAUDE:\nFrom your map: you answered/);
+  assert.doesNotMatch(m, /Which one do you want\?/, "only what is new");
+  assert.equal(t.ledger.view(root)!.turns, 1, "still one turn");
+  // filed once: nothing more to do
+  t.advance(6000);
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 2);
+  // a server that starts again knows how far it read
+  const again = setup(filing, t.file);
+  again.link(c);
+  again.advance(6000);
+  await again.ledger.tick();
+  await again.ledger.tick();
+  assert.equal(again.calls.length, 0);
+});
+
+test("a map filed before this was kept starts from where the turn is, and files only what comes after", async () => {
+  const c = chat();
+  const t = setup();
+  const root = t.link(c);
+  c.turn("Which region?", "EU or US?");
+  t.advance(6000);
+  await t.ledger.tick();
+  assert.equal(t.calls.length, 1);
+  // as an older version left it: no extent stored, and the turn grew since
+  c.notice("a build finished");
+  c.claude("The build passed.");
+  const s = t.db.load(root)!;
+  delete s.conv.readExtent;
+  t.db.commit(s, [], 0);
+  const again = setup(filing, t.file);
+  again.link(c);
+  again.advance(6000);
+  await again.ledger.tick();
+  await again.ledger.tick();
+  assert.equal(again.calls.length, 0, "what was there is not filed twice");
+  c.notice("tests finished");
+  c.claude("All tests pass.");
+  await again.ledger.tick();
+  again.advance(6000);
+  await again.ledger.tick();
+  assert.equal(again.calls.length, 1);
+  assert.match(again.calls[0]!.message, /TURN 1 · CLAUDE:\nAll tests pass\./);
 });
 
 test("the handover is rewritten when a turn is filed and when you act, and a failing one holds nothing up", async () => {

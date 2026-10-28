@@ -26,7 +26,14 @@ export type Conv = {
   following: boolean;
   linkedAt: number;
   skipped: number; // older turns left unread when it was linked late
+  // how much of the last filed turn the map has read: its reply's length and
+  // its question-tool lines. Claude can add to a turn after a notice (a
+  // background task finishing) with no new prompt; what lies past this is
+  // filed as more of that turn. Absent until first known.
+  readExtent?: Extent;
 };
+
+export type Extent = { reply: number; asked: number };
 
 // what the map keeps of an item beside the item itself
 export type Meta = {
@@ -219,6 +226,8 @@ const MIGRATIONS: string[] = [
    );`,
   // a wait the extractor closed with no quote behind it (Item.unconfirmed)
   `ALTER TABLE items ADD COLUMN unconfirmed TEXT;`,
+  // how much of the last filed turn was read (Conv.readExtent)
+  `ALTER TABLE conversations ADD COLUMN read_extent TEXT;`,
 ];
 
 type Row = Record<string, SQLInputValue>;
@@ -232,6 +241,13 @@ const parse = <T>(v: unknown, fallback: T): T => {
   }
 };
 const text = (v: unknown) => (typeof v === "string" ? v : "");
+// a stored extent, when it is one
+const extentOf = (v: unknown): { readExtent?: Extent } => {
+  const e = parse<Partial<Extent> | null>(v, null);
+  return e && typeof e.reply === "number" && typeof e.asked === "number"
+    ? { readExtent: { reply: e.reply, asked: e.asked } }
+    : {};
+};
 const num = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
 
 export type LedgerDb = ReturnType<typeof openDb>;
@@ -307,15 +323,16 @@ export function openDb(file: string) {
     following: num(r.following) === 1,
     linkedAt: num(r.linked_at),
     skipped: num(r.skipped),
+    ...extentOf(r.read_extent),
   });
 
   const putConv = db.prepare(
-    `INSERT INTO conversations (root, ids, title, cwd, file, looked_turn, following, linked_at, skipped)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO conversations (root, ids, title, cwd, file, looked_turn, following, linked_at, skipped, read_extent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (root) DO UPDATE SET ids = excluded.ids, title = excluded.title,
        cwd = excluded.cwd, file = excluded.file, looked_turn = excluded.looked_turn,
        following = excluded.following, linked_at = excluded.linked_at,
-       skipped = excluded.skipped`,
+       skipped = excluded.skipped, read_extent = excluded.read_extent`,
   );
   const saveConv = (c: Conv) =>
     putConv.run(
@@ -328,6 +345,7 @@ export function openDb(file: string) {
       c.following ? 1 : 0,
       c.linkedAt,
       c.skipped,
+      c.readExtent ? json(c.readExtent) : null,
     );
 
   const putItem = db.prepare(
