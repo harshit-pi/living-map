@@ -126,6 +126,7 @@ function setup(
   script: Script = filing,
   dbFile?: string,
   changes?: Parameters<typeof createLedger>[0]["changes"],
+  handover?: Parameters<typeof createLedger>[0]["handover"],
 ) {
   let clock = Date.now();
   const calls: ExtractRequest[] = [];
@@ -145,6 +146,7 @@ function setup(
     everyMs: 0,
     findSuccessor: () => null,
     changes,
+    handover,
   });
   return {
     db,
@@ -701,4 +703,36 @@ test("your word on an item the map closed without a quote settles it", () => {
     assert.equal(item.unconfirmed, undefined);
     assert.equal(item.writers.state, "you");
   }
+});
+
+test("the handover is rewritten when a turn is filed and when you act, and a failing one holds nothing up", async () => {
+  const seen: string[] = [];
+  const c = chat();
+  const t = setup(filing, undefined, undefined, (s, v) => {
+    seen.push(
+      v.items
+        .filter((i) => i.type === "question")
+        .map((i) => `${i.title}:${i.state}`)
+        .join(","),
+    );
+    if (seen.length > 3) throw new Error("disk full");
+    void s;
+  });
+  const root = t.link(c);
+  c.turn("Should we use Postgres?", "Postgres? Yes or no?");
+  t.advance(6000);
+  await t.ledger.tick();
+  assert.ok(seen.includes("Should we use Postgres?:open"), "filed");
+  const q = t.ledger.view(root)!.items.find((i) => i.type === "question")!;
+  t.ledger.act(root, { type: "answer", item: q.id, text: "Yes" });
+  assert.equal(seen.at(-1), "Should we use Postgres?:answered", "you acted");
+  // the writer failing leaves the map and your action standing
+  const r = t.ledger.act(root, { type: "fold", item: q.id, folded: false });
+  for (let k = 0; k < 3; k++)
+    t.ledger.act(root, { type: "fold", item: q.id, folded: k % 2 === 0 });
+  assert.equal(r.error, undefined);
+  assert.equal(
+    t.ledger.view(root)!.items.find((i) => i.id === q.id)!.state,
+    "answered",
+  );
 });

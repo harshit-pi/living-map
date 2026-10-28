@@ -15,6 +15,7 @@ import { compare, shadowFor, snapshot } from "./changes/snapshot.ts";
 import { summarize } from "./chats.ts";
 import { openDb, type Conv } from "./db.ts";
 import { createLedger, type Ledger } from "./follow.ts";
+import { writeHandover } from "./handover.ts";
 import { heardAt as heardAtOf, post } from "./outbox.ts";
 import { outline as outlineOf, type OutlineLens } from "./outline.ts";
 import { createSides, type Sides } from "./sides.ts";
@@ -71,6 +72,7 @@ export function startLedger(
     tell: tellChat,
     heardAt,
     model: () => ledgerModel(),
+    handover: (s, v) => writeHandover(HOME, s, v, db.conversations()),
     changes: {
       shadowFor: (cwd) => shadowFor(HOME, cwd),
       snapshot,
