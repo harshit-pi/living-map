@@ -10,6 +10,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { fromMap } from "./restate.ts";
+
 // the local API's token (see server/auth.ts), written by the server on start
 const token = (() => {
   try {
@@ -46,7 +48,7 @@ async function main() {
       );
       const { text } = (await r.json()) as { text?: string };
       if (text?.trim()) {
-        console.log(`FROM YOUR LIVING MAP:\n${text}`);
+        console.log(fromMap(text));
         return;
       }
     } catch {

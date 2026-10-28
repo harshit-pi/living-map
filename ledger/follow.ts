@@ -104,6 +104,8 @@ export type LedgerDeps = {
   // the model the extractor runs on ("" for Claude Code's default)
   model?: () => string;
   now?: () => number;
+  // the chat's handover file, rewritten with its map (handover.ts)
+  handover?: (s: State, v: LedgerView) => void;
   everyMs?: number; // 0: no timer (tests call tick)
   findSuccessor?: (file: string, id: string) => string | null;
   // what changed in the system: snapshots at each newly sealed turn (absent
@@ -650,7 +652,17 @@ export function createLedger(deps: LedgerDeps) {
 
   function push(root: string) {
     const v = viewOf(root);
-    if (v) deps.emit({ type: "ledger", conv: root, view: v });
+    if (!v) return;
+    deps.emit({ type: "ledger", conv: root, view: v });
+    const hit = stateOf(root);
+    // a handover that can't be written never holds the map up
+    try {
+      if (hit) deps.handover?.(hit.s, v);
+    } catch (e) {
+      console.error(
+        `[ledger] ${root}: handover not written: ${(e as Error).message}`,
+      );
+    }
   }
 
   // A change to a chat's items from outside the extractor (you, a side

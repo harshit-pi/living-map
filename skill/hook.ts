@@ -8,6 +8,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { mapNote } from "./restate.ts";
+
 // the local API's token (see server/auth.ts), written by the server on start
 const token = (() => {
   try {
@@ -60,7 +62,7 @@ async function main() {
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "UserPromptSubmit",
-        additionalContext: `LIVING MAP: the user keeps a live map of this conversation at http://localhost:${port}/, with side chats that know everything said here. Since your last turn there:\n${text}\nTake this into account where it bears on the user's message; they may refer to it.`,
+        additionalContext: mapNote(text, port),
       },
     }),
   );
