@@ -279,6 +279,11 @@ function Screen({
     }),
     [items, changed],
   );
+  // waits the map closed with no quote behind it, for you to check
+  const toCheck = useMemo(
+    () => items.filter((i) => !i.waiting && i.unconfirmed).length,
+    [items],
+  );
   const lit = useMemo((): ((i: LedgerItem) => boolean) | null => {
     if (searching && query.trim()) {
       const ids = new Set(search(items, query).map((i) => i.id));
@@ -685,7 +690,15 @@ function Screen({
             />
           )
         }
+        toCheck={toCheck}
         onLens={(l) => {
+          // nothing waits but some closes need checking: the list opens on them
+          if (l === "waiting" && !counts.waiting && toCheck) {
+            setChangesFirst(false);
+            setListFirst("check");
+            setDrawer(true);
+            return;
+          }
           setLens(l);
           if (l === "changed" && view.changes.length) {
             setChangesFirst(true);

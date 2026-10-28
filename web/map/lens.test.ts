@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { heldUp, linkedTo, litBy, matcher } from "./lens.ts";
+import { groupsOf, heldUp, linkedTo, litBy, matcher } from "./lens.ts";
 import type { LedgerItem } from "../../shared/ledger.ts";
 
 const item = (
@@ -88,4 +88,25 @@ test("a link reads from either end", () => {
     ["answers<i6"],
   );
   assert.deepEqual(linkedTo(items, "i1"), []);
+});
+
+test("closes the map made with no quote get their own group, right under what waits on you", () => {
+  const g = groupsOf([
+    item("t", "topic"),
+    item("w", "ask", { state: "waiting", waiting: true, open: true }),
+    item("c", "question", {
+      state: "answered",
+      unconfirmed: { from: "open", to: "answered", turn: 4 },
+    }),
+    item("s", "question", { state: "answered" }),
+  ]);
+  assert.deepEqual(
+    g.map((x) => [x.id, x.items.map((i) => i.id)]),
+    [
+      ["waiting", ["w"]],
+      ["check", ["c"]],
+      ["settled", ["s"]],
+    ],
+  );
+  assert.equal(g[1]!.label, "Closed by the map, to check");
 });

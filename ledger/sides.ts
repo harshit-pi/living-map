@@ -504,7 +504,11 @@ export function applyOps(
     if (op.op === "retire") {
       item.retired = op.reason?.trim() || "retired from a side chat";
     } else {
-      if (op.state) item.state = op.state;
+      // a proposal you applied: where it stands is settled
+      if (op.state) {
+        item.state = op.state;
+        delete item.unconfirmed;
+      }
       if (op.title) item.title = op.title;
       if (op.body) item.body = op.body;
       if (op.owner) item.owner = op.owner;

@@ -311,6 +311,57 @@ test("a state change lands even when its quote doesn't check out", () => {
   assert.equal(s.items.get("i2")!.state, "answered");
 });
 
+test("a wait closed with no quote behind it is marked, until a quoted change or waiting again settles it", () => {
+  const close = (st: Store, quote: string, state = "answered") =>
+    apply(
+      st,
+      {
+        topics: [],
+        ops: [{ op: "update", item: "i2", state, quote, turn: 2 }],
+      },
+      [T2],
+    );
+  // no quote from the chat: closed, and marked
+  const s = first();
+  close(s, "words nobody said here");
+  assert.deepEqual(s.items.get("i2")!.unconfirmed, {
+    from: "open",
+    to: "answered",
+    turn: 2,
+  });
+  // a later change that quotes the chat settles it
+  close(s, "Go with VPC peering.");
+  assert.equal(s.items.get("i2")!.unconfirmed, undefined);
+  // quoted the first time: nothing to check
+  const q = first();
+  close(q, "Go with VPC peering.");
+  assert.equal(q.items.get("i2")!.unconfirmed, undefined);
+  // reopened by the extractor: waiting again, nothing to check
+  const r = first();
+  close(r, "words nobody said here");
+  close(r, "words nobody said here", "open");
+  assert.equal(r.items.get("i2")!.unconfirmed, undefined);
+  // something that wasn't waiting on you is never marked
+  const o = first();
+  apply(
+    o,
+    {
+      topics: [],
+      ops: [
+        {
+          op: "update",
+          item: "i3",
+          state: "dropped",
+          quote: "nothing like it",
+          turn: 2,
+        },
+      ],
+    },
+    [T2],
+  );
+  assert.equal(o.items.get("i3")!.unconfirmed, undefined);
+});
+
 test("creates with no ref are named by their place, and a turn with no topic keeps the one before", () => {
   const s = first();
   const t3 = turn(

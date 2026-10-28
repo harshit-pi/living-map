@@ -28,6 +28,9 @@ export type LedgerItem = {
   // the chat has taken it from its inbox yet (the hook or the listener)
   sent?: { at: number; heard: boolean };
   proposals?: number; // side-chat proposals still waiting on you
+  // a wait the map closed with no quote from the chat behind it: what it
+  // was, what it became and on which turn, until you settle it
+  unconfirmed?: { from: string; to: string; turn: number };
 };
 
 // what changed in the system this session, one summary (see ledger/changes)

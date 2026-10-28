@@ -151,6 +151,8 @@ export function applyAction(s: State, a: LedgerAction, turns: number): Acted {
       };
     item.state = state;
     item.writers.state = "you";
+    // you said where it stands: nothing left to check
+    delete item.unconfirmed;
     return {
       lines: [{ writer: "you", op: { op: "update", item: item.id, state } }],
       tell: tellOf(s, item, state),
@@ -198,6 +200,7 @@ export function applyAction(s: State, a: LedgerAction, turns: number): Acted {
     if (settled) {
       item.state = settled;
       item.writers.state = "you";
+      delete item.unconfirmed;
     }
     return {
       lines: [

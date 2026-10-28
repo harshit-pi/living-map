@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
 import { applyAnswer, place } from "./apply.ts";
@@ -103,6 +104,11 @@ test("a state written and read back is the same", () => {
   );
   s.meta.get("i1")!.folded = true;
   s.store.items.get("i3")!.retired = "merged";
+  s.store.items.get("i2")!.unconfirmed = {
+    from: "open",
+    to: "answered",
+    turn: 2,
+  };
   db.commit(s, [{ writer: "extractor", op: { op: "x" } }], 100);
   db.close();
 
@@ -130,7 +136,7 @@ test("a state written and read back is the same", () => {
         }
       ).user_version,
     ),
-    2,
+    3,
   );
   again.close();
 
@@ -183,5 +189,32 @@ test("a run applies whole or not at all, and only once", () => {
   assert.throws(() => db.commit(s, [], 3, { id, rejected: [] }), /not waiting/);
   assert.deepEqual(db.spend("c2", 0), { calls: 1, usd: 0.02, todayUsd: 0.02 });
   assert.deepEqual(db.spend("c2", 10), { calls: 1, usd: 0.02, todayUsd: 0 });
+  db.close();
+});
+
+test("a store from before the unconfirmed column opens with its items whole", () => {
+  const file = path.join(tmp, "old", "ledger.db");
+  // the store as user_version 2 left it: every table, no unconfirmed
+  openDb(file).close();
+  const raw = new DatabaseSync(file);
+  raw.exec(
+    `ALTER TABLE items DROP COLUMN unconfirmed;
+     PRAGMA user_version = 2;
+     INSERT INTO conversations (root, ids, title) VALUES ('old', '["old"]', 'Old');
+     INSERT INTO items (conv, id, type, state, title, body, quote, src, parent, owner, basis, links, writers, order_key, filed_at)
+     VALUES ('old', 'i1', 'question', 'answered', 'Which store?', '', 'Which store?', '[1]', NULL, 'you', 'said', '[]', '{}', 'a1', 1);`,
+  );
+  raw.close();
+  const db = openDb(file);
+  const back = db.load("old")!;
+  assert.equal(back.store.items.get("i1")!.state, "answered");
+  assert.equal(back.store.items.get("i1")!.unconfirmed, undefined);
+  assert.equal(
+    Number(
+      (db.db.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ),
+    3,
+  );
   db.close();
 });
