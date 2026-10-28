@@ -35,6 +35,7 @@ Rules:
 - File what matters to someone coming back to this conversation later; skip chit-chat, progress narration and tool details.
 - Prefer updating an existing item over creating a near-duplicate. When a question is answered, an ask is done, an option is taken or a task finishes, update its state.
 - Every batch, check the map's open items against the new turns: an item the conversation has answered, finished or moved past gets its new state (an ask the user replied to, or that the work went on without, is done or dropped; a question nobody pursues further is dropped). Stale open items are the worst mistake: the user trusts "waiting on you".
+- A turn may end with CLAUDE'S QUESTION TOOL: questions Claude asked the user in a picker, each with its options, and what the user picked. File them as you would a question Claude asked in words, with its options; a pick is the option taken and answers the question, and it can be quoted from those lines.
 - Options only when at least two were offered for the same question. A single proposal the user says yes or no to ("Want me to…?") is an ask, done or dropped, not an option.
 - A problem Claude names as still unfixed or not yet tried is an open task (owner claude) until it is fixed or dropped.
 - A handoff to the user is its own item: when Claude opens a PR, or finishes work that the user must review, merge, deploy, approve, install or test, file an ask (owner "you") for that step ("Review and merge PR #266"), even as Claude's own task becomes done. Never file such a handoff only as a finding ("PR #259 is open") or fold it into Claude's task.
@@ -139,11 +140,18 @@ export function clip(text: string, head: number, tail = 0): string {
   return `${text.slice(0, head)}\n[…]\n${tail ? text.slice(-tail) : ""}`;
 }
 
+// the question tool's lines in full: a question and its pick sit mid-turn,
+// where Claude's reply is clipped
+export const askedText = (t: Turn) =>
+  t.asked?.length
+    ? `\n\nTURN ${t.n} · CLAUDE'S QUESTION TOOL:\n${t.asked.join("\n")}`
+    : "";
+
 export function renderTurns(turns: Turn[]): string {
   return turns
     .map(
       (t) =>
-        `TURN ${t.n} · YOU:\n${clip(t.text, PROMPT_MAX)}\n\nTURN ${t.n} · CLAUDE:\n${clip(t.reply, REPLY_HEAD, REPLY_TAIL) || "(no words)"}`,
+        `TURN ${t.n} · YOU:\n${clip(t.text, PROMPT_MAX)}\n\nTURN ${t.n} · CLAUDE:\n${clip(t.reply, REPLY_HEAD, REPLY_TAIL) || "(no words)"}${askedText(t)}`,
     )
     .join("\n\n");
 }
@@ -282,7 +290,7 @@ export function apply(
     const t = byTurn.get(op.turn);
     if (!t || !op.quote?.trim()) return false;
     const q = loose(op.quote);
-    const hay = loose(`${t.text}\n${t.reply}`);
+    const hay = loose(`${t.text}\n${t.reply}\n${(t.asked ?? []).join("\n")}`);
     if (q.length < 3) return false;
     if (hay.includes(q)) return true;
     const words = q.split(/\W+/).filter((w) => w.length > 2);

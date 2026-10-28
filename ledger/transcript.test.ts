@@ -557,3 +557,103 @@ test("a file shorter than what was read is read again from the start", async () 
   assert.equal(reset, true);
   assert.deepEqual(prompts(t), ["typed:new"]);
 });
+
+test("the question tool's questions and your picks are kept on the turn; a typed answer is not a pick", () => {
+  const ask = (
+    uuid: string,
+    parent: string,
+    id: string,
+    questions: object[],
+  ) => ({
+    ...base("assistant", uuid, parent),
+    message: {
+      role: "assistant",
+      content: [
+        { type: "tool_use", id, name: "AskUserQuestion", input: { questions } },
+      ],
+      stop_reason: "tool_use",
+    },
+  });
+  const t = read([
+    typed("p1", null, "set up sessions"),
+    ask("a1", "p1", "q1", [
+      {
+        question: "Where should sessions live?",
+        header: "Store",
+        multiSelect: false,
+        options: [
+          { label: "Redis", description: "fast" },
+          { label: "Postgres", description: "durable" },
+        ],
+      },
+      {
+        question: "Which regions?",
+        header: "Regions",
+        multiSelect: true,
+        options: [
+          { label: "EU", description: "" },
+          { label: "US", description: "" },
+        ],
+      },
+    ]),
+    user(
+      "r1",
+      "a1",
+      [
+        {
+          tool_use_id: "q1",
+          type: "tool_result",
+          content: "Your questions have been answered: …",
+        },
+      ],
+      {
+        toolUseResult: {
+          questions: [],
+          answers: {
+            "Where should sessions live?": "Postgres",
+            "Which regions?": ["EU", "US"],
+          },
+        },
+        sourceToolAssistantUUID: "a1",
+      },
+    ),
+    claude("c1", "r1", "Postgres it is."),
+    typed("p2", "c1", "and the cache?"),
+    ask("a2", "p2", "q2", [
+      { question: "Cache TTL?", options: [{ label: "1h" }, { label: "1d" }] },
+    ]),
+    user(
+      "r2",
+      "a2",
+      [
+        {
+          tool_use_id: "q2",
+          type: "tool_result",
+          content: "The user doesn't want to proceed",
+          is_error: true,
+        },
+      ],
+      {
+        toolUseResult:
+          "Error: The user doesn't want to proceed with this tool use.",
+        sourceToolAssistantUUID: "a2",
+      },
+    ),
+    typed("p3", "r2", "skip the cache for now"),
+  ]);
+  const turns = view(t, 0).turns;
+  assert.deepEqual(turns[0].asked, [
+    "Claude asked: Where should sessions live? Options: Redis · Postgres",
+    "Claude asked: Which regions? Options (any number): EU · US",
+    'You picked, for "Where should sessions live?": Postgres',
+    'You picked, for "Which regions?": EU, US',
+  ]);
+  // never as Claude's words or yours
+  assert.equal(turns[0].reply, "Postgres it is.");
+  assert.equal(turns[0].text, "set up sessions");
+  // a question you answered by typing: asked, no pick, and your words are the next prompt
+  assert.deepEqual(turns[1].asked, [
+    "Claude asked: Cache TTL? Options: 1h · 1d",
+  ]);
+  assert.equal(turns[2].text, "skip the cache for now");
+});
