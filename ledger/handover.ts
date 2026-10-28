@@ -14,7 +14,13 @@ import type { Conv, State } from "./db.ts";
 import { isDecided } from "./outline.ts";
 import type { LedgerItem, LedgerView } from "../shared/ledger.ts";
 
-const day = (ms: number) => (ms ? new Date(ms).toISOString().slice(0, 10) : "");
+// the date in your time zone: a decision made this evening is dated today
+const day = (ms: number) => {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+};
 
 const turnOf = (i: LedgerItem) => i.src[0] ?? 0;
 const byTurn = (a: LedgerItem, b: LedgerItem) => turnOf(a) - turnOf(b);
@@ -48,7 +54,28 @@ export function handoverText(v: LedgerView, s: State): string {
   const open = items
     .filter((i) => !i.waiting && i.open && i.type !== "task")
     .sort(byTurn);
-  const decided = items.filter(isDecided).sort(byTurn);
+  // a taken option whose question a decision already answers is the same
+  // choice twice: the decision, with its reason, stands for both
+  const settledBy = new Set(
+    items
+      .filter((i) => i.type === "decision" && isDecided(i))
+      .flatMap((i) =>
+        i.links.filter((l) => l.rel === "answers").map((l) => l.to),
+      ),
+  );
+  // when it was decided: the latest turn it came up in, not when it was offered
+  const last = (i: LedgerItem) => i.src.at(-1) ?? 0;
+  const decided = items
+    .filter(
+      (i) =>
+        isDecided(i) &&
+        !(i.type === "option" && i.parent && settledBy.has(i.parent)),
+    )
+    .sort((a, b) => last(a) - last(b));
+  const forQuestion = (i: LedgerItem) => {
+    const q = i.type === "option" && i.parent ? byId.get(i.parent) : undefined;
+    return q?.type === "question" ? ` (for: ${q.title})` : "";
+  };
 
   const holds = (i: LedgerItem) => {
     const up = i.links
@@ -102,7 +129,7 @@ export function handoverText(v: LedgerView, s: State): string {
     ...(decided.length
       ? decided.map((i) => {
           const why = i.body ? `: ${i.body.replace(/\s*\n\s*/g, " ")}` : "";
-          return `- ${i.title}${why} (${[when(i), at(i)].filter(Boolean).join(", ")})`;
+          return `- ${i.title}${forQuestion(i)}${why} (${[when(i), `turn ${last(i)}`].filter(Boolean).join(", ")})`;
         })
       : ["Nothing has been decided yet."]),
   );

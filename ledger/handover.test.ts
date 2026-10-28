@@ -177,3 +177,62 @@ test("one file per chat and one per folder, yours alone, rewritten only when it 
 test("a folder is named the way Claude Code names its own", () => {
   assert.equal(folderName("/Users/me/my app"), "-Users-me-my-app");
 });
+
+test("one entry per choice, at the turn it was made, dated in your time zone", () => {
+  const s = state();
+  const st = s.store;
+  // a question with two options, one taken at turn 6; a decision answers it
+  st.items.set(
+    "i8",
+    item("i8", "question", "answered", 3, {
+      owner: "you",
+      title: "Which queue?",
+    }),
+  );
+  st.items.set(
+    "i9",
+    item("i9", "option", "taken", 3, {
+      parent: "i8",
+      title: "BullMQ",
+      src: [3, 6],
+    }),
+  );
+  st.items.set(
+    "i10",
+    item("i10", "decision", "decided", 6, {
+      title: "Use BullMQ",
+      body: "we need retries",
+      links: [{ rel: "answers", to: "i8" }],
+    }),
+  );
+  // another taken option, with no decision for its question
+  st.items.set(
+    "i11",
+    item("i11", "question", "answered", 2, {
+      owner: "you",
+      title: "Which region?",
+    }),
+  );
+  st.items.set(
+    "i12",
+    item("i12", "option", "taken", 2, {
+      parent: "i11",
+      title: "eu-west",
+      src: [2, 5],
+    }),
+  );
+  // late in the evening, local time
+  place(s, new Date(2026, 9, 27, 23, 30).getTime());
+  const t = handoverText(view(s), s);
+  const decided = t.slice(t.indexOf("## Decided"));
+  assert.doesNotMatch(
+    decided,
+    /- BullMQ/,
+    "the decision stands for its option",
+  );
+  assert.match(decided, /- Use BullMQ: we need retries \(2026-10-27, turn 6\)/);
+  assert.match(
+    decided,
+    /- eu-west \(for: Which region\?\) \(2026-10-27, turn 5\)/,
+  );
+});
