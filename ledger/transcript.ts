@@ -94,6 +94,21 @@ export interface Entry {
   // calls to Claude's own task list, in order (see tasks.ts): kept whole,
   // as they are small and say what Claude is on with no model
   plan?: { tool: string; input: unknown }[];
+  // what Claude asked through its question tool, and what you picked: the
+  // only words of either are in the tool call and its result
+  asked?: Asked[];
+  picked?: Picked[];
+}
+
+export interface Asked {
+  question: string;
+  options: string[];
+  many: boolean; // you could pick more than one
+}
+
+export interface Picked {
+  question: string;
+  answer: string;
 }
 
 export interface Transcript {
@@ -116,6 +131,9 @@ export interface Turn {
   ts: number;
   end: number;
   reply: string;
+  // questions Claude asked through its question tool and your picks, one
+  // line each, in order (Claude's text never has them)
+  asked?: string[];
   entries: string[];
   changes: ToolChange[];
   hooks: string[];
@@ -310,6 +328,48 @@ function toolChange(d: Raw, entry: string, tools: Map<string, string>) {
 export const PLAN_TOOL =
   /(?:^|__)(?:update_plan|wrap_up)$|^TodoWrite$|^Task(?:Create|Update)$/;
 
+// Claude Code's question tool: the questions are in its input, and your
+// picks in its result's `toolUseResult.answers`, keyed by question
+export const ASK_TOOL = /^AskUserQuestion$/;
+
+function askedOf(input: unknown): Asked[] {
+  const qs = (input as { questions?: unknown })?.questions;
+  if (!Array.isArray(qs)) return [];
+  return qs.flatMap((q: Raw): Asked[] => {
+    const question = str(q?.question)?.trim();
+    if (!question) return [];
+    const options = (Array.isArray(q.options) ? q.options : [])
+      .map((o: Raw) => str(o?.label)?.trim())
+      .filter((l: string | undefined): l is string => !!l);
+    return [{ question, options, many: q.multiSelect === true }];
+  });
+}
+
+// the picks a question tool's result carries; none when you answered by
+// typing instead (the result is an error, and your words are a prompt)
+function pickedOf(d: Raw, tools: Map<string, string>): Picked[] {
+  const asked = blocks(d.message?.content).some(
+    (b) =>
+      b.type === "tool_result" &&
+      b.is_error !== true &&
+      ASK_TOOL.test(tools.get(str(b.tool_use_id) ?? "") ?? ""),
+  );
+  const answers = d.toolUseResult?.answers;
+  if (!asked || !answers || typeof answers !== "object") return [];
+  return Object.entries(answers as Record<string, unknown>).flatMap(
+    ([question, a]): Picked[] => {
+      const answer = Array.isArray(a)
+        ? a.filter((x) => typeof x === "string").join(", ")
+        : typeof a === "string"
+          ? a
+          : "";
+      return question.trim() && answer.trim()
+        ? [{ question: question.trim(), answer: answer.trim() }]
+        : [];
+    },
+  );
+}
+
 export function toEntry(
   d: Raw,
   tools = new Map<string, string>(),
@@ -332,6 +392,8 @@ export function toEntry(
     if (text) e.text = text;
     const change = toolChange(d, e.uuid, tools);
     if (change) e.change = change;
+    const picked = pickedOf(d, tools);
+    if (picked.length) e.picked = picked;
   } else if (e.type === "assistant") {
     e.kind = "assistant";
     const content = d.message?.content;
@@ -341,6 +403,10 @@ export function toEntry(
         tools.set(b.id, name);
         if (PLAN_TOOL.test(name))
           (e.plan ??= []).push({ tool: name, input: b.input });
+        if (ASK_TOOL.test(name)) {
+          const asked = askedOf(b.input);
+          if (asked.length) (e.asked ??= []).push(...asked);
+        }
       }
     const text = textOf(content).trim();
     if (text) e.text = text;
@@ -480,6 +546,15 @@ export function buildTurns(
     if (e.ts) tn.end = Math.max(tn.end, e.ts);
     if (e.kind === "assistant" && e.text)
       tn.reply = tn.reply ? `${tn.reply}\n\n${e.text}` : e.text;
+    for (const q of e.asked ?? [])
+      (tn.asked ??= []).push(
+        `Claude asked: ${q.question}` +
+          (q.options.length
+            ? ` Options${q.many ? " (any number)" : ""}: ${q.options.join(" · ")}`
+            : ""),
+      );
+    for (const p of e.picked ?? [])
+      (tn.asked ??= []).push(`You picked, for "${p.question}": ${p.answer}`);
     if (e.kind === "hook") tn.hooks.push(e.uuid);
   };
   const changes = new Map<Turn | undefined, Entry[]>();

@@ -24,7 +24,7 @@ import type {
   SideRow,
   State,
 } from "./db.ts";
-import { loose, renderMap, type Op } from "./extract.ts";
+import { askedText, loose, renderMap, type Op } from "./extract.ts";
 import type { Ledger } from "./follow.ts";
 import {
   KINDS,
@@ -146,8 +146,9 @@ export function itemsPage(s: Store): string {
   return `${out.join("\n")}\n`;
 }
 
-// turns.md: what you typed and Claude's words, turn by turn; no tool calls
-// or their output
+// turns.md: what you typed and Claude's words, turn by turn, with what
+// Claude asked in its question tool and your picks; no other tool calls or
+// their output
 export function turnsPage(title: string, turns: Turn[]): string {
   const out = [
     `# ${title || "Your chat"}: the turns`,
@@ -163,6 +164,9 @@ export function turnsPage(title: string, turns: Turn[]): string {
       `## Turn ${t.n} · Claude`,
       "",
       t.reply.trim() || "(no words)",
+      ...(t.asked?.length
+        ? ["", `## Turn ${t.n} · Claude's question tool`, "", ...t.asked]
+        : []),
     );
   return `${out.join("\n")}\n`;
 }
@@ -243,7 +247,7 @@ export function startingSlice(s: Store, about: Item, turns: Turn[]): string {
         ? src
             .map(
               (t) =>
-                `TURN ${t.n} · THE USER:\n${cut(t.text)}\n\nTURN ${t.n} · CLAUDE:\n${cut(t.reply) || "(no words)"}`,
+                `TURN ${t.n} · THE USER:\n${cut(t.text)}\n\nTURN ${t.n} · CLAUDE:\n${cut(t.reply) || "(no words)"}${askedText(t)}`,
             )
             .join("\n\n")
         : "(not in the transcript any more)"

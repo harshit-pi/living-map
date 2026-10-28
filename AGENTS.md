@@ -43,7 +43,7 @@ For a UI change, also try it in the browser on a test server (below), on a linke
 ## Layout
 
 - `ledger/`: the map of a chat.
-  - `transcript.ts` reads a Claude Code transcript incrementally (uuid dedupe, compactions through `logicalParentUuid`, queued prompts, sealing, edit patches, never tool output).
+  - `transcript.ts` reads a Claude Code transcript incrementally (uuid dedupe, compactions through `logicalParentUuid`, queued prompts, sealing, edit patches, the question tool's questions and your picks as `turn.asked`, never other tool output).
   - `extract.ts` files new turns as ops: `extract()` on the provider, a fresh `claude -p` with its own system prompt, no tools, no cache and a JSON schema, on Claude Code's default model unless `{"ledgerModel": …}` in `~/.living-map/settings.json` names one; never Haiku for judgment. `apply.ts` checks every op (quotes, server-minted ids, who may write what) before it is stored.
   - `db.ts` is the store (`~/.living-map/ledger.db`, `node:sqlite`, migrated by `PRAGMA user_version`): a run's raw answer is saved first, then one transaction applies it and moves the read point.
   - `follow.ts` follows every linked chat (and measures how long after a turn seals it is filed: `health.filing` and `health.lag` in the view, one log line per run); `view.ts` builds `LedgerView` (`shared/ledger.ts`); `tasks.ts` replays Claude's own task list; `mermaid.ts` writes and parses mermaid+, the map's text form; `changes/` lifts file diffs into system-level change statements with no model.

@@ -465,3 +465,61 @@ test("links land only between live items, through refs, never to the item itself
   assert.match(message(s, []), /%% i2 blocks i5/);
   assert.match(message(s, []), /%% i6 answers i2/);
 });
+
+test("the question tool's lines reach the model in full, and can be quoted", () => {
+  const long = "Working on it. ".repeat(400);
+  const t3: Turn = {
+    ...turn(3, "Which store?", long),
+    asked: [
+      "Claude asked: Where should sessions live? Options: Redis · Postgres",
+      'You picked, for "Where should sessions live?": Postgres',
+    ],
+  };
+  const s = emptyStore("c1", "Sessions");
+  const m = message(s, [t3]);
+  // past the clipped reply, whole
+  assert.match(
+    m,
+    /TURN 3 · CLAUDE'S QUESTION TOOL:\nClaude asked: Where should sessions live\? Options: Redis · Postgres\nYou picked, for "Where should sessions live\?": Postgres/,
+  );
+  const r = apply(
+    s,
+    {
+      topics: [{ turn: 3, topic: "new1" }],
+      ops: [
+        {
+          op: "create",
+          ref: "new1",
+          type: "topic",
+          title: "Sessions",
+          quote: "Which store?",
+          turn: 3,
+        },
+        {
+          op: "create",
+          ref: "new2",
+          type: "question",
+          title: "Where should sessions live?",
+          quote: "Where should sessions live?",
+          turn: 3,
+          owner: "you",
+          parent: "new1",
+          state: "answered",
+        },
+        {
+          op: "create",
+          ref: "new3",
+          type: "option",
+          title: "Postgres",
+          quote: 'You picked, for "Where should sessions live?": Postgres',
+          turn: 3,
+          parent: "new2",
+          state: "taken",
+        },
+      ],
+    },
+    [t3],
+  );
+  assert.deepEqual(r.rejected, []);
+  assert.equal(s.items.get("i3")!.state, "taken");
+});
