@@ -129,7 +129,9 @@ export function Drawer({
 
   const itemList = groups.map((g) => (
     <section key={g.id} className="px-3 pt-3">
-      <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">
+      <h3
+        className={`text-[11px] font-medium tracking-wide uppercase ${g.id === "check" ? "text-warning-strong" : "text-muted"}`}
+      >
         {g.label} <span className="text-faint">{g.items.length}</span>
       </h3>
       <ul className="mt-1">
@@ -141,12 +143,18 @@ export function Drawer({
             i.type === "option"
               ? items.find((q) => q.id === i.parent && q.type === "question")
               : undefined;
-          const under = question ? `for: ${question.title}` : topic?.title;
+          // a close to check says what the map did, and when
+          const u = g.id === "check" ? i.unconfirmed : undefined;
+          const under = u
+            ? `marked ${u.to} · turn ${u.turn}, no quote in the chat`
+            : question
+              ? `for: ${question.title}`
+              : topic?.title;
           return (
             <li key={i.id}>
               <button
                 onClick={() => onPick(i.id)}
-                className={`flex w-full items-start gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-panel ${selected === i.id ? "bg-panel" : ""}`}
+                className={`flex w-full items-start gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-panel ${selected === i.id ? "bg-panel" : ""} ${u ? "rounded-l-none border-l-2 border-dashed border-warning-line" : ""}`}
               >
                 <span
                   aria-hidden

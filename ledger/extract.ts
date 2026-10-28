@@ -424,8 +424,16 @@ export function apply(
         continue;
       }
       // a state change lands even when its quote doesn't check out: an
-      // item left open by mistake costs more than one closed a turn early
-      if (can("state")) item.state = op.state;
+      // item left open by mistake costs more than one closed a turn early.
+      // A wait closed that way is marked, so it can be checked: the mark
+      // goes once a quoted change, or the item waiting again, settles it.
+      if (can("state")) {
+        const was = isWaiting(item);
+        const from = item.state;
+        item.state = op.state;
+        if (isWaiting(item) || quoted(op)) delete item.unconfirmed;
+        else if (was) item.unconfirmed = { from, to: op.state, turn: op.turn };
+      }
     }
     if (op.title?.trim() && can("title"))
       item.title = op.title.trim().slice(0, 120);

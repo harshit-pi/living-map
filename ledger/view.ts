@@ -62,6 +62,7 @@ export function buildView(s: State, f: Facts): LedgerView {
     src: i.src,
     parent: i.parent,
     ...(i.owner ? { owner: i.owner } : {}),
+    ...(i.unconfirmed ? { unconfirmed: i.unconfirmed } : {}),
     basis: i.basis,
     links: i.links,
     waiting: isWaiting(i, store.read),

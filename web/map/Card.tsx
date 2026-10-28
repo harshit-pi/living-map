@@ -15,6 +15,13 @@ const BASIS: Record<LedgerItem["basis"], string> = {
   side: "From a side chat",
 };
 
+// the button that keeps what the map did, in words for what it did
+const CONFIRM: Record<string, string> = {
+  answered: "Yes, it's answered",
+  done: "Yes, it's done",
+  dropped: "Yes, drop it",
+};
+
 const turns = (src: number[]) =>
   src.length === 0
     ? ""
@@ -185,6 +192,47 @@ export function Card({
       >
         {item.title}
       </h2>
+      {item.unconfirmed && !item.waiting && (
+        // a wait the map closed with no quote from the chat: say so, and let
+        // you settle it either way (both are yours, so the extractor can't
+        // undo them)
+        <div className="mt-2 rounded-lg bg-warning-soft px-2.5 py-1.5 text-[12px] leading-snug text-warning-strong">
+          The map marked this {item.unconfirmed.to} at turn{" "}
+          {item.unconfirmed.turn}, but nothing it could find in the chat says
+          so.
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <button
+              className={button}
+              disabled={busy}
+              title="It still waits on you: back where it was"
+              onClick={() =>
+                void run({
+                  type: "state",
+                  item: item.id,
+                  state: item.unconfirmed!.from,
+                })
+              }
+            >
+              Still waiting
+            </button>
+            <button
+              className={button}
+              disabled={busy}
+              title="Keep it as the map has it"
+              onClick={() =>
+                void run({
+                  type: "state",
+                  item: item.id,
+                  state: item.unconfirmed!.to,
+                })
+              }
+            >
+              {CONFIRM[item.unconfirmed.to] ??
+                `Yes, it's ${item.unconfirmed.to}`}
+            </button>
+          </div>
+        </div>
+      )}
       {item.body && (
         <p
           data-content

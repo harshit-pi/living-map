@@ -671,3 +671,34 @@ test("the view says which turns are being filed, and how long after a turn seale
     modelMs: 5,
   });
 });
+
+test("your word on an item the map closed without a quote settles it", () => {
+  for (const [action, state] of [
+    [{ type: "state", item: "i1", state: "open" }, "open"],
+    [{ type: "state", item: "i1", state: "answered" }, "answered"],
+    [{ type: "answer", item: "i1", text: "Postgres" }, "answered"],
+  ] as const) {
+    const store = emptyStore("c1", "A chat");
+    store.items.set("i1", {
+      id: "i1",
+      type: "question",
+      state: "answered",
+      title: "Which store?",
+      body: "",
+      quote: "",
+      src: [1],
+      parent: null,
+      owner: "you",
+      basis: "said",
+      links: [],
+      writers: { state: "extractor" },
+      unconfirmed: { from: "open", to: "answered", turn: 1 },
+    });
+    const s = { conv: {} as Conv, store, meta: new Map() };
+    const item = store.items.get("i1")!;
+    applyAction(s, action, 1);
+    assert.equal(item.state, state);
+    assert.equal(item.unconfirmed, undefined);
+    assert.equal(item.writers.state, "you");
+  }
+});

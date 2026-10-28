@@ -149,7 +149,11 @@ export function countsText(c: Counts): string {
 export type Group = { id: string; label: string; items: LedgerItem[] };
 
 export function groupsOf(items: LedgerItem[]): Group[] {
-  const rest = items.filter((i) => i.type !== "topic");
+  const all = items.filter((i) => i.type !== "topic");
+  // waits the map closed with no quote behind it get a group of their own,
+  // right under what waits on you, until you settle them
+  const check = all.filter((i) => !i.waiting && i.unconfirmed);
+  const rest = all.filter((i) => !check.includes(i));
   const waiting = rest.filter((i) => i.waiting);
   const open = rest.filter((i) => !i.waiting && i.open);
   const decided = rest.filter((i) => !i.waiting && !i.open && isDecided(i));
@@ -159,6 +163,7 @@ export function groupsOf(items: LedgerItem[]): Group[] {
   const dropped = rest.filter((i) => !i.waiting && !i.open && isDropped(i));
   return [
     { id: "waiting", label: "Waiting on you", items: waiting },
+    { id: "check", label: "Closed by the map, to check", items: check },
     { id: "open", label: "Open", items: open },
     { id: "decided", label: "Decided", items: decided },
     { id: "settled", label: "Settled", items: settled },

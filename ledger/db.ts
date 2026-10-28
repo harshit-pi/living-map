@@ -217,6 +217,8 @@ const MIGRATIONS: string[] = [
      at INTEGER NOT NULL,
      PRIMARY KEY (conv, item)
    );`,
+  // a wait the extractor closed with no quote behind it (Item.unconfirmed)
+  `ALTER TABLE items ADD COLUMN unconfirmed TEXT;`,
 ];
 
 type Row = Record<string, SQLInputValue>;
@@ -246,6 +248,18 @@ export function openDb(file: string) {
   const version = num(
     (db.prepare("PRAGMA user_version").get() as Row).user_version,
   );
+  // Before a store that already holds maps is migrated, a copy of it as it
+  // is: a migration that fails rolls back on its own, but one that runs and
+  // turns out wrong would leave no way back. VACUUM INTO writes a whole,
+  // consistent copy (what the WAL holds included); the first copy made for
+  // a version is kept.
+  if (version > 0 && version < MIGRATIONS.length) {
+    const copy = `${file}.before-v${MIGRATIONS.length}`;
+    if (!fs.existsSync(copy)) {
+      db.exec(`VACUUM INTO '${copy.replaceAll("'", "''")}'`);
+      fs.chmodSync(copy, 0o600);
+    }
+  }
   for (let v = version; v < MIGRATIONS.length; v++) {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -317,13 +331,14 @@ export function openDb(file: string) {
     );
 
   const putItem = db.prepare(
-    `INSERT INTO items (conv, id, type, state, title, body, quote, src, parent, owner, basis, links, writers, retired, order_key, under, folded, filed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO items (conv, id, type, state, title, body, quote, src, parent, owner, basis, links, writers, retired, order_key, under, folded, filed_at, unconfirmed)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (conv, id) DO UPDATE SET type = excluded.type, state = excluded.state,
        title = excluded.title, body = excluded.body, quote = excluded.quote, src = excluded.src,
        parent = excluded.parent, owner = excluded.owner, basis = excluded.basis,
        links = excluded.links, writers = excluded.writers, retired = excluded.retired,
-       order_key = excluded.order_key, under = excluded.under, folded = excluded.folded`,
+       order_key = excluded.order_key, under = excluded.under, folded = excluded.folded,
+       unconfirmed = excluded.unconfirmed`,
   );
   const putLog = db.prepare(
     "INSERT INTO log (conv, run, writer, op, at) VALUES (?, ?, ?, ?, ?)",
@@ -401,6 +416,9 @@ export function openDb(file: string) {
         };
         if (i.owner === "you" || i.owner === "claude") item.owner = i.owner;
         if (typeof i.retired === "string") item.retired = i.retired;
+        const u = parse<Item["unconfirmed"] | null>(i.unconfirmed, null);
+        if (u && typeof u.from === "string" && typeof u.to === "string")
+          item.unconfirmed = { from: u.from, to: u.to, turn: num(u.turn) };
         store.items.set(item.id, item);
         meta.set(item.id, {
           order: text(i.order_key),
@@ -450,6 +468,7 @@ export function openDb(file: string) {
             m.under,
             m.folded ? 1 : 0,
             m.filedAt,
+            i.unconfirmed ? json(i.unconfirmed) : null,
           );
         }
         putPoint.run(

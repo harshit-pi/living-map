@@ -54,7 +54,13 @@ export type Item = {
   links: { rel: string; to: string }[];
   writers: Partial<Record<Field, Writer>>;
   retired?: string; // why, when it was filed wrongly or merged
+  // a wait the extractor closed with no quote from the chat behind it:
+  // what it was, what it became and on which turn, until you or a later
+  // quoted change settles it
+  unconfirmed?: Unconfirmed;
 };
+
+export type Unconfirmed = { from: string; to: string; turn: number };
 
 export type Store = {
   conv: string;

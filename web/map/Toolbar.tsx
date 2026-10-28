@@ -24,6 +24,7 @@ const EMPTY = "border-line text-muted";
 export function Toolbar({
   lens,
   counts,
+  toCheck = 0,
   since,
   onLens,
   onSearch,
@@ -39,6 +40,7 @@ export function Toolbar({
 }: {
   lens: Lens | null;
   counts: Record<Lens, number>;
+  toCheck?: number; // waits the map closed with no quote, to check
   since?: ReactNode; // what was filed since you last looked, to step through
   onLens: (l: Lens | null) => void;
   onSearch: () => void;
@@ -64,17 +66,21 @@ export function Toolbar({
           const on = lens === l.id;
           const empty = !on && counts[l.id] === 0;
           const clear = empty && l.id === "waiting";
+          // closes the map made with no quote, shown on Waiting while any are left
+          const check = l.id === "waiting" && toCheck > 0;
           return (
             <button
               key={l.id}
               onClick={() => onLens(on ? null : l.id)}
               aria-pressed={on}
               title={
-                clear
-                  ? "Nothing waits on you"
-                  : on
-                    ? `Turn off ${l.label}`
-                    : `Light up ${l.label.toLowerCase()} items`
+                check && !counts.waiting
+                  ? `Nothing waits on you; ${toCheck} closed by the map without a quote, to check`
+                  : clear
+                    ? "Nothing waits on you"
+                    : on
+                      ? `Turn off ${l.label}`
+                      : `Light up ${l.label.toLowerCase()} items`
               }
               className={`${tool} gap-1 ${on ? LENS_LOOK[l.id].on : `${empty ? EMPTY : KEY[l.id].off} hover:bg-panel`}`}
             >
@@ -95,6 +101,11 @@ export function Toolbar({
                     {counts[l.id]}
                   </span>
                 </>
+              )}
+              {check && (
+                <span className="text-warning-strong">
+                  · {toCheck} to check
+                </span>
               )}
             </button>
           );
