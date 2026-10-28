@@ -1,19 +1,28 @@
 <p align="center"><img src="docs/logo.svg" alt="Living Map" width="260"></p>
 
-<p align="center"><b>A live map of your Claude Code chat, beside it.</b><br>
-What waits on you, what is still open and what was decided, kept up to date as you talk, with nothing to ask for.</p>
+<p align="center"><b>Claude asked you something 40 turns ago. It's still waiting.</b><br>
+Living Map sits beside your Claude Code chat and draws it as a map every turn: what waits on you, what is still open, what was decided. You answer Claude right on the map.</p>
 
 https://github.com/user-attachments/assets/73b3762c-e3b1-4c2b-9492-965592b0af54
 
 ---
 
-Long Claude Code sessions bury the things you need to act on. Living Map reads your chat as it grows and keeps it as one mind map in a page beside it:
+Living Map is a view for you, not memory for Claude. Claude still has the whole chat; what gets lost is what it asked you, and what the two of you decided an hour ago. Living Map reads your chat as it grows and keeps it as one mind map in a page beside it:
 
 - **It follows by itself.** Type `/living-map` once in a chat. A few seconds after each turn, the map files what was new: questions waiting on you, tasks Claude is on, decisions made, what changed in your code. You never tell it what happened.
-- **Lenses** show what matters now: **Waiting** (on you), **Open**, **Decided** and **Changed**, with a strip that steps through them. Settled topics fold away; each decision sits under the topic where it was made, and findings sit in the list.
-- **Answer from the map.** Answer a question, pick an option or tick a task on the map, and it reaches your chat at once.
+- **What waits on you stays on top.** A question Claude asked stays in the strip at the top of the map until you deal with it, however far the chat has scrolled since. When work is waiting on your answer, the map draws what it holds up.
+- **Lenses** show what matters now: **Waiting** (on you), **Open**, **Decided** and **Changed**. Settled topics fold away; each decision sits under the topic where it was made, and findings sit in the list.
+- **Answer from the map.** Answer a question, pick an option or tick a task on the map, and it reaches your chat at once. Claude's reply opens with "From your map: you answered …" in your words, so the decision is in the chat's own transcript too.
+- **A handover that is always written.** Each chat keeps one in `~/.living-map/handover/`, rewritten whenever its map changes: waiting on you, next steps, still open, and what was decided, with the date and the reason. A session that stops halfway still has one.
 - **Side chats** on any item: a read-only Claude that has read the map and the chat, can read your project, and proposes changes to the map you apply with one click.
 - An empty chat starts as an empty map that fills in as you talk. A chat you link partway through is read from its start, or from its newest 40 turns if it is longer.
+
+### Isn't this just…?
+
+- **A handover file, or ADRs?** Those work between sessions, and Living Map writes the handover for you. The map is for the middle of a session, when Claude asks something and it scrolls away.
+- **Shorter sessions?** Keep them short too. A two-hour session buries a question just as well, and with several sessions the question becomes which one is waiting on you.
+- **A changelog?** A changelog says what changed. It doesn't say what Claude asked and is still waiting on, or what you decided and why.
+- **A memory tool?** Memory tools help Claude remember. Living Map helps you see where the chat stands.
 
 Everything runs on your machine. Living Map talks to the model through your own Claude Code (`claude -p`) and keeps its data in `~/.living-map/`.
 
@@ -50,7 +59,7 @@ npm run skill -- --hook
 
 - `/living-map` starts the server if it is not running (in the background, so it outlives the chat), links the chat and opens the map: in the desktop app's browser pane beside the chat if there is one, or as a link to open. Nothing to choose, nothing to describe.
 - Saying `/living-map` again in the same chat opens its map again. Another chat gets its own map.
-- Ask the chat "what's pending?", "what's open?" or "what did we decide?" and it reads that one section of the map back: a few lines, not the chat again. "What does my map say?" or "where were we?" gets the whole outline: what waits on you, what is open, what was decided and what Claude is on, then the map with settled topics folded. Pasted into a file, that outline is a handoff.
+- Ask the chat "what's pending?", "what's open?" or "what did we decide?" and it reads that one section of the map back: a few lines, not the chat again. "What does my map say?" or "where were we?" gets the whole outline: what waits on you, what is open, what was decided and what Claude is on, then the map with settled topics folded. For a new chat, point it at the handover instead: `~/.living-map/handover/projects/<folder>.md` (the project's path with every character but letters and digits turned into `-`, as Claude Code names its own folders: `/Users/me/work` → `-Users-me-work`) is the chat you changed last in that project, so one line in the project's `CLAUDE.md` can tell every new chat to read it first.
 - A handover of each chat is kept on disk and rewritten whenever its map changes, so a session that stops halfway still leaves one: what waits on you, the next steps, what is still open, and what was decided, when and why. It's at `~/.living-map/handover/projects/<folder>.md` for the chat you were in most recently in a project folder (the folder's path with every character other than a letter or digit turned into `-`), and `~/.living-map/handover/<chat>.md` for each chat. One line in a project's CLAUDE.md, "Before anything else, read ~/.living-map/handover/projects/<folder>.md if it exists.", has every new chat start from it.
 - The first time each kind of box is on screen, a tip explains it. Each tip shows once in that browser; **No more tips** turns them off and **Show tips again** (under ⋯) brings them back.
 - The map is one page on http://localhost:4317. It stays signed in in the browser that opened it. To have it in your own browser too, open http://localhost:4317 there and click **Show my maps** (or choose **⋯ → Open in your browser** on the map); from then on that address lists every mapped chat, each opening in a new tab. Any browser on this machine can sign itself in that way, so on a computer you share, another account could see your maps.
